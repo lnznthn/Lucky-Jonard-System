@@ -110,6 +110,45 @@ label,.lbl{font-size:13px;color:var(--mute);display:block;margin-bottom:4px}
 details{border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--card);margin-top:10px}
 details summary{cursor:pointer;color:var(--mute);font-size:14px}
 details pre{white-space:pre-wrap;font-size:13px;margin:8px 0 0;font-family:ui-monospace,Menlo,monospace}
+.cards.c3{grid-template-columns:repeat(3,1fr)}
+.row3{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+.row3 .btn{width:46px;padding:0}
+.lineb{border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:10px}
+.tot{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end}.tot small{color:var(--mute);font-size:13px}.tot b{font-size:24px;letter-spacing:-.01em}
+.amt{font-weight:700;white-space:nowrap}.amt.big{font-size:20px}
+div.item{cursor:default}
+.tag.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.seg.s3 button{font-size:13px;line-height:1.15;padding:0 4px}
+textarea.plain{font-family:inherit;font-size:16px}
+.check{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--ink)}.check input{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
+.logo{max-height:48px;max-width:120px;border-radius:8px;border:1px solid var(--line);background:#fff;flex:none}
+.panel>.hint,.sheet>.hint{margin:0}
+details.mini{margin:0;border:0;background:none;padding:0}.row2>details.mini{align-self:end}details.mini summary{padding:6px 2px}details.mini[open] summary{margin-bottom:4px}
+
+/* ---------- desktop: side navigation, wider pages, two columns, sheets as dialogs ---------- */
+@media(min-width:900px){
+  .app{max-width:none;margin:0 0 0 228px}
+  header.top{padding:18px 32px 10px}
+  header.top h1{font-size:26px}
+  main{padding:6px 32px 48px;max-width:1160px}
+  main.v-stock{max-width:1000px}
+  main.v-import,main.v-activity,main.v-move{max-width:760px}
+  nav.tabs{top:0;right:auto;width:228px;flex-direction:column;justify-content:flex-start;border-top:0;border-right:1px solid var(--line);padding:18px 12px}
+  nav.tabs::before{content:'Toy Stock';font-weight:700;font-size:20px;letter-spacing:-.01em;padding:4px 14px 18px}
+  nav.tabs .in{flex-direction:column;gap:4px;max-width:none}
+  nav.tabs button{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;padding:11px 14px;border-radius:12px;font-size:15px}
+  nav.tabs button b{width:22px;text-align:center}
+  nav.tabs button.on{background:var(--chip)}
+  .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:start}
+  .cols.sell{grid-template-columns:minmax(0,440px) minmax(0,1fr)}
+  .cols>div>.day:first-child{margin-top:2px}
+  .cards{gap:12px}.card{padding:14px}.card b{font-size:22px}
+  .layer{align-items:center}
+  .sheet{max-width:560px;border-radius:20px;max-height:88dvh;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .toast{left:calc(50% + 114px);bottom:28px}
+  .btn.big{min-height:48px}
+}
+@media(hover:hover){button.item:hover,.sug button:not([disabled]):hover,nav.tabs button:hover{background:color-mix(in srgb,var(--chip) 70%,transparent)}.btn:not([disabled]):hover,.chip:hover,.icon:hover{filter:brightness(.97)}}
 </style>
 </head>
 <body>
@@ -127,7 +166,7 @@ details pre{white-space:pre-wrap;font-size:13px;margin:8px 0 0;font-family:ui-mo
 
 <script>
 'use strict';
-const VERSION = '1.0.0';
+const VERSION = '2.0.0';
 
 /* ---------- small helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -150,6 +189,14 @@ function parseDate(s) {
   if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) return null;
   return t.toISOString().slice(0, 10);
 }
+/** A release date is a best guess: a year, a year and month, or a full date. '' when blank, null when not understood. */
+function parseRel(s) {
+  s = String(s || '').trim(); if (!s) return '';
+  let x;
+  if (/^\d{4}$/.test(s)) return s;
+  if ((x = /^(\d{4})-(\d{1,2})$/.exec(s)) && +x[2] >= 1 && +x[2] <= 12) return x[1] + '-' + x[2].padStart(2, '0');
+  return /^\d{4}-\d{1,2}-\d{1,2}$/.test(s) || s.includes('/') ? parseDate(s) : null;
+}
 function fmtDay(iso) {
   const t = todayISO(); if (iso === t) return 'Today';
   const y = new Date(); y.setDate(y.getDate() - 1); if (iso === new Date(y.getTime() - y.getTimezoneOffset() * 60000).toISOString().slice(0, 10)) return 'Yesterday';
@@ -157,55 +204,123 @@ function fmtDay(iso) {
 }
 const money = n => prefs.cur + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
+const r2 = n => Math.round(n * 100) / 100;
+const getPath = p => p.split('.').reduce((o, k) => (o == null ? o : o[k]), ui);
+function setPath(p, v) { const ks = p.split('.'), last = ks.pop(), o = ks.reduce((o, k) => (o == null ? o : o[k]), ui); if (o) o[last] = v; }
 
-/* ---------- reasons (same rules as apps-script/Code.gs) ---------- */
+/* ---------- rules shared with apps-script/Code.gs ---------- */
 const IN_ONLY = ['Opening', 'Restock', 'Return'], OUT_ONLY = ['Sale', 'Damaged', 'Lost'], EITHER = ['Count', 'Correction', 'Other'];
 const FORM_REASONS = { In: ['Restock', 'Return', 'Opening', 'Other'], Out: ['Sale', 'Damaged', 'Lost', 'Other'] };
 const reasonOK = (dir, r) => EITHER.includes(r) || (dir === 'In' ? IN_ONLY : OUT_ONLY).includes(r);
 const defaultReason = dir => (dir === 'In' ? 'Restock' : 'Sale');
+const PRE_OPEN = 'Open', PRE_DONE = 'Fulfilled', PRE_CANCEL = 'Cancelled';
+const SALE = 'Sale', RECEIPT = 'Pre-order receipt';
+// What a return does to stock, per outcome. Same table as RETURN_STOCK_ in Code.gs: change both together.
+const RETURN_STOCK = { 'Restock': 'In', 'Write-off': null };
+const RETURN_HINT = { 'Restock': 'Goes back into stock.', 'Write-off': 'Does not go back into stock.' };
 
 /* ---------- state ---------- */
 let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
+let docs = Object.assign({ custs: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
 let meta = store.get('meta', { rows: 0, lastId: '', syncedAt: null });
-let queue = store.get('queue', []);       // entries waiting for the sheet: item | edit | move
-let prefs = Object.assign({ tab: 'stock', cur: '₱', low: 2 }, store.get('prefs', {}));
-let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, err: '', busy: false };
+let queue = store.get('queue', []);       // entries waiting for the sheet
+let prefs = Object.assign({ tab: 'home', cur: '₱', low: 2 }, store.get('prefs', {}));
+if (prefs.tab === 'move') prefs.tab = 'home';
+prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
+const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '' });
+let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
+  sellSeg: 'new', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, pdf: null, manual: false };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
 const savePrefs = () => store.set('prefs', prefs);
-const saveSynced = () => { store.set('items', items); store.set('moves', moves); store.set('meta', meta); };
+const saveSynced = () => { store.set('items', items); store.set('moves', moves); store.set('docs', docs); store.set('meta', meta); };
 
-/** Synced data plus pending queue entries: what the screen shows. Failed entries are not counted. */
+/**
+ * Synced data plus pending queue entries: what the screen shows. Failed entries are not counted.
+ * Pending documents are replayed the way Code.gs will apply them, including the movements they write.
+ * On a document, q is the entry that creates it (not in the sheet yet) and w is a change still waiting.
+ */
 function live() {
   if (_live) return _live;
   const map = new Map(items.map(i => [i.sku, { ...i }]));
-  const pend = queue.filter(q => q.status === 'pending');
-  for (const q of pend) {
-    if (q.kind === 'item' && !map.has(q.item.sku)) map.set(q.item.sku, { ...q.item });
-    else if (q.kind === 'edit' && map.has(q.sku)) Object.assign(map.get(q.sku), q.patch);
+  const custs = new Map(docs.custs.map(c => [c.id, { ...c }]));
+  const orders = docs.orders.map(o => ({ ...o })), pres = docs.pres.map(p => ({ ...p })), invs = docs.invs.map(v => ({ ...v })), rets = docs.rets.map(r => ({ ...r }));
+  const all = moves.map((m, i) => ({ ...m, _i: i }));
+  const push = (m, q) => all.push({ ...m, _i: all.length, q });
+  const find = (list, id) => list.find(x => x.id === id);
+  const nameOf = sku => (map.get(sku) || { name: sku }).name, handled = new Set();
+  for (const q of queue) {
+    if (q.kind === 'move') { push(q.move, q); continue; }
+    if (q.status !== 'pending') continue;
+    switch (q.kind) {
+      case 'item': if (!map.has(q.item.sku)) map.set(q.item.sku, { ...q.item }); break;
+      case 'edit': if (map.has(q.sku)) Object.assign(map.get(q.sku), q.patch); break;
+      case 'cust': custs.set(q.cust.id, { ...q.cust }); break;
+      case 'order': orders.push({ ...q.order, name: nameOf(q.order.sku), status: 'Ordered', recQty: null, recDate: '', q }); break;
+      case 'receive': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Received'; o.recQty = q.qty; o.recDate = q.date; o.w = q; push({ id: 'rcv-' + o.id, date: q.date, sku: o.sku, dir: 'In', qty: q.qty, reason: 'Restock', ref: o.id, note: '', cost: q.cost }, q); } break; }
+      case 'orderCancel': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
+      case 'pre': {
+        const p = q.pre, c = custs.get(p.custId) || {}, tot = r2(p.qty * p.price), it = map.get(p.sku) || {};
+        pres.push({ id: p.id, date: p.date, custId: p.custId, cust: c.name || '', contact: c.contact || '', sku: p.sku, name: nameOf(p.sku), qty: p.qty, price: p.price, paid: p.paid, balance: r2(tot - p.paid), status: PRE_OPEN, kept: null, recNo: p.no, invNo: null, note: p.note, q });
+        invs.push({ no: p.no, id: p.invId, date: p.date, type: RECEIPT, custId: p.custId, cust: c.name || '', contact: c.contact || '', total: tot, ship: '', preId: p.id, lines: [{ sku: p.sku, name: nameOf(p.sku), qty: p.qty, list: it.price == null ? null : it.price, price: p.price, cost: null }], q });
+        break;
+      }
+      case 'prePay': { const p = find(pres, q.preId); if (p && p.status === PRE_OPEN) { p.paid = q.paid; p.balance = r2(p.qty * p.price - q.paid); p.w = q; } break; }
+      case 'preCancel': { const p = find(pres, q.preId); if (p && p.status === PRE_OPEN) { p.status = PRE_CANCEL; p.kept = q.kept || 0; p.w = q; } break; }
+      case 'inboxDone': q.rows.forEach(x => handled.add(x.row)); break;
+      case 'invoice': {
+        const v = q.invoice, c = custs.get(v.custId) || {};
+        invs.push({ no: v.no, id: v.id, date: v.date, type: SALE, custId: v.custId, cust: c.name || '', contact: c.contact || '', total: r2(v.lines.reduce((s, l) => s + l.qty * l.price, 0)), ship: '', preId: v.preId || '',
+          lines: v.lines.map(l => ({ sku: l.sku, name: nameOf(l.sku), qty: l.qty, list: l.list, price: l.price, cost: l.cost })), q });
+        v.lines.forEach((l, k) => push({ id: v.id + '-' + (k + 1), date: v.date, sku: l.sku, dir: 'Out', qty: l.qty, reason: 'Sale', ref: String(v.no), note: '', cost: l.cost }, q));
+        if (v.preId) { const p = find(pres, v.preId); if (p && p.status === PRE_OPEN) { p.status = PRE_DONE; p.invNo = v.no; p.w = q; } }
+        break;
+      }
+      case 'ship': { const v = find(invs, q.invId); if (v) { v.ship = q.ship; v.w = q; } break; }
+      case 'ret': {
+        const r = q.ret, v = find(invs, r.invId);
+        rets.push({ ...r, refund: r.refund || 0, invNo: v ? v.no : null, cust: v ? v.cust : '', name: nameOf(r.sku), q });
+        if (RETURN_STOCK[r.outcome] === 'In') push({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', qty: r.qty, reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '', cost: null }, q);
+        break;
+      }
+    }
   }
-  const stock = new Map();
-  const add = m => stock.set(m.sku, (stock.get(m.sku) || 0) + (m.dir === 'In' ? m.qty : -m.qty));
-  moves.forEach(add);
-  pend.filter(q => q.kind === 'move').forEach(q => add(q.move));
+  // Stock and the average cost on hand. A receipt with a cost moves the average; everything else leaves it alone.
+  const stock = new Map(), avg = new Map();
+  all.forEach(m => {
+    if (m.q && m.q.status !== 'pending') return;
+    const have = stock.get(m.sku) || 0;
+    if (m.dir === 'In') {
+      if (m.cost != null) { const a = avg.get(m.sku); avg.set(m.sku, have <= 0 || a == null ? m.cost : (have * a + m.qty * m.cost) / (have + m.qty)); }
+      stock.set(m.sku, have + m.qty);
+    } else stock.set(m.sku, have - m.qty);
+  });
+  const incoming = new Map(), owed = new Map();
+  orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
+  pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const cats = [...new Set(list.filter(i => i.active).map(catOf))].sort((a, b) => a.localeCompare(b));
-  const all = moves.map((m, i) => ({ ...m, _i: i }));
-  queue.filter(q => q.kind === 'move').forEach((q, j) => all.push({ ...q.move, _i: moves.length + j, q }));
-  _live = { map, list, stock, cats, all };
+  // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
+  const inbox = docs.inbox.filter(r => !handled.has(r.row));
+  _live = { map, list, stock, avg, incoming, owed, cats, all, custs, orders, pres, invs, rets, inbox };
   return _live;
 }
 const catOf = i => i.cat || 'General';
 const stockOf = sku => live().stock.get(sku) || 0;
+/** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
+function nums(sku) { const L = live(), have = L.stock.get(sku) || 0, inc = L.incoming.get(sku) || 0, owed = L.owed.get(sku) || 0; return { have, inc, owed, ltp: have + inc - owed }; }
+const fourText = sku => { const n = nums(sku); return `On hand ${n.have} · Incoming ${n.inc} · Owed ${n.owed} · Left to promise ${n.ltp}`; };
 const minOf = i => (i.min == null ? prefs.low : i.min);
 function status(i) { const n = stockOf(i.sku); return n < 0 ? 'neg' : n === 0 ? 'out' : n <= minOf(i) ? 'low' : 'ok'; }
 function nextSku() {
   let max = 0; live().list.forEach(i => { const m = /^T(\d+)$/.exec(i.sku); if (m) max = Math.max(max, +m[1]); });
   return 'T' + String(max + 1).padStart(4, '0');
 }
+/** Invoices and pre-order receipts share one plain sequential number series. */
+const nextNo = () => 1 + Math.max(0, ...live().invs.map(v => v.no || 0));
 function findItem(text) {
   const t = String(text || '').trim(); if (!t) return null;
   const L = live(); const n = norm(t);
@@ -215,12 +330,52 @@ function similarItem(name) {
   let best = null, bs = 0; live().list.forEach(i => { const s = jaccard(i.name, name); if (s > bs) { bs = s; best = i; } });
   return bs >= 0.5 ? best : null;
 }
+const custKey = s => norm(s) || String(s).trim().toLowerCase();
+/** Finds the customer by name or queues a new one; a newly typed contact replaces the one on file. Returns the ID. */
+function custFor(name, contact) {
+  name = name.trim().replace(/\s+/g, ' '); contact = String(contact || '').trim();
+  const cur = [...live().custs.values()].find(c => custKey(c.name) === custKey(name));
+  if (cur) { if (contact && contact !== cur.contact) { qAdd('cust', { cust: { id: cur.id, name: cur.name, contact } }); dirty(); } return cur.id; }
+  const id = 'c' + uid(); qAdd('cust', { cust: { id, name, contact } }); dirty(); return id;
+}
+const contactOf = d => { const c = live().custs.get(d.custId); return (c && c.contact) || d.contact || ''; };
+/** How many of a toy on an invoice can still be returned. */
+function returnable(v, sku) { return v.lines.filter(l => l.sku === sku).reduce((s, l) => s + l.qty, 0) - live().rets.filter(r => r.invId === v.id && r.sku === sku).reduce((s, r) => s + r.qty, 0); }
+/** Open pre-orders the stock on hand can cover, oldest first. */
+function readyPres() {
+  const left = new Map(), out = [];
+  live().pres.filter(p => p.status === PRE_OPEN).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).forEach(p => {
+    const have = left.has(p.sku) ? left.get(p.sku) : Math.max(stockOf(p.sku), 0);
+    if (have >= p.qty) { out.push(p); left.set(p.sku, have - p.qty); } else left.set(p.sku, have);
+  });
+  return out;
+}
 
 /* ---------- queue ---------- */
-const qItem = (item, auto) => queue.push({ id: 'q' + uid(), kind: 'item', item, auto: !!auto, status: 'pending' });
-const entrySku = q => (q.kind === 'move' ? q.move.sku : q.kind === 'edit' ? q.sku : q.item.sku);
-const qEdit = (sku, patch) => queue.push({ id: 'q' + uid(), kind: 'edit', sku, patch, status: 'pending' });
-const qMove = move => queue.push({ id: 'q' + uid(), kind: 'move', move, status: 'pending' });
+const qAdd = (kind, payload) => queue.push(Object.assign({ id: 'q' + uid(), kind, status: 'pending' }, payload));
+const qItem = (item, auto) => qAdd('item', { item, auto: !!auto });
+const qEdit = (sku, patch) => qAdd('edit', { sku, patch });
+const qMove = move => qAdd('move', { move });
+const entrySkus = q => q.kind === 'move' ? [q.move.sku] : q.kind === 'edit' ? [q.sku] : q.kind === 'item' ? [q.item.sku] : q.kind === 'order' ? [q.order.sku] : q.kind === 'pre' ? [q.pre.sku] : q.kind === 'invoice' ? q.invoice.lines.map(l => l.sku) : q.kind === 'ret' ? [q.ret.sku] : [];
+function describe(q) {
+  const nm = s => (live().map.get(s) || { name: s }).name;
+  switch (q.kind) {
+    case 'item': return `New toy “${q.item.name}” (${q.item.sku})`;
+    case 'edit': return `Edit of ${q.sku}`;
+    case 'cust': return `Customer “${q.cust.name}”`;
+    case 'order': return `Supplier order for ${nm(q.order.sku)}`;
+    case 'receive': return 'Receiving a supplier order';
+    case 'orderCancel': return 'Cancelling a supplier order';
+    case 'pre': return `Pre-order for ${nm(q.pre.sku)}`;
+    case 'prePay': return 'Payment on a pre-order';
+    case 'preCancel': return 'Cancelling a pre-order';
+    case 'invoice': return `Invoice no. ${q.invoice.no}`;
+    case 'ship': return 'Shipping status';
+    case 'ret': return `Return of ${nm(q.ret.sku)}`;
+    case 'inboxDone': return 'Clearing rows from Claude';
+    default: return 'Entry';
+  }
+}
 function commit() { saveQueue(); dirty(); render(); scheduleSync(); }
 let syncTimer = null;
 function scheduleSync() { clearTimeout(syncTimer); if (cfg.url) syncTimer = setTimeout(() => syncNow(false), 700); }
@@ -243,28 +398,30 @@ function applySnapshot(s) {
   items = s.items;
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
+  docs = { custs: s.custs || [], orders: s.orders || [], pres: s.pres || [], invs: s.invs || [], rets: s.rets || [], inbox: s.inbox || [] };
   meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt };
   saveSynced(); dirty();
 }
-const wire = q => q.kind === 'item' ? { id: q.id, kind: 'item', item: q.item, auto: q.auto } : q.kind === 'edit' ? { id: q.id, kind: 'edit', sku: q.sku, patch: q.patch } : { id: q.id, kind: 'move', move: q.move };
+const wire = q => { const { status, error, ...w } = q; return w; };
 async function syncNow(manual) {
   if (ui.busy) return;
   if (!cfg.url) { if (manual) toast('Not connected yet. Everything is saved on this device.'); return; }
   ui.busy = true; ui.err = ''; renderSync();
+  let note = '';
   try {
     let batch, pushed = false;
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
       const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId } });
       const res = new Map(data.results.map(r => [r.id, r]));
-      data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); });
+      data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); if (r.ok && r.fromNo != null) note = `The sheet already had no. ${r.fromNo}, so that document is now no. ${r.no}. Share its PDF again.`; });
       queue = queue.filter(q => !(res.get(q.id) && res.get(q.id).ok));
       batch.forEach(b => { const q = queue.find(x => x.id === b.id); if (!q) return; const r = res.get(q.id); q.status = 'failed'; q.error = r ? r.error : 'The sheet did not answer for this entry'; });
       // Whatever is still queued for a toy the sheet refused must not be sent against another toy's SKU.
-      queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySku(q) === f.item.sku) { q.status = 'failed'; q.error = 'Its toy was refused'; } }));
+      queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySkus(q).includes(f.item.sku)) { q.status = 'failed'; q.error = 'Its toy was refused'; } }));
       applySnapshot(data.sync); saveQueue(); pushed = true;
     }
     if (!pushed) applySnapshot(await api('sync', { have: { rows: meta.rows, lastId: meta.lastId } }));
-    if (manual) toast('Synced');
+    if (note) toast(note); else if (manual) toast('Synced');
   } catch (e) {
     ui.err = e.message; if (manual || !e.network) toast(e.message);
   } finally {
@@ -275,8 +432,12 @@ async function syncNow(manual) {
 }
 /** The sheet renumbered an app-made SKU (two phones picked the same one); follow it in what is still queued. */
 function renumber(from, to) {
-  queue.forEach(q => { if (q.kind === 'move' && q.move.sku === from) q.move.sku = to; else if (q.kind === 'edit' && q.sku === from) q.sku = to; });
-  if (ui.mv && ui.mv.sku === from) ui.mv.sku = to;
+  const sw = o => { if (o && o.sku === from) o.sku = to; };
+  queue.forEach(q => {
+    if (q.kind === 'edit') sw(q); else if (q.kind === 'move') sw(q.move); else if (q.kind === 'order') sw(q.order); else if (q.kind === 'pre') sw(q.pre); else if (q.kind === 'ret') sw(q.ret);
+    else if (q.kind === 'invoice') q.invoice.lines.forEach(sw);
+  });
+  sw(ui.mv); sw(ui.f); ui.inv.lines.forEach(sw);
   if (ui.aSku === from) ui.aSku = to;
 }
 function renderSync() {
@@ -294,22 +455,92 @@ function renderSync() {
 
 /* ---------- toast & sheets ---------- */
 let toastTimer;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200); }
-function openSheet(html) { $('#sheet').innerHTML = html; $('#layer').hidden = false; $('#sheet').scrollTop = 0; }
-function closeSheet() { $('#layer').hidden = true; $('#sheet').innerHTML = ''; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), msg.length > 60 ? 6000 : 3200); }
+/** key + fn make a sheet "live": it is redrawn from state (keeping its scroll position) whenever the data behind it changes. */
+function openSheet(html, key, fn) {
+  const s = $('#sheet'), at = key && ui.sheetKey === key && !$('#layer').hidden ? s.scrollTop : 0;
+  ui.sheetKey = key || null; ui.sheetFn = key ? fn : null;
+  s.innerHTML = html; $('#layer').hidden = false; s.scrollTop = at;
+}
+function closeSheet() { $('#layer').hidden = true; $('#sheet').innerHTML = ''; ui.sheetKey = null; ui.sheetFn = null; ui.f = null; ui.sub = null; }
 function copyText(text) {
   const fallback = () => { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} ta.remove(); return Promise.resolve(); };
   return navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).catch(fallback) : fallback();
 }
+const closeBtn = '<button class="icon" data-act="close" aria-label="Close">✕</button>';
+const waitTag = d => (d.q ? '<span class="tag warn">waiting</span>' : d.w ? '<span class="tag warn">change waiting</span>' : '');
+
+/* ---------- toy picker used by the invoice, pre-order and supplier order forms ---------- */
+function pickerHtml(k, sku) {
+  const it = sku && live().map.get(sku);
+  return it
+    ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(fourText(it.sku))}</div></div><button class="btn" data-act="pkClear" data-k="${k}">Change</button></div>`
+    : `<input type="search" data-pk="${k}" placeholder="Search by name or SKU" autocomplete="off"><div class="sug" data-sug="${k}"></div>`;
+}
+function renderPk(k, text) {
+  const box = $(`[data-sug="${k}"]`); if (!box) return;
+  const n = norm(text); if (!n) { box.innerHTML = ''; return; }
+  const rows = live().list.filter(i => i.active && norm([i.name, i.sku, i.brand, i.line, i.chr].join(' ')).includes(n)).slice(0, 8);
+  box.innerHTML = rows.length ? rows.map(i => `<button data-act="pk" data-k="${k}" data-sku="${esc(i.sku)}"><b>${esc(i.name)}</b> <span class="hint">${esc(i.sku)} · ${stockOf(i.sku)} in stock</span></button>`).join('') : `<button disabled>No match. Add it from Stock → + Toy.</button>`;
+}
+function rerender() { if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn(); else render(); }
+const custList = () => `<datalist id="custList">${[...live().custs.values()].map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`;
 
 /* ---------- rendering ---------- */
-const TABS = [['stock', '▦', 'Stock'], ['move', '⇅', 'Move'], ['activity', '☰', 'Activity'], ['import', '⇩', 'Import']];
+const TABS = [['home', '⌂', 'Home'], ['stock', '▦', 'Stock'], ['sell', '¤', 'Sell'], ['orders', '◷', 'Orders'], ['import', '⇩', 'Import']];
 function render() {
-  $('#tabs').innerHTML = TABS.map(([k, g, n]) => `<button data-act="tab" data-t="${k}" class="${prefs.tab === k ? 'on' : ''}"><b>${g}</b>${n}</button>`).join('');
-  ({ stock: renderStock, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]();
+  const waiting = live().inbox.length;
+  // A desktop window has room for Activity in the side navigation and names the page in the header.
+  $('header.top h1').textContent = wide() ? TITLES[prefs.tab] : 'Toy Stock';
+  view().className = 'v-' + prefs.tab;
+  $('#tabs').innerHTML = (wide() ? [...TABS, ['activity', '☰', 'Activity']] : TABS).map(([k, g, n]) => `<button data-act="tab" data-t="${k}" class="${prefs.tab === k ? 'on' : ''}"><b>${g}</b>${n}${k === 'import' && waiting ? ' · ' + waiting : ''}</button>`).join('');
+  ({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]();
+  if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn();
   renderSync();
 }
 const view = () => $('#view');
+const mqWide = matchMedia('(min-width: 900px)'), wide = () => mqWide.matches;
+mqWide.addEventListener('change', () => render());
+const TITLES = { home: 'Home', stock: 'Stock', sell: 'Sell', orders: 'Orders', import: 'Import', move: 'Stock in and out', activity: 'Activity' };
+
+/* Home: what needs doing now, then the month's numbers */
+const readyRow = p => `<div class="item"><div class="main" data-act="pre" data-id="${esc(p.id)}"><div class="name">${esc(p.cust)}</div><div class="sub">${esc(contactOf(p))}</div><div class="sub">${esc(p.name)} × ${p.qty}${p.balance > 0 ? ' · balance ' + money(p.balance) : ''}</div></div><button class="btn primary" data-act="fulfil" data-id="${esc(p.id)}">Invoice</button></div>`;
+const STOCK_FILTERS = { short: 'Promised beyond stock', noprice: 'No price yet', verify: 'Release date to verify' };
+function renderHome() {
+  const L = live(), today = todayISO(), month = today.slice(0, 7), act = L.list.filter(i => i.active);
+  if (!L.list.length && !L.inbox.length) {
+    view().innerHTML = `<div class="empty"><h3>No toys yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Import.</p>
+      <div class="actions"><button class="btn primary" data-act="newItem">Add a toy</button><button class="btn" data-act="tab" data-t="import">Import from photos</button></div></div>`;
+    return;
+  }
+  const sales = L.invs.filter(v => v.type === SALE), tS = sales.filter(v => v.date === today), mS = sales.filter(v => v.date.slice(0, 7) === month);
+  const sum = list => r2(list.reduce((s, v) => s + v.total, 0));
+  let margin = 0, known = true, some = false; mS.forEach(v => v.lines.forEach(l => { if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } }));
+  const refunds = r2(L.rets.filter(r => r.date.slice(0, 7) === month).reduce((s, r) => s + (r.refund || 0), 0));
+  const ready = readyPres(), owing = L.pres.filter(p => p.status === PRE_OPEN && p.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
+  const short = act.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; }), low = act.filter(i => status(i) !== 'ok'), verify = act.filter(i => i.relCheck), noprice = act.filter(i => i.price == null);
+  const failed = queue.filter(q => q.status === 'failed').length;
+  const go = (n, label, sub, attrs, cls) => (n ? `<button class="item" ${attrs}><div class="main"><div class="name">${label}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="qty ${cls || ''}">${n}</div></button>` : '');
+  const todo = [
+    go(failed, 'Refused by the sheet', 'Open Activity to see why', 'data-act="tab" data-t="activity"', 'neg'),
+    go(L.inbox.length, 'Rows from Claude to review', 'Read from your photos, not recorded yet', 'data-act="tab" data-t="import"', 'low'),
+    go(due.length, 'Supplier orders due to arrive', due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"', 'low'),
+    go(short.length, 'Promised beyond stock', 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"', 'neg'),
+    go(owing.length, 'Pre-orders with a balance', money(r2(owing.reduce((s, p) => s + p.balance, 0))) + ' still to collect', 'data-act="homeGo" data-to="pre"'),
+    go(low.length, 'Toys low or out of stock', '', 'data-act="homeGo" data-to="attn"', 'low'),
+    go(noprice.length, 'Toys with no price yet', 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'),
+    go(verify.length, 'Release dates to verify', '', 'data-act="homeGo" data-to="verify"'),
+  ].join('');
+  view().innerHTML = `<div class="cols"><div>
+    <div class="actions" style="margin-top:0"><button class="btn primary big" data-act="homeGo" data-to="sale">New Sale</button><button class="btn big" data-act="preNew">New pre-order</button></div>
+    ${ready.length ? `<div class="day">Ready to ship · the toy has arrived</div><div class="list">${ready.map(readyRow).join('')}</div>` : ''}
+    <div class="day">Needs you</div>${todo ? `<div class="list">${todo}</div>` : `<div class="empty" style="padding:18px">${ready.length ? 'Nothing else.' : 'Nothing needs attention.'}</div>`}
+    </div><div>
+    <div class="day">${new Date().toLocaleDateString(undefined, { month: 'long' })} so far</div>
+    <div class="cards c3"><div class="card"><small>Sales today</small><b>${money(sum(tS))}</b></div><div class="card"><small>Sales this month</small><b>${money(sum(mS))}</b></div><div class="card"><small>Margin this month</small><b>${some ? money(Math.round(margin)) + (known ? '' : '*') : '–'}</b></div></div>
+    <p class="hint">${mS.length} invoice${mS.length === 1 ? '' : 's'} this month${refunds ? ' · ' + money(refunds) + ' refunded' : ''}.${known ? '' : some ? ' * Leaves out toys sold with no cost on file.' : ' No margin yet: the toys sold have no cost on file.'}</p>
+    <button class="btn" style="width:100%" data-act="tab" data-t="activity">All stock activity</button></div></div>`;
+}
 
 /* Stock */
 function renderStock() {
@@ -317,7 +548,7 @@ function renderStock() {
   let units = 0, value = 0, attention = 0;
   act.forEach(i => { const n = Math.max(L.stock.get(i.sku) || 0, 0); units += n; if (i.price != null) value += n * i.price; if (status(i) !== 'ok') attention++; });
   if (!L.list.length) {
-    view().innerHTML = `<div class="empty"><h3>No toys yet</h3><p>Add one by hand, or send Claude a photo of the shelves and paste the result in Import.</p>
+    view().innerHTML = `<div class="empty"><h3>No toys yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Import.</p>
       <div class="actions"><button class="btn primary" data-act="newItem">Add a toy</button><button class="btn" data-act="tab" data-t="import">Import from a photo</button></div></div>`;
     return;
   }
@@ -328,8 +559,9 @@ function renderStock() {
       <div class="card ${attention ? 'warn' : ''}"><small>Low / out</small><b>${attention}</b></div>
       <div class="card"><small>Retail value</small><b>${value ? money(Math.round(value)) : '–'}</b></div>
     </div>
-    <div class="bar"><input id="q" type="search" placeholder="Search name, category or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn primary" data-act="newItem">+ Toy</button></div>
+    <div class="bar"><input id="q" type="search" placeholder="Search name, brand, character or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn primary" data-act="newItem">+ Toy</button></div>
     <div class="chips">${['All', ...L.cats].map(c => `<button class="chip ${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    ${STOCK_FILTERS[ui.filter] ? `<div class="chips"><button class="chip on" data-act="filter" data-f="all">${STOCK_FILTERS[ui.filter]} ✕</button></div>` : ''}
     <div class="seg">${[['all', 'All'], ['attn', 'Low / out'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
     <div id="stockList"></div>`;
   renderStockList();
@@ -338,54 +570,73 @@ function renderStockList() {
   const L = live(), q = norm(ui.q);
   let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
   if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
-  if (q) rows = rows.filter(i => norm(i.name + ' ' + i.sku + ' ' + catOf(i)).includes(q));
+  if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (ui.filter === 'attn') rows = rows.filter(i => status(i) !== 'ok');
   if (ui.filter === 'out') rows = rows.filter(i => ['out', 'neg'].includes(status(i)));
+  if (ui.filter === 'short') rows = rows.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; });
+  if (ui.filter === 'noprice') rows = rows.filter(i => i.price == null);
+  if (ui.filter === 'verify') rows = rows.filter(i => i.relCheck);
   const box = $('#stockList'); if (!box) return;
   if (!rows.length) { box.innerHTML = `<div class="empty">Nothing matches.</div>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
-    const s = status(i), n = stockOf(i.sku);
-    return `<button class="item" data-act="item" data-sku="${esc(i.sku)}"><div class="main"><div class="name">${esc(i.name)}</div><div class="sub">${esc(catOf(i))} · ${esc(i.sku)}${i.price != null ? ' · ' + money(i.price) : ''}${s === 'low' ? ' · reorder at ' + minOf(i) : ''}</div></div><div class="qty ${s}">${n}</div></button>`;
+    const s = status(i), n = nums(i.sku);
+    return `<button class="item" data-act="item" data-sku="${esc(i.sku)}"><div class="main"><div class="name">${esc(i.name)}</div><div class="sub">${esc(catOf(i))} · ${esc(i.sku)}${i.price != null ? ' · ' + money(i.price) : ''}${n.inc ? ' · ' + n.inc + ' incoming' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}${s === 'low' ? ' · reorder at ' + minOf(i) : ''}</div></div><div class="qty ${s}">${n.have}</div></button>`;
   }).join('')}</div>${rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''}`;
 }
 function openItem(sku) {
   const L = live(), i = L.map.get(sku); if (!i) return;
-  const n = stockOf(sku), s = status(i);
+  const n = nums(sku), s = status(i), a = L.avg.get(sku);
   const recent = L.all.filter(m => m.sku === sku).sort(cmpMove).slice(0, 6);
+  const det = [['Manufacturer', i.mfr], ['Brand', i.brand], ['Toy line', i.line], ['Character', i.chr]].filter(d => d[1]);
   openSheet(`
-    <div class="top"><h2>${esc(i.name)}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div class="top"><h2>${esc(i.name)}</h2>${closeBtn}</div>
     <div class="sub hint">${esc(catOf(i))} · ${esc(i.sku)}${i.price != null ? ' · ' + money(i.price) : ''}${i.active ? '' : ' · archived'}</div>
-    <div class="picked"><div class="main"><div class="bigqty">${n}</div><div class="hint">in stock${s === 'low' ? ' · low (reorder at ' + minOf(i) + ')' : s === 'out' ? ' · out of stock' : s === 'neg' ? ' · negative, run a count' : ''}</div></div></div>
-    <div class="actions"><button class="btn primary" data-act="moveFor" data-sku="${esc(sku)}" data-dir="In">+ Stock in</button><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="Out">− Stock out</button><button class="btn" data-act="editItem" data-sku="${esc(sku)}">Edit</button></div>
+    <div class="picked"><div class="main"><div class="bigqty">${n.have}</div><div class="hint">in stock${s === 'low' ? ' · low (reorder at ' + minOf(i) + ')' : s === 'out' ? ' · out of stock' : s === 'neg' ? ' · negative, run a count' : ''}</div></div></div>
+    <div class="cards c3"><div class="card"><small>Incoming</small><b>${n.inc}</b></div><div class="card"><small>Owed to customers</small><b>${n.owed}</b></div><div class="card ${n.ltp < 0 ? 'warn' : ''}"><small>Left to promise</small><b>${n.ltp}</b></div></div>
+    <div class="actions" style="margin-bottom:0"><button class="btn primary" data-act="toyGo" data-to="sell" data-sku="${esc(sku)}">Sell</button><button class="btn" data-act="toyGo" data-to="pre" data-sku="${esc(sku)}">Pre-order</button><button class="btn" data-act="toyGo" data-to="ord" data-sku="${esc(sku)}">Order stock</button></div>
+    <div class="actions" style="margin-top:0"><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="In">+ Stock in</button><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="Out">− Stock out</button><button class="btn" data-act="editItem" data-sku="${esc(sku)}">Edit</button></div>
+    <dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}<dt>Average cost</dt><dd>${a == null ? 'No cost recorded yet' : money(r2(a))}</dd></dl>
     <div><div class="lbl">Recent movements</div>${recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div><button class="btn" style="margin-top:8px;width:100%" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : `<div class="hint">None yet.</div>`}</div>`);
 }
 
 /* Item editor */
 function openItemEditor(sku) {
-  const i = sku ? live().map.get(sku) : null;
+  const i = sku ? live().map.get(sku) : null, v = k => esc(i && i[k] ? i[k] : '');
   openSheet(`
-    <div class="top"><h2>${i ? 'Edit toy' : 'New toy'}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div class="top"><h2>${i ? 'Edit toy' : 'New toy'}</h2>${closeBtn}</div>
     <div><label for="fName">Name</label><input id="fName" value="${esc(i ? i.name : '')}" autocomplete="off"></div>
     <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
       <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
-    <div class="row2"><div><label for="fMin">Reorder at</label><input id="fMin" type="number" inputmode="numeric" min="0" step="1" placeholder="${prefs.low}" value="${i && i.min != null ? i.min : ''}"></div>
+    ${i ? '' : `<div class="row2"><div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0"></div><div><label for="fCost">Cost each (${esc(prefs.cur)})</label><input id="fCost" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional"></div></div>`}
+    <details ${i && (i.mfr || i.brand || i.line || i.chr || i.rel) ? 'open' : ''}><summary>Toy details</summary>
+      <div class="row2" style="margin-top:10px"><div><label for="fMfr">Manufacturer</label><input id="fMfr" value="${v('mfr')}" autocomplete="off"></div><div><label for="fBrand">Brand</label><input id="fBrand" value="${v('brand')}" autocomplete="off"></div></div>
+      <div class="row2" style="margin-top:10px"><div><label for="fLine">Toy line</label><input id="fLine" value="${v('line')}" autocomplete="off"></div><div><label for="fChr">Character</label><input id="fChr" value="${v('chr')}" autocomplete="off"></div></div>
+      <div style="margin-top:10px"><label for="fRel">Release date</label><input id="fRel" value="${v('rel')}" placeholder="2024-07-15, 2024-07 or 2024" autocomplete="off"></div>
+      <label class="check" style="margin:10px 0 4px"><input id="fRelCheck" type="checkbox" ${i && i.relCheck ? 'checked' : ''}> Release date still needs checking</label>
+    </details>
+    <details><summary>Reorder level and SKU</summary>
+      <div class="row2" style="margin:10px 0 4px"><div><label for="fMin">Reorder at</label><input id="fMin" type="number" inputmode="numeric" min="0" step="1" placeholder="${prefs.low}" value="${i && i.min != null ? i.min : ''}"></div>
       <div><label for="fSku">SKU / barcode</label><input id="fSku" value="${esc(i ? i.sku : nextSku())}" data-sug="${esc(i ? '' : nextSku())}" ${i ? 'disabled' : ''} autocomplete="off"></div></div>
-    ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0"></div>`}
+    </details>
     <div class="actions"><button class="btn primary" data-act="saveItem" ${i ? `data-sku="${esc(i.sku)}"` : ''}>Save</button>${i ? `<button class="btn ${i.active ? 'danger' : ''}" data-act="archive" data-sku="${esc(i.sku)}">${i.active ? 'Archive' : 'Restore'}</button>` : ''}</div>`);
 }
 function saveItem(sku) {
   const name = $('#fName').value.trim().replace(/\s+/g, ' '), cat = $('#fCat').value.trim() || 'General';
   const price = $('#fPrice').value === '' ? null : Number($('#fPrice').value);
   const min = $('#fMin').value === '' ? null : Number($('#fMin').value);
+  const det = { mfr: $('#fMfr').value.trim(), brand: $('#fBrand').value.trim(), line: $('#fLine').value.trim(), chr: $('#fChr').value.trim(), rel: parseRel($('#fRel').value), relCheck: $('#fRelCheck').checked };
   if (!name) return toast('Give the toy a name.');
   if (price != null && (isNaN(price) || price < 0)) return toast('Price must be zero or more.');
   if (min != null && (!Number.isInteger(min) || min < 0)) return toast('Reorder level must be a whole number.');
+  if (det.rel == null) return toast('Release date should look like 2024-07-15, 2024-07 or 2024.');
   const clash = live().list.find(x => norm(x.name) === norm(name) && x.sku !== sku);
   if (clash) return toast(`“${clash.name}” already exists.`);
   if (sku) {
     const cur = live().map.get(sku), patch = {};
     if (name !== cur.name) patch.name = name; if (cat !== catOf(cur)) patch.cat = cat;
     if (price !== cur.price) patch.price = price; if (min !== (cur.min == null ? null : cur.min)) patch.min = min;
+    ['mfr', 'brand', 'line', 'chr', 'rel'].forEach(k => { if (det[k] !== (cur[k] || '')) patch[k] = det[k]; });
+    if (det.relCheck !== !!cur.relCheck) patch.relCheck = det.relCheck;
     if (Object.keys(patch).length) qEdit(sku, patch);
     closeSheet(); commit(); toast('Saved');
   } else {
@@ -394,16 +645,19 @@ function saveItem(sku) {
     if (live().map.has(nsku)) return toast('That SKU is already used.');
     const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
     if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
-    qItem({ sku: nsku, name, cat, price, min, active: true }, nsku === $('#fSku').dataset.sug);
-    if (start > 0) qMove({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', qty: start, reason: 'Opening', ref: '', note: '' });
+    const cost = $('#fCost').value === '' ? null : Number($('#fCost').value);
+    if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
+    qItem(Object.assign({ sku: nsku, name, cat, price, min, active: true }, det), nsku === $('#fSku').dataset.sug);
+    if (start > 0) qMove({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', qty: start, reason: 'Opening', ref: '', note: '', cost });
     closeSheet(); commit(); toast(`${name} added`);
   }
 }
 
 /* Move */
+const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason: defaultReason(dir || 'In'), date: todayISO(), note: '', cost: '' });
 function renderMove() {
-  const m = ui.mv || (ui.mv = { sku: '', dir: 'In', qty: 1, reason: 'Restock', date: todayISO(), note: '' });
-  const it = m.sku && live().map.get(m.sku);
+  const m = ui.mv || (ui.mv = newMv());
+  const it = m.sku && live().map.get(m.sku), a = it ? live().avg.get(it.sku) : null;
   view().innerHTML = `<div class="panel">
     <div><div class="lbl">Toy</div><div id="pick">${it
       ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(it.sku)} · ${stockOf(it.sku)} in stock</div></div><button class="btn" data-act="unpick">Change</button></div>`
@@ -413,9 +667,11 @@ function renderMove() {
       <div><label for="mvQty">Quantity</label><div class="step"><button data-act="qty" data-d="-1" aria-label="Less">−</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}"><button data-act="qty" data-d="1" aria-label="More">+</button></div></div>
       <div><label for="mvReason">Reason</label><select id="mvReason">${FORM_REASONS[m.dir].map(r => `<option ${r === m.reason ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
     </div>
+    ${m.dir === 'In' ? `<div><label for="mvCost">Cost each (${esc(prefs.cur)}) for this receipt</label><input id="mvCost" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.cost)}" placeholder="${a == null ? 'Optional' : 'Average so far ' + money(r2(a))}"></div>` : ''}
     <div class="row2"><div><label for="mvDate">Date</label><input id="mvDate" type="date" value="${esc(m.date)}"></div><div><label for="mvNote">Note</label><input id="mvNote" value="${esc(m.note)}" placeholder="Optional" autocomplete="off"></div></div>
     <div class="hint" id="mvHint"></div>
     <button class="btn primary big" data-act="saveMove">Record ${m.dir === 'In' ? 'stock in' : 'stock out'}</button>
+    ${m.dir === 'Out' ? `<p class="hint">Selling to a customer? Use <b>Sell</b>: it records the stock out and makes the invoice PDF in one step.</p>` : ''}
   </div>`;
   updateMvHint();
 }
@@ -437,11 +693,13 @@ function saveMove() {
   if (!it) return toast('Pick a toy first.');
   const qty = Number(m.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   const date = parseDate(m.date); if (!date) return toast('Check the date.');
+  const cost = m.dir === 'In' && m.cost !== '' ? Number(m.cost) : null;
+  if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
   const have = stockOf(it.sku);
   if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
-  qMove({ id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim() });
+  qMove({ id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost });
   const after = have + (m.dir === 'In' ? qty : -qty);
-  ui.mv = { sku: '', dir: m.dir, qty: 1, reason: defaultReason(m.dir), date: todayISO(), note: '' };
+  ui.mv = null; prefs.tab = 'stock'; savePrefs();
   commit(); toast(`${signed(m.dir, qty)} ${it.name} → ${after} in stock`);
 }
 
@@ -450,13 +708,13 @@ const cmpMove = (a, b) => (a.date === b.date ? b._i - a._i : a.date < b.date ? 1
 function moveRow(m, withName = true) {
   const it = live().map.get(m.sku), q = m.q;
   const tag = q ? (q.status === 'failed' ? '<span class="tag bad">failed</span>' : '<span class="tag warn">waiting</span>') : '';
-  return `<button class="item" data-act="move" data-id="${esc(m.id)}"><div class="delta ${m.dir === 'In' ? 'in' : 'out'}">${signed(m.dir, m.qty)}</div><div class="main"><div class="name">${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${tag}</div><div class="sub">${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.note ? ' · ' + esc(m.note) : ''}</div></div></button>`;
+  return `<button class="item" data-act="move" data-id="${esc(m.id)}"><div class="delta ${m.dir === 'In' ? 'in' : 'out'}">${signed(m.dir, m.qty)}</div><div class="main"><div class="name">${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${tag}</div><div class="sub">${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.reason === 'Sale' && m.ref ? ' · invoice ' + esc(m.ref) : ''}${m.note ? ' · ' + esc(m.note) : ''}</div></div></button>`;
 }
 function renderActivity() {
   const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
   view().innerHTML = `
     ${failed ? `<div class="banner bad"><span><b>${failed}</b> entr${failed === 1 ? 'y was' : 'ies were'} refused by the sheet. Tap a tagged row to see why.</span><button class="btn" data-act="retryAll">Retry</button></div>` : ''}
-    ${queue.filter(q => q.status === 'failed' && q.kind !== 'move').map(q => `<div class="banner bad"><span>${q.kind === 'item' ? `New toy “${esc(q.item.name)}” (${esc(q.item.sku)})` : `Edit of ${esc(q.sku)}`} was refused: ${esc(q.error || 'unknown reason')}.${q.kind === 'item' ? ' Deleting it also deletes stock entries waiting on it.' : ''}</span><button class="btn" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button></div>`).join('')}
+    ${queue.filter(q => q.status === 'failed' && q.kind !== 'move').map(q => `<div class="banner bad"><span>${esc(describe(q))} was refused: ${esc(q.error || 'unknown reason')}.${q.kind === 'item' ? ' Deleting it also deletes stock entries waiting on it.' : ''}</span><button class="btn" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button></div>`).join('')}
     ${pend && !failed ? `<div class="banner warn"><span><b>${pend}</b> waiting to reach the sheet.</span><button class="btn" data-act="sync">Sync</button></div>` : ''}
     <div class="bar"><input id="aq" type="search" placeholder="Filter activity" value="${esc(ui.aq)}" autocomplete="off"></div>
     ${ui.aSku ? `<div class="chips"><button class="chip on" data-act="clearSku">${esc((live().map.get(ui.aSku) || { name: ui.aSku }).name)} ✕</button></div>` : ''}
@@ -477,20 +735,322 @@ function renderActList() {
 }
 function openMove(id) {
   const m = live().all.find(x => x.id === id); if (!m) return;
-  const it = live().map.get(m.sku), q = m.q;
+  const it = live().map.get(m.sku), q = m.q, own = q && q.kind === 'move';
   const reversed = live().all.some(x => x.ref === m.id && x.reason === 'Correction');
   openSheet(`
-    <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(it ? it.name : m.sku)}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
-    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd><dt>SKU</dt><dd>${esc(m.sku)}</dd>${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>Corrects</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
-    <div class="actions">${q
+    <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(it ? it.name : m.sku)}</h2>${closeBtn}</div>
+    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd><dt>SKU</dt><dd>${esc(m.sku)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
+    <div class="actions">${own
       ? `${q.status === 'failed' ? `<button class="btn primary" data-act="retryOne" data-qid="${esc(q.id)}">Retry</button>` : ''}<button class="btn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button>`
-      : `<button class="btn ${reversed ? '' : 'primary'}" data-act="reverse" data-id="${esc(m.id)}" ${reversed ? 'disabled' : ''}>${reversed ? 'Already reversed' : 'Reverse this movement'}</button>`}</div>
-    ${q ? '' : `<p class="hint">Movements are never edited or deleted. Reversing adds an opposite entry, so the history stays complete.</p>`}`);
+      : q ? '' : `<button class="btn ${reversed ? '' : 'primary'}" data-act="reverse" data-id="${esc(m.id)}" ${reversed ? 'disabled' : ''}>${reversed ? 'Already reversed' : 'Reverse this movement'}</button>`}</div>
+    ${q && !own ? `<p class="hint">Written by ${esc(describe(q).toLowerCase())}, which is waiting to sync. Open that document to change it.</p>` : q ? '' : `<p class="hint">Movements are never edited or deleted. Reversing adds an opposite entry, so the history stays complete.</p>`}`);
 }
 function reverseMove(id) {
   const m = moves.find(x => x.id === id); if (!m) return;
   qMove({ id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` });
   closeSheet(); commit(); toast('Reversal recorded');
+}
+
+/* ---------- Sell: invoices ---------- */
+function linePrice(l) { const it = l.sku && live().map.get(l.sku); return l.price === '' ? (it && it.price != null ? it.price : null) : Number(l.price); }
+function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + (parseInt(l.qty, 10) || 0) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
+function renderSell() {
+  if (wide()) {   // New Sale and the invoice list side by side
+    view().innerHTML = `<div class="cols sell"><div><div class="day">New Sale</div><div id="sellBody"></div></div><div><div class="day">Invoices</div><div class="bar"><input id="iq" type="search" placeholder="Search number, customer or toy" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div></div></div>`;
+    renderInvForm(); renderInvList(); return;
+  }
+  view().innerHTML = `<div class="seg"><button class="${ui.sellSeg === 'new' ? 'on' : ''}" data-act="sellSeg" data-s="new">New Sale</button><button class="${ui.sellSeg === 'list' ? 'on' : ''}" data-act="sellSeg" data-s="list">Invoices</button></div><div id="sellBody"></div>`;
+  if (ui.sellSeg === 'new') renderInvForm(); else { $('#sellBody').innerHTML = `<div class="bar"><input id="iq" type="search" placeholder="Search number, customer or toy" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`; renderInvList(); }
+}
+function renderInvForm() {
+  const f = ui.inv, L = live(), pre = f.preId && L.pres.find(p => p.id === f.preId);
+  $('#sellBody').innerHTML = `<div class="panel">
+    ${pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="btn" data-act="invReset">Clear</button></div>` : ''}
+    ${f.lines.map((l, i) => `<div class="lineb">
+      <div><div class="lbl">Toy${f.lines.length > 1 ? ' ' + (i + 1) : ''}</div>${pickerHtml('inv.lines.' + i, l.sku)}</div>
+      <div class="row3"><div><label>Quantity</label><input type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}"></div>
+        <div><label>Price each (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}"></div>
+        ${f.lines.length > 1 ? `<button class="btn danger" data-act="invDelLine" data-i="${i}" aria-label="Remove toy">✕</button>` : '<span></span>'}</div>
+    </div>`).join('')}
+    <button class="btn" data-act="invAddLine">+ Add another toy</button>
+    <div class="row2"><div><label>Customer</label><input data-b="inv.cust" data-cust="inv" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div>
+      <div><label>Phone or Messenger</label><input data-b="inv.contact" value="${esc(f.contact)}" placeholder="Optional" autocomplete="off"></div></div>
+    <div class="row2"><details class="mini"><summary>Dated ${esc(fmtDay(f.date).toLowerCase())}</summary><input type="date" data-b="inv.date" data-redraw="1" value="${esc(f.date)}" aria-label="Date"></details><div class="tot"><small>Total</small><b id="invTotal">${money(invTotal())}</b></div></div>
+    <button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button>
+    <p class="hint">Issue it once the customer has paid. This takes the toys out of stock and opens the PDF to send.</p>
+  </div>`;
+}
+function issueInvoice() {
+  const f = ui.inv, L = live();
+  const lines = [], seen = new Set();
+  for (const l of f.lines) {
+    const it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick a toy first.');
+    if (seen.has(it.sku)) return toast(`“${it.name}” is listed twice. Put it on one line.`);
+    seen.add(it.sku);
+    const qty = Number(l.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+    const price = linePrice(l);
+    if (price == null || isNaN(price) || price < 0) return toast(`Type the price for “${it.name}”.`);
+    const a = L.avg.get(it.sku);
+    lines.push({ sku: it.sku, qty, list: it.price == null ? null : it.price, price: r2(price), cost: a == null ? null : r2(a) });
+  }
+  const name = f.cust.trim(); if (!name) return toast('Add the customer’s name.');
+  const date = parseDate(f.date); if (!date) return toast('Check the date.');
+  const short = lines.find(l => l.qty > stockOf(l.sku));
+  if (short && !confirm(`Only ${stockOf(short.sku)} of “${L.map.get(short.sku).name}” in stock. Issue the invoice anyway? Stock will go below zero.`)) return;
+  const pre = f.preId && L.pres.find(p => p.id === f.preId && p.status === PRE_OPEN);
+  const custId = custFor(name, f.contact), id = 'v' + uid(), no = nextNo();
+  // Payment comes before the invoice, so issuing one for a pre-order settles whatever balance it still showed.
+  if (pre && pre.balance > 0) { queue = queue.filter(q => !(q.kind === 'prePay' && q.preId === pre.id && q.status === 'pending')); qAdd('prePay', { preId: pre.id, paid: r2(pre.qty * pre.price) }); }
+  qAdd('invoice', { invoice: { id, no, date, custId, lines, preId: pre ? pre.id : '' } });
+  ui.inv = newInv(); ui.sellSeg = 'new'; commit(); openInv(id); toast(`Invoice no. ${no} issued. Stock updated.`);
+}
+const docTitle = v => (v.type === SALE ? 'Invoice' : 'Pre-order receipt') + ' no. ' + v.no;
+function renderInvList() {
+  const box = $('#invList'); if (!box) return;
+  const q = norm(ui.iq);
+  let rows = live().invs.slice().sort((a, b) => b.no - a.no);
+  if (q) rows = rows.filter(v => norm([v.no, v.cust, v.date, v.type, ...v.lines.map(l => l.name)].join(' ')).includes(q));
+  if (!rows.length) { box.innerHTML = `<div class="empty">${q ? 'Nothing matches.' : 'No invoices yet.'}</div>`; return; }
+  box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => `<button class="item" data-act="inv" data-id="${esc(v.id)}"><div class="main"><div class="name">No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag good">delivered</span>' : ''}${waitTag(v)}</div><div class="sub">${esc(fmtDay(v.date))} · ${esc(v.lines[0] ? v.lines[0].name : '')}${v.lines.length > 1 ? ' +' + (v.lines.length - 1) + ' more' : ''}</div></div><div class="amt">${money(v.total)}</div></button>`).join('')}</div>`;
+}
+function openInv(id) {
+  const L = live(), v = L.invs.find(x => x.id === id); if (!v) return closeSheet();
+  const sale = v.type === SALE, pre = v.preId && L.pres.find(p => p.id === v.preId), contact = contactOf(v);
+  const cost = v.lines.reduce((s, l) => s + l.qty * (l.cost || 0), 0), costKnown = v.lines.every(l => l.cost != null);
+  const myRets = L.rets.filter(r => r.invId === v.id), canReturn = sale && v.lines.some(l => returnable(v, l.sku) > 0);
+  const s = ui.sub && ui.sub.id === id ? ui.sub : null;
+  let retForm = '';
+  if (s && s.mode === 'ret') {
+    const opts = v.lines.filter(l => returnable(v, l.sku) > 0);
+    if (!opts.some(l => l.sku === s.sku)) s.sku = opts[0] ? opts[0].sku : '';
+    retForm = `<div class="panel">
+      ${opts.length > 1 ? `<div><label>Toy coming back</label><select data-b="sub.sku" data-redraw="1">${opts.map(l => `<option value="${esc(l.sku)}" ${l.sku === s.sku ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : `<div class="hint">Returning <b>${esc(opts[0] ? opts[0].name : '')}</b></div>`}
+      <div class="seg" style="margin:0">${Object.keys(RETURN_STOCK).map(o => `<button class="${s.outcome === o ? 'on' : ''}" data-act="subSet" data-k="outcome" data-v="${o}">${o}</button>`).join('')}</div>
+      <div class="hint">${RETURN_HINT[s.outcome]}</div>
+      <div class="row2"><div><label>Quantity (up to ${returnable(v, s.sku)})</label><input type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label>Refund (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="sub.refund" value="${esc(s.refund)}" placeholder="0"></div></div>
+      <div><label>Note</label><input data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
+      <div class="actions" style="margin:0"><button class="btn primary" data-act="retSave">Record return</button><button class="btn" data-act="subOff">Cancel</button></div></div>`;
+  }
+  prepPdf(v);
+  openSheet(`
+    <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
+    <div class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</div>
+    <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><div class="amt">${money(r2(l.qty * l.price))}</div></div>`).join('')}
+      <div class="item"><div class="main"><div class="name">Total</div>${sale ? `<div class="sub">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) + ' at average cost' : 'Margin unknown: a toy has no cost'}</div>` : pre ? `<div class="sub">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</div>` : ''}</div><div class="amt big">${money(v.total)}</div></div></div>
+    <div class="actions"><button class="btn primary" data-act="pdfShare" data-id="${esc(id)}">Share PDF</button>${sale ? `<button class="btn" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}">${v.ship ? '✓ Delivered' : 'Mark delivered'}</button>` : ''}</div>
+    ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
+    ${myRets.length ? `<div><div class="lbl">Returns</div><div class="list">${myRets.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.name)} × ${r.qty} · ${esc(r.outcome)}${waitTag(r)}</div><div class="sub">${esc(fmtDay(r.date))}${r.refund ? ' · refunded ' + money(r.refund) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div></div>${r.q ? `<button class="btn danger" data-act="dropQ" data-qid="${esc(r.q.id)}" data-stay="1">Delete</button>` : ''}</div>`).join('')}</div></div>` : ''}
+    ${retForm || (canReturn ? `<button class="btn" data-act="retOpen" data-id="${esc(id)}">Record a return</button>` : '')}
+    ${v.q ? `<div class="actions"><button class="btn danger" data-act="dropQ" data-qid="${esc(v.q.id)}">Delete this ${sale ? 'invoice' : 'pre-order'}</button></div><p class="hint">It has not reached the sheet yet, so it can still be deleted. After that, a mistake is fixed with a return, or by reversing its stock movement under Home, All stock activity.</p>` : ''}`, 'inv:' + id, () => openInv(id));
+}
+function saveReturn() {
+  const s = ui.sub, v = s && live().invs.find(x => x.id === s.id); if (!v) return;
+  const qty = Number(s.qty), max = returnable(v, s.sku);
+  if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  if (qty > max) return toast(`Only ${max} can still be returned on this invoice.`);
+  const refund = s.refund === '' ? 0 : Number(s.refund); if (isNaN(refund) || refund < 0) return toast('Refund must be zero or more.');
+  qAdd('ret', { ret: { id: 'r' + uid(), date: todayISO(), invId: v.id, sku: s.sku, qty, outcome: s.outcome, refund: r2(refund), note: s.note.trim() } });
+  ui.sub = null; commit(); toast('Return recorded');
+}
+
+/* ---------- Orders: pre-orders and supplier orders ---------- */
+function renderOrders() {
+  if (wide()) { view().innerHTML = `<div class="cols"><div><div class="day">Pre-orders</div>${preListHtml()}</div><div><div class="day">Supplier orders</div>${ordListHtml()}</div></div>`; return; }
+  const pre = ui.ordSeg === 'pre';
+  view().innerHTML = `<div class="seg"><button class="${pre ? 'on' : ''}" data-act="ordSeg" data-s="pre">Pre-orders</button><button class="${pre ? '' : 'on'}" data-act="ordSeg" data-s="sup">Supplier orders</button></div>${pre ? preListHtml() : ordListHtml()}`;
+}
+function preRow(p, ready) {
+  return `<button class="item" data-act="pre" data-id="${esc(p.id)}"><div class="main"><div class="name">${esc(p.cust)}${ready ? '<span class="tag good">ready to ship</span>' : ''}${p.status !== PRE_OPEN ? `<span class="tag">${esc(p.status.toLowerCase())}</span>` : ''}${waitTag(p)}</div><div class="sub">${esc(p.name)} × ${p.qty} · ${p.status === PRE_OPEN ? (p.balance > 0 ? 'balance ' + money(p.balance) : 'paid in full') : esc(fmtDay(p.date))}</div></div></button>`;
+}
+function preListHtml() {
+  const L = live(), ready = readyPres(), rs = new Set(ready.map(p => p.id));
+  const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
+  return `<button class="btn primary big" data-act="preNew">+ New pre-order</button>
+    ${ready.length ? `<div class="day">Ready to ship · the toy has arrived</div><div class="list">${ready.map(readyRow).join('')}</div>` : ''}
+    ${open.length ? `<div class="day">Waiting for stock</div><div class="list">${open.map(p => preRow(p)).join('')}</div>` : ''}
+    ${!L.pres.length ? `<div class="empty">No pre-orders yet. Add one when a customer pays for a toy that has not arrived.</div>` : ''}
+    ${closed.length ? `<details><summary>Closed (${closed.length})</summary><div class="list" style="margin-top:8px">${closed.slice(0, 200).map(p => preRow(p)).join('')}</div></details>` : ''}`;
+}
+function preTotals() { const f = ui.f, it = f.sku && live().map.get(f.sku); const p = f.price === '' ? (it && it.price != null ? it.price : null) : Number(f.price), q = parseInt(f.qty, 10) || 0; const tot = p == null || isNaN(p) ? null : r2(p * q); const paid = f.paid === '' ? tot : Number(f.paid); return { price: p, tot, paid }; }
+function preHint() { const t = preTotals(); return t.tot == null ? (ui.f.sku ? 'Type the price to see the total.' : 'Pick the toy to see the total.') : `Total <b>${money(t.tot)}</b> · balance <b>${money(Math.max(0, r2(t.tot - (isNaN(t.paid) ? 0 : t.paid))))}</b>`; }
+function openPreForm() {
+  const f = ui.f || (ui.f = { type: 'pre', cust: '', contact: '', sku: '', qty: 1, price: '', paid: '', date: todayISO(), note: '' });
+  openSheet(`
+    <div class="top"><h2>New pre-order</h2>${closeBtn}</div>
+    <div><div class="lbl">Toy</div>${pickerHtml('f', f.sku)}</div>
+    <div class="row2"><div><label>Quantity</label><input type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label>Price each (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="f.price" value="${esc(f.price)}"></div></div>
+    <div class="row2"><div><label>Customer</label><input data-b="f.cust" data-cust="f" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div><div><label>Phone or Messenger</label><input data-b="f.contact" value="${esc(f.contact)}" autocomplete="off"></div></div>
+    <div><label>Amount paid now (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="f.paid" value="${esc(f.paid)}" placeholder="Leave blank when paid in full"></div>
+    <div class="hint" id="preHint">${preHint()}</div>
+    <details class="mini" ${f.note || f.date !== todayISO() ? 'open' : ''}><summary>Date and note</summary><div class="row2"><input type="date" data-b="f.date" value="${esc(f.date)}" aria-label="Date"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
+    <button class="btn primary big" data-act="preSave">Save and make receipt no. ${nextNo()}</button>
+    <p class="hint">Stock does not move now. It leaves when the toy arrives and the invoice is issued.</p>`, 'preForm', openPreForm);
+}
+function savePre() {
+  const f = ui.f, it = f.sku && live().map.get(f.sku), t = preTotals();
+  if (!it) return toast('Pick a toy first.');
+  const qty = Number(f.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  if (t.price == null || isNaN(t.price) || t.price < 0) return toast('Type the price.');
+  const name = f.cust.trim(); if (!name) return toast('Add the customer’s name.');
+  if (!f.contact.trim()) return toast('Add the customer’s phone or Messenger, so they can be told when the toy arrives.');
+  if (isNaN(t.paid) || t.paid < 0) return toast('Amount paid must be zero or more.');
+  if (t.paid > t.tot) return toast('Amount paid is more than the total.');
+  const date = parseDate(f.date); if (!date) return toast('Check the date.');
+  const custId = custFor(name, f.contact), id = 'p' + uid(), invId = 'v' + uid(), no = nextNo();
+  qAdd('pre', { pre: { id, date, custId, sku: it.sku, qty, price: r2(t.price), paid: r2(t.paid), note: f.note.trim(), invId, no } });
+  closeSheet(); ui.ordSeg = 'pre'; commit(); openInv(invId); toast(`Pre-order saved. Receipt no. ${no} is ready to send.`);
+}
+function openPre(id) {
+  const L = live(), p = L.pres.find(x => x.id === id); if (!p) return closeSheet();
+  const open = p.status === PRE_OPEN, ready = open && readyPres().some(x => x.id === id), n = nums(p.sku), tot = r2(p.qty * p.price);
+  const rec = L.invs.find(v => v.type === RECEIPT && v.preId === id), s = ui.sub && ui.sub.id === id ? ui.sub : null;
+  let sub = '';
+  if (open && s && s.mode === 'pay') sub = `<div class="panel"><div><label>Amount received now (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="sub.paid" value="${esc(s.paid)}" placeholder="Leave blank for the full ${money(p.balance)}"></div><div class="actions" style="margin:0"><button class="btn primary" data-act="prePaySave">Save payment</button><button class="btn" data-act="subOff">Cancel</button></div></div>`;
+  if (open && s && s.mode === 'cancel') sub = `<div class="panel"><div><label>Deposit kept (${esc(prefs.cur)}), out of ${money(p.paid)} paid</label><input type="number" inputmode="decimal" min="0" step="any" data-b="sub.kept" value="${esc(s.kept)}" placeholder="Leave blank for a full refund"></div>
+    <div class="actions" style="margin:0"><button class="btn danger" data-act="preCancelSave">Cancel the pre-order</button><button class="btn" data-act="subOff">Back</button></div><div class="hint">Stock is not touched.</div></div>`;
+  openSheet(`
+    <div class="top"><h2>Pre-order · ${esc(p.cust)}</h2>${closeBtn}</div>
+    <div class="hint">${esc(contactOf(p))} ${waitTag(p)}</div>
+    <dl class="kv"><dt>Toy</dt><dd>${esc(p.name)} × ${p.qty}</dd><dt>Price</dt><dd>${money(p.price)} each, ${money(tot)} total</dd><dt>Paid</dt><dd>${money(p.paid)}</dd><dt>Balance</dt><dd>${p.balance > 0 ? '<b>' + money(p.balance) + '</b>' : 'Nothing left to pay'}</dd><dt>Date</dt><dd>${esc(p.date)}</dd>
+      <dt>Status</dt><dd>${open ? (ready ? 'Ready to ship: the toy is in stock' : 'Waiting for stock') : esc(p.status)}${p.status === PRE_CANCEL ? (p.kept ? ', kept ' + money(p.kept) : ', refunded in full') : ''}${p.invNo ? ', invoice no. ' + p.invNo : ''}</dd>${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}</dl>
+    ${open ? `<div class="hint">${esc(fourText(p.sku))}</div>` : ''}
+    ${sub || (open ? `<div class="actions"><button class="btn ${ready ? 'primary' : ''}" data-act="fulfil" data-id="${esc(id)}">Issue invoice</button>${p.balance > 0 ? `<button class="btn" data-act="subOn" data-id="${esc(id)}" data-m="pay">Add payment</button>` : ''}<button class="btn danger" data-act="subOn" data-id="${esc(id)}" data-m="cancel">Cancel</button></div>` : '')}
+    ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (PDF)</button>` : ''}
+    ${p.q ? `<div class="actions"><button class="btn danger" data-act="dropQ" data-qid="${esc(p.q.id)}">Delete this pre-order</button></div>` : ''}`, 'pre:' + id, () => openPre(id));
+}
+function ordRow(o) { return `<button class="item" data-act="ord" data-id="${esc(o.id)}"><div class="main"><div class="name">${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}</div><div class="sub">${o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : '')}</div></div><div class="qty">${o.status === 'Received' ? o.recQty : o.qty}</div></button>`; }
+function ordListHtml() {
+  const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
+  return `<button class="btn primary big" data-act="ordNew">+ New supplier order</button>
+    ${open.length ? `<div class="day">On the way</div><div class="list">${open.map(ordRow).join('')}</div>` : `<div class="empty">${L.orders.length ? 'Nothing on the way.' : 'No supplier orders yet. Add one when stock is ordered and paid for.'}</div>`}
+    ${closed.length ? `<details><summary>Closed (${closed.length})</summary><div class="list" style="margin-top:8px">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
+}
+function openOrdForm() {
+  const f = ui.f || (ui.f = { type: 'ord', sku: '', qty: 1, expected: '', date: todayISO(), note: '' });
+  openSheet(`
+    <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
+    <div><div class="lbl">Toy</div>${pickerHtml('f', f.sku)}</div>
+    <div class="row2"><div><label>Quantity ordered</label><input type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label>Expected arrival</label><input type="date" data-b="f.expected" value="${esc(f.expected)}"></div></div>
+    <details class="mini" ${f.note ? 'open' : ''}><summary>Note</summary><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></details>
+    <button class="btn primary big" data-act="ordSave">Save order</button>
+    <p class="hint">Counts as incoming until it is received. The cost is typed when it arrives.</p>`, 'ordForm', openOrdForm);
+}
+function saveOrd() {
+  const f = ui.f, it = f.sku && live().map.get(f.sku);
+  if (!it) return toast('Pick a toy first.');
+  const qty = Number(f.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  const expected = f.expected ? parseDate(f.expected) : ''; if (expected == null) return toast('Check the expected date.');
+  qAdd('order', { order: { id: 'o' + uid(), date: todayISO(), sku: it.sku, qty, expected, note: f.note.trim() } });
+  closeSheet(); ui.ordSeg = 'sup'; commit(); toast(`${qty} × ${it.name} on the way`);
+}
+function openOrd(id) {
+  const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
+  const open = o.status === 'Ordered', a = L.avg.get(o.sku);
+  if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, cost: '' };
+  const s = ui.sub || {};
+  openSheet(`
+    <div class="top"><h2>${esc(o.name)}</h2>${closeBtn}</div>
+    <div class="hint">Supplier order · ${o.qty} ordered ${esc(fmtDay(o.date))}${o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''} ${waitTag(o)}</div>
+    ${o.note ? `<div class="hint">${esc(o.note)}</div>` : ''}
+    ${open ? `<div class="panel"><div class="row2"><div><label>Quantity received</label><input type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label>Cost each (${esc(prefs.cur)})</label><input type="number" inputmode="decimal" min="0" step="any" data-b="sub.cost" value="${esc(s.cost)}" placeholder="${a == null ? '' : 'Average so far ' + money(r2(a))}"></div></div>
+      <button class="btn primary big" data-act="ordRecv">Received · add to stock</button></div>
+      <div class="actions"><button class="btn danger" data-act="ordCancel" data-id="${esc(id)}">Cancel this order</button></div>`
+      : `<dl class="kv"><dt>Status</dt><dd>${esc(o.status)}${o.status === 'Received' ? ', ' + o.recQty + ' on ' + esc(o.recDate) : ''}</dd></dl>`}
+    ${o.q ? `<div class="actions"><button class="btn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button></div>` : ''}`, 'ord:' + id, () => openOrd(id));
+}
+function receiveOrd() {
+  const s = ui.sub, o = s && live().orders.find(x => x.id === s.id); if (!o) return;
+  const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  if (s.cost === '') return toast('Type the cost each, so margins can be worked out.');
+  const cost = Number(s.cost); if (isNaN(cost) || cost < 0) return toast('Cost must be zero or more.');
+  qAdd('receive', { orderId: o.id, date: todayISO(), qty, cost: r2(cost) });
+  closeSheet(); commit();
+  const waiting = readyPres().filter(p => p.sku === o.sku).length;
+  toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
+  if (waiting) { prefs.tab = 'orders'; ui.ordSeg = 'pre'; savePrefs(); render(); }
+}
+
+/* ---------- PDF: the invoice or receipt drawn on a canvas, wrapped as a one-image-per-page PDF ---------- */
+const loadImg = src => new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+async function drawDoc(v) {
+  const W = 595, H = 842, M = 48, S = 2, R = W - M, sale = v.type === SALE, shop = prefs.shop;
+  const pre = v.preId && live().pres.find(p => p.id === v.preId), contact = contactOf(v);
+  const pages = []; let x, y;
+  const font = (size, bold) => { x.font = `${bold ? '700' : '400'} ${size}px Helvetica, Arial, sans-serif`; };
+  const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#1d1b20'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
+  const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
+  const rule = (py, c) => { x.strokeStyle = c || '#d9d4cb'; x.lineWidth = 0.75; x.beginPath(); x.moveTo(M, py); x.lineTo(R, py); x.stroke(); };
+  const page = () => { const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
+  const head = () => { text('ITEM', M, y, { size: 8, color: '#6f6b76', bold: true }); text('QTY', 372, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('PRICE', 455, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('AMOUNT', R, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); y += 7; rule(y); y += 16; };
+  page();
+  // Header: shop on the left, document title on the right.
+  let ly = y;
+  const logo = shop.logo ? await loadImg(shop.logo) : null;
+  if (logo) { const k = Math.min(150 / logo.width, 56 / logo.height, 1); x.drawImage(logo, M, ly, logo.width * k, logo.height * k); ly += logo.height * k + 16; } else ly += 14;
+  if (shop.name) { text(shop.name, M, ly, { size: 15, bold: true }); ly += 15; }
+  font(9.5); wrap(shop.contact || '', 250).filter(Boolean).forEach(l => { text(l, M, ly, { size: 9.5, color: '#6f6b76' }); ly += 13; });
+  let ry = y + 16;
+  text(sale ? 'INVOICE' : 'PRE-ORDER RECEIPT', R, ry, { size: sale ? 22 : 17, bold: true, align: 'right' }); ry += 20;
+  text('No. ' + v.no, R, ry, { size: 11, align: 'right' }); ry += 15;
+  text(new Date(v.date + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }), R, ry, { size: 10, color: '#6f6b76', align: 'right' });
+  y = Math.max(ly, ry) + 26;
+  text(sale ? 'BILLED TO' : 'RECEIVED FROM', M, y, { size: 8, color: '#6f6b76', bold: true }); y += 15;
+  text(v.cust, M, y, { size: 12, bold: true }); y += 14;
+  if (contact) { text(contact, M, y, { size: 10, color: '#6f6b76' }); y += 14; }
+  y += 18; head();
+  v.lines.forEach(l => {
+    font(10.5); const ls = wrap(l.name, 290);
+    if (y + ls.length * 14 > H - M - 120) { page(); head(); }
+    ls.forEach((s, i) => text(s, M, y + i * 14, { size: 10.5 }));
+    text(l.qty, 372, y, { size: 10.5, align: 'right' }); text(money(l.price), 455, y, { size: 10.5, align: 'right' }); text(money(r2(l.qty * l.price)), R, y, { size: 10.5, align: 'right' });
+    y += ls.length * 14 + 4; rule(y - 6, '#eeeae2'); y += 10;
+  });
+  y += 6;
+  const sum = (label, val, bold) => { text(label, 455, y, { size: bold ? 12 : 10.5, bold, align: 'right', color: bold ? '#1d1b20' : '#6f6b76' }); text(val, R, y, { size: bold ? 12 : 10.5, bold, align: 'right' }); y += bold ? 20 : 17; };
+  sum('Total', money(v.total), true);
+  if (!sale && pre) { sum('Amount paid', money(pre.paid)); sum('Balance', money(pre.balance), true); }
+  if (shop.foot) { font(9.5); const fl = wrap(shop.foot, R - M); let fy = H - M - (fl.length - 1) * 13; rule(fy - 16); fl.forEach(l => { text(l, M, fy, { size: 9.5, color: '#6f6b76' }); fy += 13; }); }
+  if (pages.length > 1) pages.forEach((c, i) => { x = c.getContext('2d'); text(`Page ${i + 1} of ${pages.length}`, R, H - 24, { size: 8, color: '#6f6b76', align: 'right' }); });
+  return pages;
+}
+function buildPdf(imgs) {
+  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
+  const add = b => { if (typeof b === 'string') b = enc.encode(b); parts.push(b); len += b.length; };
+  const obj = (n, body) => { offs[n] = len; add(n + ' 0 obj\n'); body(); add('\nendobj\n'); };
+  add('%PDF-1.4\n%âãÏÓ\n');
+  obj(1, () => add('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => add(`<< /Type /Pages /Kids [${imgs.map((_, i) => (3 + i * 3) + ' 0 R').join(' ')}] /Count ${imgs.length} >>`));
+  imgs.forEach((im, i) => {
+    const p = 3 + i * 3, content = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q';
+    obj(p, () => add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ${p + 2} 0 R >> >> /Contents ${p + 1} 0 R >>`));
+    obj(p + 1, () => add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`));
+    obj(p + 2, () => { add(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.bytes.length} >>\nstream\n`); add(im.bytes); add('\nendstream'); });
+  });
+  const n = 3 + imgs.length * 3, at = len;
+  add(`xref\n0 ${n}\n0000000000 65535 f \n` + offs.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${at}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+async function docPdf(v) {
+  const pages = await drawDoc(v), imgs = [];
+  for (const c of pages) { const b = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.92)); imgs.push({ w: c.width, h: c.height, bytes: new Uint8Array(await b.arrayBuffer()) }); }
+  return buildPdf(imgs);
+}
+const pdfName = v => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no + '.pdf';
+/** Makes the PDF as soon as the document is opened, so the Share tap itself has nothing to wait for. */
+function prepPdf(v) {
+  const pre = v.preId && live().pres.find(p => p.id === v.preId);
+  const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
+  if (!ui.pdf || ui.pdf.sig !== sig) ui.pdf = { sig, id: v.id, p: docPdf(v) };
+  return ui.pdf.p;
+}
+async function sendPdf(id, share) {
+  const v = live().invs.find(x => x.id === id); if (!v) return;
+  try {
+    const blob = await prepPdf(v), name = pdfName(v), file = new File([blob], name, { type: 'application/pdf' });
+    if (share && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: docTitle(v) }); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    toast('PDF downloaded');
+  } catch (e) { if (e.name !== 'AbortError') toast('Could not make the PDF: ' + e.message); }
 }
 
 /* ---------- import ---------- */
@@ -502,15 +1062,33 @@ function splitLine(line) {
 }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
+const DETAILS = [['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'toy line'], ['chr', 'character'], ['rel', 'release date']];
+/** Reads the toy-detail columns of a pasted row into r. */
+function readDetails(r, mfr, brand, line, chr, rel, verify) {
+  r.mfr = (mfr || '').trim(); r.brand = (brand || '').trim(); r.line = (line || '').trim(); r.chr = (chr || '').trim();
+  const d = parseRel(rel); r.rel = d || ''; r.relCheck = !!r.rel && /^(y|yes|true|verify|check|x|\?)$/i.test((verify || '').trim());
+  r.relMsg = d == null ? `Release date “${rel}” not understood, left blank.` : '';
+}
+/** Details a paste can add to a toy on file. Only blank fields are filled; what the owner typed is never overwritten. */
+function detailPatch(it, r) {
+  const p = {};
+  DETAILS.forEach(([k]) => { if (!it[k] && r[k]) p[k] = r[k]; });
+  if (p.rel && r.relCheck) p.relCheck = true;
+  return p;
+}
+const detailNames = p => DETAILS.filter(([k]) => p[k]).map(d => d[1]).join(', ');
+const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
+const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price == null ? null : r.price, min: null, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
 function parseCount(text) {
-  const rows = [], seen = new Set();
+  const rows = [];
   cleanLines(text).forEach((line, idx) => {
     const c = splitLine(line);
     if (!c) { rows.push({ line, status: 'bad', msg: 'Columns must be separated by tabs (or |).', on: false, name: line.slice(0, 40) }); return; }
     const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
     if (idx === 0 && /^(count|qty|quantity|stock|on hand)/i.test(cnt.trim())) return;
     const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '' };
+    readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
     if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; rows.push(r); return; }
     if (cnt === '' || cnt === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; rows.push(r); return; }
     if (!/^\d+$/.test(cnt.trim())) { r.status = 'bad'; r.msg = `“${cnt}” is not a whole number.`; rows.push(r); return; }
@@ -533,14 +1111,53 @@ function settleCount(rows) {
     used.add(key);
     if (r.match) {
       const have = stockOf(r.match.sku), d = r.count - have;
-      r.have = have; r.delta = d;
-      r.status = d === 0 ? 'same' : 'count';
-      r.on = d !== 0 || !r.match.active;
+      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r));
+      r.status = d !== 0 ? 'count' : r.adds ? 'details' : 'same';
+      r.on = d !== 0 || !r.match.active || !!r.adds;
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
       r.status = 'new'; r.on = !r.similar;
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
+    if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
+  });
+}
+/** Supplier paperwork: Name, Qty, Cost each, then the optional toy details and a note. */
+function parseReceive(text) {
+  const rows = [], taken = new Set(), L = live();
+  cleanLines(text).forEach((line, idx) => {
+    const c = splitLine(line);
+    if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
+    const [name = '', q = '', cost = '', cat = ''] = c;
+    if (idx === 0 && /^(qty|quantity)/i.test(q.trim())) return;
+    const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: null, note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '' };
+    readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
+    if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; rows.push(r); return; }
+    if (!/^\d+$/.test(q.trim()) || Number(q) < 1) { r.status = 'bad'; r.msg = `Quantity “${q}” must be a whole number, 1 or more.`; rows.push(r); return; }
+    r.qty = Number(q);
+    r.match = findItem(r.name);
+    if (!r.match) r.similar = similarItem(r.name);
+    rows.push(r);
+  });
+  settleReceive(rows);
+  return rows;
+}
+function settleReceive(rows) {
+  const taken = new Set(), L = live();
+  rows.forEach(r => {
+    if (r.status === 'bad' && !r.qty) return;
+    r.msg = ''; r.order = null;
+    if (r.match) {
+      r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
+      r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
+      if (r.order) taken.add(r.order.id);
+      if (!r.match.active) r.msg = 'Archived. Applying restores it.';
+    } else {
+      r.status = 'new'; r.on = !r.similar;
+      if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
+    }
+    if (r.cost == null) r.msg = (r.msg ? r.msg + ' ' : '') + 'No cost given: the average cost will not change.';
+    if (r.relMsg) r.msg += ' ' + r.relMsg;
   });
 }
 function parseMoves(text) {
@@ -549,9 +1166,9 @@ function parseMoves(text) {
   cleanLines(text).forEach((line, idx) => {
     const c = splitLine(line);
     if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
-    const [d = '', nm = '', dr = '', q = '', rs = '', note = ''] = c;
+    const [d = '', nm = '', dr = '', q = '', rs = '', note = '', cost = ''] = c;
     if (idx === 0 && /^date/i.test(d)) return;
-    const r = { date: parseDate(d), name: nm.trim(), dir: /^(in|\+)$/i.test(dr.trim()) ? 'In' : /^(out|-|−)$/i.test(dr.trim()) ? 'Out' : '', qty: /^\d+$/.test(q.trim()) ? Number(q) : 0, reason: '', note: note.trim(), on: false, status: 'ok', msg: '' };
+    const r = { date: parseDate(d), name: nm.trim(), dir: /^(in|\+)$/i.test(dr.trim()) ? 'In' : /^(out|-|−)$/i.test(dr.trim()) ? 'Out' : '', qty: /^\d+$/.test(q.trim()) ? Number(q) : 0, reason: '', note: note.trim(), cost: null, on: false, status: 'ok', msg: '' };
     const fail = m => { r.status = 'bad'; r.msg = m; rows.push(r); };
     if (!r.date) return fail(`Date “${d}” not understood. Use 2026-11-15 or 11/15/26.`);
     r.item = findItem(nm);
@@ -561,6 +1178,7 @@ function parseMoves(text) {
     const want = rs.trim(); r.reason = want ? [...IN_ONLY, ...OUT_ONLY, ...EITHER].find(x => x.toLowerCase() === want.toLowerCase()) || '' : defaultReason(r.dir);
     if (!r.reason) return fail(`Unknown reason “${want}”.`);
     if (!reasonOK(r.dir, r.reason)) return fail(`${r.reason} cannot be recorded as ${r.dir}.`);
+    if (r.dir === 'In') r.cost = parsePrice(cost);
     const dup = seenKey.has([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
     seenKey.add([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
     const bal = (run.has(r.item.sku) ? run.get(r.item.sku) : stockOf(r.item.sku)) + (r.dir === 'In' ? r.qty : -r.qty);
@@ -571,77 +1189,156 @@ function parseMoves(text) {
   });
   return rows;
 }
-const STATUS_LABEL = { new: 'New toy', count: 'Count', same: 'No change', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+const STATUS_LABEL = { new: 'New toy', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+const IMP = {
+  count: { name: 'Count from photo', cols: 'Name⇥Category⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Toy line⇥Character⇥Release date⇥Verify', parse: parseCount,
+    hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Toys missing from the paste are left alone.' },
+  receive: { name: 'Receive', cols: 'Name⇥Qty⇥Cost each⇥Category⇥Manufacturer⇥Brand⇥Toy line⇥Character⇥Release date⇥Verify⇥Note', parse: parseReceive,
+    hint: 'Send Claude a photo of the supplier’s invoice or packing list, then paste its answer here. Each row adds stock at its cost. A toy with a supplier order on the way closes that order.' },
+  moves: { name: 'Movements', cols: 'Date⇥Toy⇥In/Out⇥Qty⇥Reason⇥Note', parse: parseMoves,
+    hint: 'Paste rows of <b>date, toy, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.' },
+};
+/** Loads the rows Claude left in the sheet into the same preview the paste box uses. One type at a time. */
+function inboxLoad() {
+  const rows = live().inbox;
+  if (!rows.length) { if (ui.imp && ui.imp.src === 'inbox') ui.imp = null; return false; }
+  const type = rows[0].type, set = rows.filter(r => r.type === type), key = type + ':' + set.map(r => r.row).join(',');
+  if (ui.imp && ui.imp.src === 'inbox' && ui.imp.key === key) return true;
+  // The same toy counted in several photos arrives as several rows: add them into one count.
+  let lines = set;
+  if (type === 'count') {
+    const by = new Map();
+    set.forEach(r => {
+      const k = norm(r.name) || r.name, m = by.get(k), n = /^\d+$/.test(String(r.qty).trim()) ? Number(r.qty) : null;
+      if (!m) { by.set(k, { ...r, n }); return; }
+      if (n != null) m.n = (m.n || 0) + n;
+      ['mfr', 'brand', 'line', 'chr', 'rel', 'verify'].forEach(f => { if (!m[f] && r[f]) m[f] = r[f]; });
+      if (r.note && !String(m.note).includes(r.note)) m.note = [m.note, r.note].filter(Boolean).join('; ');
+    });
+    lines = [...by.values()].map(m => ({ ...m, qty: m.n == null ? m.qty : m.n }));
+  }
+  const c = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+  const text = lines.map(r => (type === 'count' ? [r.name, '', r.qty, '', r.note, r.mfr, r.brand, r.line, r.chr, r.rel, r.verify] : [r.name, r.qty, r.cost, '', r.mfr, r.brand, r.line, r.chr, r.rel, r.verify, r.note]).map(c).join('\t')).join('\n');
+  const mode = type === 'count' ? 'count' : 'receive';
+  ui.rdate = todayISO();
+  ui.imp = { src: 'inbox', key, mode, rows: IMP[mode].parse(text), refs: set.map(r => ({ row: r.row, name: r.name })) };
+  return true;
+}
 function renderImport() {
-  const count = ui.mode === 'count';
+  // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
+  if (!(ui.imp && ui.imp.src === 'paste') && inboxLoad()) {
+    const n = ui.imp.refs.length, more = live().inbox.length - n;
+    view().innerHTML = `<div class="banner"><span><b>${n} row${n === 1 ? '' : 's'} from Claude</b>, read from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</span><button class="btn" data-act="inboxDismiss">Dismiss</button></div><div id="impOut"></div>`;
+    renderImpOut(); return;
+  }
+  const m = IMP[ui.mode];
   view().innerHTML = `
-    <div class="seg"><button class="${count ? 'on' : ''}" data-act="mode" data-m="count">Count from photo</button><button class="${count ? '' : 'on'}" data-act="mode" data-m="moves">Movements</button></div>
-    <p class="hint">${count
-      ? 'Send Claude a photo of the shelves, then paste its answer here. Counts are compared with the stock on file; only the differences are recorded. Toys missing from the paste are left alone.'
-      : 'Paste rows of <b>date, toy, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.'}</p>
-    ${count ? `<button class="btn" style="width:100%" data-act="copyPrompt">Copy the prompt and toy list for Claude</button>` : ''}
-    <textarea id="impText" rows="7" spellcheck="false" placeholder="${count ? 'Name⇥Category⇥Count⇥Price⇥Note' : 'Date⇥Toy⇥In/Out⇥Qty⇥Reason⇥Note'}"></textarea>
+    <div class="empty" style="padding:22px 16px"><h3>Nothing to review</h3><p>Send Claude photos of boxes, shelves or a supplier’s invoice and ask it to log them. What it reads appears here to check. Nothing is recorded until you tap Apply.</p></div>
+    <details id="manual" ${ui.manual ? 'open' : ''}><summary>Paste a block by hand</summary>
+    <div class="seg s3" style="margin-top:10px">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
+    <p class="hint">${m.hint}</p>
+    ${ui.mode !== 'moves' ? `<button class="btn" style="width:100%;margin-bottom:10px" data-act="copyPrompt">Copy the prompt and toy list for Claude</button>` : ''}
+    <textarea id="impText" rows="7" spellcheck="false" placeholder="${m.cols}"></textarea>
+    ${ui.mode === 'receive' ? `<div><label for="impDate">Received on</label><input id="impDate" type="date" value="${esc(ui.rdate)}"></div>` : ''}
     <div class="actions"><button class="btn primary" data-act="impParse">Preview</button><button class="btn" data-act="impClear">Clear</button></div>
+    </details>
     <div id="impOut"></div>`;
   $('#impText').value = ui.text;
   renderImpOut();
 }
 function renderImpOut() {
   const box = $('#impOut'); if (!box) return;
-  const imp = ui.imp; if (!imp || imp.mode !== ui.mode) { box.innerHTML = ''; return; }
+  const imp = ui.imp; if (!imp || (imp.src !== 'inbox' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
   if (!imp.rows.length) { box.innerHTML = `<div class="empty">No rows found. Check that columns are separated by tabs.</div>`; return; }
   const n = imp.rows.filter(r => r.on).length;
   box.innerHTML = `<div class="prev">${imp.rows.map((r, i) => {
     const can = !['bad', 'skip'].includes(r.status);
     let detail = '';
     if (imp.mode === 'count') {
-      if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})`;
+      if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
       else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
+      else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
       else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}`;
-    } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.note ? ' · ' + esc(r.note) : ''}`;
-    return `<div class="prow ${r.on ? '' : 'off'}"><input type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Include"><div class="main"><div class="name">${esc(r.name)} <span class="tag ${['bad'].includes(r.status) ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span></div>${detail ? `<div class="sub">${detail}</div>` : ''}${r.msg ? `<div class="sub">${esc(r.msg)}</div>` : ''}${r.similar && !r.match ? `<button class="go" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
+    } else if (imp.mode === 'receive') {
+      if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+      else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}`;
+    } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
+    const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
+    return `<div class="prow ${r.on ? '' : 'off'}"><input type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Include"><div class="main"><div class="name">${esc(r.name)} <span class="tag ${['bad'].includes(r.status) ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span></div>${detail ? `<div class="sub">${detail}</div>` : ''}${dl ? `<div class="sub">${esc(dl)}</div>` : ''}${r.msg ? `<div class="sub">${esc(r.msg)}</div>` : ''}${r.similar && !r.match ? `<button class="go" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
   }).join('')}</div><div class="actions"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${n} change${n === 1 ? '' : 's'}</button></div>`;
+}
+/** Fills blank details on a toy already on file; restores it when archived. */
+function patchExisting(it, r) {
+  const patch = detailPatch(it, r);
+  if (!it.active) patch.active = true;
+  if (it.price == null && r.price != null) patch.price = r.price;
+  if (!it.cat && r.cat) patch.cat = r.cat;
+  if (Object.keys(patch).length) qEdit(it.sku, patch);
 }
 function applyCount(rows) {
   let nNew = 0, nMove = 0; const done = new Set();
   rows.forEach(r => {
-    if (!r.on || !['new', 'count', 'same'].includes(r.status)) return;
+    if (!r.on || !['new', 'count', 'same', 'details'].includes(r.status)) return;
     let it = r.match, fresh = false;
     if (it && done.has(it.sku)) return;
-    if (!it) {
-      it = { sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price, min: null, active: true };
-      qItem(it, true); dirty(); nNew++; fresh = true;
-    } else {
-      const patch = {};
-      if (!it.active) patch.active = true;
-      if (it.price == null && r.price != null) patch.price = r.price;
-      if (!it.cat && r.cat) patch.cat = r.cat;
-      if (Object.keys(patch).length) qEdit(it.sku, patch);
-    }
+    if (!it) { it = newItemFrom(r); qItem(it, true); dirty(); nNew++; fresh = true; }
+    else patchExisting(it, r);
     done.add(it.sku);
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
-    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note }); nMove++; }
+    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null }); nMove++; }
     dirty();
+  });
+  return { nNew, nMove };
+}
+function applyReceive(rows) {
+  let nNew = 0, nMove = 0; const date = parseDate(ui.rdate) || todayISO(), made = new Map();
+  rows.forEach(r => {
+    if (!r.on || !['new', 'recv'].includes(r.status)) return;
+    let it = r.match || made.get(norm(r.name));
+    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); nNew++; }
+    else if (r.match) patchExisting(it, r);
+    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, cost: r.cost });
+    else qMove({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', qty: r.qty, reason: 'Restock', ref: '', note: r.note, cost: r.cost });
+    nMove++; dirty();
   });
   return { nNew, nMove };
 }
 function applyMoves(rows) {
   let n = 0;
-  rows.forEach(r => { if (r.on && r.item) { qMove({ id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note }); n++; } });
+  rows.forEach(r => { if (r.on && r.item) { qMove({ id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note, cost: r.cost }); n++; } });
   return n;
 }
 function buildPrompt() {
   const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${catOf(i)} | ${stockOf(i.sku)}`).join('\n') || '(empty: no toys yet)';
-  return `Read the attached photo of toy shelves and list every product you can identify.
+  const details = `- Manufacturer, Brand, Toy line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
+- Release date: your best guess, as YYYY-MM-DD, YYYY-MM or YYYY.
+- Verify: write Y when the release date needs checking (the product is a reissue, or the date is a guess). Leave it blank for a first issue you are confident about.
+- A variant (chase, exclusive colour, reissue) is a separate product with its own name. Never merge it into the regular release.`;
+  if (ui.mode === 'receive') return `Read the attached supplier invoice or packing list and list every product on it.
 Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
-Name<TAB>Category<TAB>Count<TAB>Price<TAB>Note
+Name<TAB>Qty<TAB>Cost each<TAB>Category<TAB>Manufacturer<TAB>Brand<TAB>Toy line<TAB>Character<TAB>Release date<TAB>Verify<TAB>Note
 
 Rules:
-- Name: brand and product as printed on the box. When the product is already in the catalog below, reuse its exact name.
+- Name: the specific product name. When the product is already in the catalog below, reuse its exact name.
+- Qty: units received, as a whole number.
+- Cost each: the unit cost on the paperwork as a plain number. Divide a line total by the quantity when only the total is shown. Blank when not shown.
 - Category: reuse a catalog category when one fits.
-- Count: units visible on the shelf, as a whole number. Write ? when you cannot count reliably.
-- Price: the shelf price as a plain number, blank when not visible.
-- Note: a short remark such as "back row hidden, estimate". Blank when there is nothing to say.
+${details}
+- Note: a short remark, blank when there is nothing to say.
+
+Catalog (Name | Category | In stock):
+${cat}`;
+  return `Read the attached photo (toy boxes, or the stockroom shelves) and list every product you can identify.
+Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
+Name<TAB>Category<TAB>Count<TAB>Price<TAB>Note<TAB>Manufacturer<TAB>Brand<TAB>Toy line<TAB>Character<TAB>Release date<TAB>Verify
+
+Rules:
+- Name: the specific product name as printed on the box. When the product is already in the catalog below, reuse its exact name.
+- Category: reuse a catalog category when one fits.
+- Count: units visible, as a whole number. Write ? when you cannot count reliably.
+- Price: leave blank unless the owner told you the selling price.
+- Note: a short remark such as "back row hidden, estimate" or "name guessed from artwork". Blank when there is nothing to say.
+${details}
 - If the same product appears in several places, add the counts into one line.
 
 Catalog (Name | Category | In stock):
@@ -650,17 +1347,32 @@ ${cat}`;
 
 /* ---------- settings ---------- */
 function openSettings() {
-  const failed = queue.filter(q => q.status === 'failed').length, pend = queue.filter(q => q.status === 'pending').length;
+  const failed = queue.filter(q => q.status === 'failed').length, pend = queue.filter(q => q.status === 'pending').length, sh = prefs.shop;
   openSheet(`
-    <div class="top"><h2>Settings</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div class="top"><h2>Settings</h2>${closeBtn}</div>
     <div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false">
       <p class="hint">${cfg.url ? (ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p></div>
     <div class="actions"><button class="btn primary" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="btn" data-act="redownload">Re-download everything</button>` : ''}</div>
+    <div class="lbl">On the invoice PDF</div>
+    <div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" autocomplete="off"></div>
+    <div><label for="sContact">Contact details (one per line)</label><textarea id="sContact" class="plain" rows="3">${esc(sh.contact)}</textarea></div>
+    <div><label for="sFoot">Line at the foot of the page</label><input id="sFoot" value="${esc(sh.foot)}" placeholder="Optional" autocomplete="off"></div>
+    <div><div class="lbl">Logo</div><div class="actions" style="margin:0;align-items:center">${sh.logo ? `<img class="logo" src="${esc(sh.logo)}" alt="Logo">` : ''}<label class="btn" style="display:flex;align-items:center;justify-content:center;color:var(--ink);margin:0">${sh.logo ? 'Replace' : 'Choose a picture'}<input id="sLogo" type="file" accept="image/*" hidden></label>${sh.logo ? `<button class="btn danger" data-act="logoOff">Remove</button>` : ''}</div></div>
     <div class="row2"><div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="4"></div><div><label for="sLow">Default reorder level</label><input id="sLow" type="number" inputmode="numeric" min="0" value="${prefs.low}"></div></div>
-    <div class="actions"><button class="btn" data-act="savePrefs">Save preferences</button></div>
+    <div class="actions"><button class="btn primary" data-act="savePrefs">Save</button></div>
     <div><div class="lbl">Copy for a spreadsheet</div><div class="actions" style="margin-top:0"><button class="btn" data-act="copyItems">Toys + stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
     <details><summary>Danger zone</summary><div class="actions"><button class="btn danger" data-act="wipe">Erase data on this device</button></div><p class="hint">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p></details>
     <p class="hint">Toy Stock ${VERSION}</p>`);
+}
+/** What is typed in the shop fields, kept when the sheet is redrawn for a new logo. */
+function readShopFields() { if ($('#sShop')) { prefs.shop.name = $('#sShop').value.trim(); prefs.shop.contact = $('#sContact').value.trim(); prefs.shop.foot = $('#sFoot').value.trim(); } }
+async function setLogo(file) {
+  const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(''); fr.readAsDataURL(file); });
+  const im = url && await loadImg(url); if (!im) return toast('That picture could not be read.');
+  const k = Math.min(1, 480 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+  c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+  readShopFields(); prefs.shop.logo = c.toDataURL('image/jpeg', 0.9); savePrefs(); openSettings(); toast('Logo saved');
 }
 function parseCode(s) {
   s = String(s || '').trim(); const i = s.lastIndexOf('#');
@@ -673,7 +1385,7 @@ document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
-    case 'tab': prefs.tab = d.t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
+    case 'tab': prefs.tab = d.t; if (STOCK_FILTERS[ui.filter]) ui.filter = 'all'; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
     case 'sync': syncNow(true); break;
     case 'settings': openSettings(); break;
     case 'close': closeSheet(); break;
@@ -684,7 +1396,7 @@ document.addEventListener('click', async ev => {
     case 'editItem': openItemEditor(d.sku); break;
     case 'saveItem': saveItem(d.sku || null); break;
     case 'archive': { const i = live().map.get(d.sku); if (i && (!i.active || confirm(`Archive “${i.name}”? It leaves the lists and pickers; its history stays.`))) { qEdit(d.sku, { active: !i.active }); closeSheet(); commit(); toast(i.active ? 'Archived' : 'Restored'); } break; }
-    case 'moveFor': ui.mv = { sku: d.sku, dir: d.dir, qty: 1, reason: defaultReason(d.dir), date: todayISO(), note: '' }; prefs.tab = 'move'; savePrefs(); closeSheet(); render(); break;
+    case 'moveFor': ui.mv = newMv(d.sku, d.dir); prefs.tab = 'move'; savePrefs(); closeSheet(); render(); break;
     case 'seeAll': ui.aSku = d.sku; ui.aq = ''; prefs.tab = 'activity'; savePrefs(); closeSheet(); render(); break;
     case 'clearSku': ui.aSku = ''; renderActivity(); break;
     case 'more': ui.aN += 150; renderActList(); break;
@@ -695,21 +1407,112 @@ document.addEventListener('click', async ev => {
     case 'saveMove': saveMove(); break;
     case 'move': openMove(d.id); break;
     case 'reverse': reverseMove(d.id); break;
-    case 'dropQ': { const gone = queue.find(x => x.id === d.qid); queue = queue.filter(x => x.id !== d.qid); if (gone && gone.kind === 'item') queue = queue.filter(x => x.kind === 'item' || entrySku(x) !== gone.item.sku); closeSheet(); commit(); toast('Deleted'); break; }
+    case 'dropQ': {
+      const gone = queue.find(x => x.id === d.qid); queue = queue.filter(x => x.id !== d.qid);
+      if (gone && gone.kind === 'item') queue = queue.filter(x => x.kind === 'item' || !entrySkus(x).includes(gone.item.sku));
+      if (!d.stay) closeSheet(); commit(); toast('Deleted'); break;
+    }
     case 'retryOne': { const q = queue.find(x => x.id === d.qid); if (q) { q.status = 'pending'; delete q.error; } closeSheet(); commit(); break; }
     case 'retryAll': queue.forEach(q => { if (q.status === 'failed') { q.status = 'pending'; delete q.error; } }); commit(); syncNow(true); break;
+
+    // toy picker and small sub-forms
+    case 'pk': {
+      const o = getPath(d.k), it = live().map.get(d.sku); if (!o || !it) break;
+      o.sku = d.sku; if (o.price === '' && it.price != null) o.price = it.price;
+      rerender(); break;
+    }
+    case 'pkClear': { const o = getPath(d.k); if (o) { o.sku = ''; if ('price' in o) o.price = ''; } rerender(); break; }
+    case 'subOn': ui.sub = d.m === 'pay' ? { id: d.id, mode: 'pay', paid: '' } : { id: d.id, mode: 'cancel', kept: '' }; rerender(); break;
+    case 'subSet': if (ui.sub) ui.sub[d.k] = d.v; rerender(); break;
+    case 'subOff': ui.sub = null; rerender(); break;
+
+    // sell
+    case 'toyGo': {
+      const it = live().map.get(d.sku), price = it && it.price != null ? it.price : ''; if (!it) break;
+      closeSheet();
+      if (d.to === 'sell') {
+        const l = ui.inv.lines; if (!l[0].sku) l[0] = { sku: it.sku, qty: 1, price }; else if (!l.some(x => x.sku === it.sku)) l.push({ sku: it.sku, qty: 1, price });
+        ui.sellSeg = 'new'; prefs.tab = 'sell'; savePrefs(); render(); window.scrollTo(0, 0);
+      } else {
+        prefs.tab = 'orders'; ui.ordSeg = d.to === 'pre' ? 'pre' : 'sup'; savePrefs(); render();
+        if (d.to === 'pre') { ui.f = { type: 'pre', cust: '', contact: '', sku: it.sku, qty: 1, price, paid: '', date: todayISO(), note: '' }; openPreForm(); }
+        else { ui.f = { type: 'ord', sku: it.sku, qty: 1, expected: '', date: todayISO(), note: '' }; openOrdForm(); }
+      }
+      break;
+    }
+    case 'homeGo': {
+      if (d.to === 'sale') { prefs.tab = 'sell'; ui.sellSeg = 'new'; }
+      else if (d.to === 'pre' || d.to === 'sup') { prefs.tab = 'orders'; ui.ordSeg = d.to; }
+      else { prefs.tab = 'stock'; ui.filter = d.to; ui.cat = 'All'; ui.q = ''; }
+      savePrefs(); render(); window.scrollTo(0, 0); break;
+    }
+    case 'sellSeg': ui.sellSeg = d.s; renderSell(); break;
+    case 'invAddLine': ui.inv.lines.push({ sku: '', qty: 1, price: '' }); renderSell(); break;
+    case 'invDelLine': ui.inv.lines.splice(+d.i, 1); renderSell(); break;
+    case 'invReset': ui.inv = newInv(); renderSell(); break;
+    case 'invIssue': issueInvoice(); break;
+    case 'inv': ui.sub = null; openInv(d.id); break;
+    case 'pdfShare': await sendPdf(d.id, true); break;
+    case 'ship': {
+      const v = live().invs.find(x => x.id === d.id); if (!v || v.ship === d.s) break;
+      queue = queue.filter(q => !(q.kind === 'ship' && q.invId === d.id && q.status === 'pending'));
+      qAdd('ship', { invId: d.id, ship: d.s });
+      commit(); break;
+    }
+    case 'retOpen': { const v = live().invs.find(x => x.id === d.id); const l = v && v.lines.find(l => returnable(v, l.sku) > 0); if (l) { ui.sub = { id: d.id, mode: 'ret', sku: l.sku, qty: 1, outcome: 'Restock', refund: '', note: '' }; rerender(); } break; }
+    case 'retSave': saveReturn(); break;
+
+    // orders
+    case 'ordSeg': ui.ordSeg = d.s; renderOrders(); break;
+    case 'preNew': ui.f = null; if (prefs.tab !== 'orders' || ui.ordSeg !== 'pre') { prefs.tab = 'orders'; ui.ordSeg = 'pre'; savePrefs(); render(); } openPreForm(); break;
+    case 'preSave': savePre(); break;
+    case 'pre': ui.sub = null; openPre(d.id); break;
+    case 'fulfil': {
+      const p = live().pres.find(x => x.id === d.id); if (!p) break;
+      ui.inv = { cust: p.cust, contact: contactOf(p), date: todayISO(), lines: [{ sku: p.sku, qty: p.qty, price: p.price }], preId: p.id };
+      ui.sellSeg = 'new'; prefs.tab = 'sell'; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
+    }
+    case 'prePaySave': {
+      const s = ui.sub, p = s && live().pres.find(x => x.id === s.id); if (!p) break;
+      const got = s.paid === '' ? p.balance : Number(s.paid);
+      if (isNaN(got) || got <= 0) { toast('Type the amount received.'); break; }
+      if (got > p.balance) { toast(`That is more than the balance of ${money(p.balance)}.`); break; }
+      const paid = r2(p.paid + got);
+      queue = queue.filter(q => !(q.kind === 'prePay' && q.preId === p.id && q.status === 'pending'));
+      qAdd('prePay', { preId: p.id, paid }); ui.sub = null; commit(); toast('Payment saved'); break;
+    }
+    case 'preCancelSave': {
+      const s = ui.sub, p = s && live().pres.find(x => x.id === s.id); if (!p) break;
+      const kept = s.kept === '' ? 0 : Number(s.kept);
+      if (isNaN(kept) || kept < 0) { toast('Deposit kept must be zero or more.'); break; }
+      if (kept > p.paid) { toast('That is more than what was paid.'); break; }
+      qAdd('preCancel', { preId: p.id, kept: r2(kept) }); ui.sub = null; commit(); toast('Pre-order cancelled'); break;
+    }
+    case 'ordNew': ui.f = null; openOrdForm(); break;
+    case 'ordSave': saveOrd(); break;
+    case 'ord': ui.sub = null; openOrd(d.id); break;
+    case 'ordRecv': receiveOrd(); break;
+    case 'ordCancel': if (confirm('Cancel this supplier order? It stops counting as incoming.')) { qAdd('orderCancel', { orderId: d.id }); closeSheet(); commit(); toast('Order cancelled'); } break;
+
+    // import
     case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
     case 'copyPrompt': await copyText(buildPrompt()); toast('Copied. Paste it in Claude together with the photo.'); break;
-    case 'impParse': { ui.text = $('#impText').value; ui.imp = { mode: ui.mode, rows: ui.mode === 'count' ? parseCount(ui.text) : parseMoves(ui.text) }; renderImpOut(); break; }
+    case 'impParse': { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); break; }
+    case 'inboxDismiss': if (ui.imp && ui.imp.src === 'inbox') { qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Dismissed' }); ui.imp = null; commit(); toast('Dismissed'); } break;
     case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
     case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; renderImpOut(); break; }
-    case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; settleCount(ui.imp.rows); renderImpOut(); break; }
+    case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; (ui.imp.mode === 'receive' ? settleReceive : settleCount)(ui.imp.rows); renderImpOut(); break; }
     case 'impApply': {
       const rows = ui.imp.rows;
-      if (ui.imp.mode === 'count') { const r = applyCount(rows); toast(`${r.nNew} new toy${r.nNew === 1 ? '' : 's'}, ${r.nMove} stock change${r.nMove === 1 ? '' : 's'} recorded`); }
-      else { const n = applyMoves(rows); toast(`${n} movement${n === 1 ? '' : 's'} recorded`); }
-      ui.text = ''; ui.imp = null; prefs.tab = 'stock'; savePrefs(); commit(); break;
+      if (ui.imp.mode === 'moves') { const n = applyMoves(rows); toast(`${n} movement${n === 1 ? '' : 's'} recorded`); }
+      else { const r = (ui.imp.mode === 'count' ? applyCount : applyReceive)(rows); toast(`${r.nNew} new toy${r.nNew === 1 ? '' : 's'}, ${r.nMove} stock change${r.nMove === 1 ? '' : 's'} recorded`); }
+      if (ui.imp.src === 'inbox') qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Done' });
+      ui.text = ''; ui.imp = null; dirty();
+      if (!live().inbox.length) { prefs.tab = 'stock'; savePrefs(); }
+      commit(); break;
     }
+
+    // settings
     case 'saveCfg': {
       const c = parseCode($('#sCode').value);
       if (!c.url) { cfg = { url: '', key: '' }; store.set('cfg', cfg); ui.err = ''; closeSheet(); render(); toast('Disconnected. Data stays on this device.'); break; }
@@ -720,26 +1523,42 @@ document.addEventListener('click', async ev => {
       break;
     }
     case 'redownload': meta = { rows: 0, lastId: '', syncedAt: null }; closeSheet(); syncNow(true); break;
-    case 'savePrefs': prefs.cur = $('#sCur').value.trim() || '₱'; prefs.low = Math.max(0, parseInt($('#sLow').value, 10) || 0); savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand'], ...L.list.map(i => [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', stockOf(i.sku)])])); toast('Copied. Paste into a spreadsheet.'); break; }
-    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note'], ...live().all.sort(cmpMove).map(m => [m.date, m.sku, (live().map.get(m.sku) || {}).name, m.dir, m.qty, m.reason, m.ref, m.note])])); toast('Copied. Paste into a spreadsheet.'); break;
-    case 'wipe': if (confirm('Erase everything stored on this device?')) { ['cfg', 'items', 'moves', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
+    case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; prefs.low = Math.max(0, parseInt($('#sLow').value, 10) || 0); savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
+    case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
+    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), a = L.avg.get(i.sku); return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, a == null ? '' : r2(a), i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.sort(cmpMove).map(m => [m.date, m.sku, (live().map.get(m.sku) || {}).name, m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'wipe': if (confirm('Erase everything stored on this device?')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
+function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#preHint')) && ui.f && ui.f.type === 'pre') e.innerHTML = preHint(); }
 document.addEventListener('input', ev => {
   const t = ev.target;
+  if (t.dataset.b) { setPath(t.dataset.b, t.value); if (t.dataset.redraw) rerender(); else liveHints(); return; }
+  if (t.dataset.pk) { renderPk(t.dataset.pk, t.value); return; }
   switch (t.id) {
     case 'q': ui.q = t.value; renderStockList(); break;
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
+    case 'iq': ui.iq = t.value; renderInvList(); break;
     case 'mvQ': renderSug(t.value); break;
     case 'mvQty': ui.mv.qty = t.value; updateMvHint(); break;
     case 'mvReason': ui.mv.reason = t.value; break;
     case 'mvDate': ui.mv.date = t.value; break;
     case 'mvNote': ui.mv.note = t.value; break;
+    case 'mvCost': ui.mv.cost = t.value; break;
     case 'impText': ui.text = t.value; break;
+    case 'impDate': ui.rdate = t.value; break;
   }
 });
-document.addEventListener('change', ev => { if (ev.target.id === 'mvReason') ui.mv.reason = ev.target.value; });
+document.addEventListener('change', ev => {
+  const t = ev.target;
+  if (t.id === 'mvReason') ui.mv.reason = t.value;
+  if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
+  // A known customer's name brings their contact with it.
+  if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
+});
+// Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
+document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; }, true);
+document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(() => { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }, 0); });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
 window.addEventListener('online', () => scheduleSync());

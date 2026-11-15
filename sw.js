@@ -1,7 +1,7 @@
 // Toy Stock service worker: keeps the app's own files on the phone so it opens offline.
 // The page is network-first (3-second budget, then the cached copy), so any launch with signal runs the
 // newest version. Icons and the manifest are cache-first. Data requests to the sheet are never cached here.
-const CACHE = 'toys-v1.0.0';
+const CACHE = 'toys-v2.0.0';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
