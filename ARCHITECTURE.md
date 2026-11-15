@@ -1,6 +1,6 @@
 # Bodega: how the app works
 
-This file describes release 2.1.1 (`VERSION` `2.1.1`, service worker cache `toys-v2.1.1`). Releases 2.1.0 and 2.1.1 changed the app only: `apps-script/Code.gs`, the sync protocol and the sheet are as they were in 2.0.0.
+This file describes release 2.2.0 (`VERSION` `2.2.0`, service worker cache `toys-v2.2.0`, `VERSION_` `2.2.0` in `Code.gs`). Release 2.2.0 changes the back end and the app together. Each works with the other's previous release: app 2.2.0 works against a deployed backend 2.0.0, and backend 2.2.0 works with app 2.1.1. The request and response shapes, entry kinds, tab names and column headers are unchanged, apart from the additions named below.
 
 Bodega is a single-page web app (PWA) for a small shop that sells through chat, over a Google Sheet, installed on a phone's home screen. It is local-first: the phone keeps every item and movement, computes stock itself, and uses the sheet to share data between devices and to keep a record the owner can read and chart. This file is the reference for anyone changing the app, so the logic below does not have to be rediscovered from chat history.
 
@@ -17,7 +17,7 @@ It follows the same pattern as the Ledger app (a public Pages repo, an Apps Scri
 | `fonts/` | Bebas Neue 400 and Geist 400, 500 and 600 (latin subsets, woff2), served with the app so text looks the same offline. `fonts/README.md` names the source packages and the licence (SIL OFL 1.1). |
 | `manifest.webmanifest`, `icons/` | Home-screen install metadata. |
 | `apps-script/Code.gs` | The back end. Paste it into the sheet's Apps Script project; it is not deployed from this repo. |
-| `test/` | `mock-backend.js` runs `Code.gs` unchanged against an in-memory fake of Google's services. `backend.test.js` tests it directly; `e2e.py` (stock, import, sync) and `e2e_v2.py` (item details, costs, orders, invoices, PDF, returns) drive the app in Chrome against it at phone size; `desktop.py` checks the desktop layout; `offline.py` checks offline launch. |
+| `test/` | `mock-backend.js` runs `Code.gs` unchanged against an in-memory fake of Google's services (with `MOCK_CODE=test/Code-2.0.0.gs` it serves the 2.0.0 backend instead). `Code-2.0.0.gs` is a copy of the previous backend, used to build a sheet as 2.0.0 left it. `backend.test.js` tests it directly; `e2e.py` (stock, import, sync) and `e2e_v2.py` (item details, costs, orders, invoices, PDF, returns) drive the app in Chrome against it at phone size; `desktop.py` checks the desktop layout; `offline.py` checks offline launch. |
 
 Changing this repo needs only a push to `main`; GitHub Pages republishes in about a minute. Changing `Code.gs` means pasting the new file into the Apps Script editor and publishing a new version of the existing web app deployment (Deploy > Manage deployments > edit > New version), which keeps the `/exec` URL.
 
@@ -32,9 +32,9 @@ Changing this repo needs only a push to `main`; GitHub Pages republishes in abou
 
 ## The sheet
 
-`setup()` in `Code.gs` creates nine tabs and formats the text columns as plain text, so a SKU such as `0012`, a phone number such as `+63917...` or a note starting with `=` is stored as typed. It is safe to run again; after pasting a new `Code.gs`, run it once more so new tabs and columns exist.
+`setup()` in `Code.gs` creates eleven tabs and formats the text columns as plain text, so a SKU such as `0012`, a phone number such as `+63917...` or a note starting with `=` is stored as typed. It is safe to run again and never deletes data. After pasting a newer `Code.gs`, run it once more so new tabs and columns exist, then publish a new version of the existing deployment. It also removes the 2.0.0 `On hand` formula, writes the `On hand` numbers, rewrites Browse, puts the Field dropdown on Edits, and sets a warning-only protection on Items, Movements, Customers, Supplier orders, Pre-orders, Invoices, Invoice lines and Returns with the description "Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab." A warning-only protection still lets the owner edit; Google Sheets asks first. Inbox, Browse and Edits have no protection.
 
-**Items** (one row per item): `SKU`, `Name`, `Category`, `Price`, `Reorder at`, `Active` (`Yes` or `No`), `On hand`, `Manufacturer`, `Brand`, `Toy line` (labelled Product line in the app), `Character`, `Release date`, `Release check`. `On hand` is a single `ARRAYFORMULA` in `G2` that sums `Movements` per SKU; the script writes the columns on either side of G and never G itself. `Release date` is a best guess stored as text (`2024`, `2024-07` or `2024-07-15`); `Release check` holds `Verify` while that guess still needs checking. A variant (chase, exclusive colour, reissue) is its own row with its own name and SKU. Archiving sets `Active` to `No`; rows are never deleted.
+**Items** (one row per item): `SKU`, `Name`, `Category`, `Price`, `Reorder at`, `Active` (`Yes` or `No`), `On hand`, `Manufacturer`, `Brand`, `Toy line` (labelled Product line in the app), `Character`, `Release date`, `Release check`. `On hand` is a plain number that the script writes: after every `add` request that changed movements or items, and after a sync that applied rows from Edits, it works out stock for every item from Movements and writes column G in one call, matched to the SKU in each row at that moment. 2.0.0 used one `ARRAYFORMULA` in `G2` instead; `setup()` removes it. Reading ignores column G. `Release date` is a best guess stored as text (`2024`, `2024-07` or `2024-07-15`); `Release check` holds `Verify` while that guess still needs checking. A variant (chase, exclusive colour, reissue) is its own row with its own name and SKU. Archiving sets `Active` to `No`; rows are never deleted. When a SKU appears on more than one row, the first row is used and every `sync` and `add` reply carries a warning about it.
 
 **Movements** (append-only log): `ID`, `Date` (`YYYY-MM-DD`, text), `SKU`, `Item` (the name at the time, for readability), `Direction` (`In` or `Out`), `Qty` (positive whole number), `Reason`, `Ref`, `Note`, `Unit cost`. Stock for a SKU is the sum of `In` minus the sum of `Out`. Movements are never edited or deleted; a mistake is fixed by a reversing entry.
 
@@ -60,7 +60,23 @@ Reasons and the direction each allows (enforced by the app and by `Code.gs`):
 
 **Returns** (append-only, one row per returned item): `ID`, `Date`, `Invoice no`, `Invoice ID`, `Customer`, `SKU`, `Item`, `Qty`, `Outcome` (`Restock`, `Write-off`), `Refund`, `Note`.
 
-**Inbox** (rows Claude writes after reading photos): `Added`, `Type` (`Count` or `Receive`), `Name`, `Qty`, `Cost each`, `Manufacturer`, `Brand`, `Toy line`, `Character`, `Release date`, `Verify`, `Note`, `Status`. Every column is plain text. Claude appends rows here through the Google Sheets connector, using the toy-inventory-logger skill, after reading photos of boxes, shelves or supplier paperwork. This is the one tab the app does not write first, and nothing in it counts as stock. A row is waiting when `Name` is filled and `Status` is blank. The app sets `Status` to `Done` after applying a row and to `Dismissed` after dismissing it. A `Type` starting with R reads as `Receive`; any other value reads as `Count`.
+**Inbox** (rows Claude writes after reading photos): `Added`, `Type` (`Count` or `Receive`), `Name`, `Qty`, `Cost each`, `Manufacturer`, `Brand`, `Toy line`, `Character`, `Release date`, `Verify`, `Note`, `Status`. Every column is plain text. Claude appends rows here through the Google Sheets connector, using the toy-inventory-logger skill, after reading photos of boxes, shelves or supplier paperwork. This is the one data tab the app does not write first, and nothing in it counts as stock. A row is waiting when `Name` is filled and `Status` is blank; a row with any `Status` is not sent to the app. The statuses are `Working` (an intake run may set it while it still researches a row, and clears it when the row is ready), `Done` (the app recorded the row) and `Dismissed` (the owner dismissed it). The app sets `Done` only on rows it actually recorded. A `Type` starting with R reads as `Receive`; any other value reads as `Count`.
+
+**Browse** (for the owner; the app never reads it): `SKU`, `Name`, `Category`, `Price`, `Reorder at`, `Active`, `On hand`, `Incoming`, `Owed`, `Left to promise`, `Average cost`, `Stock value at cost`, `Manufacturer`, `Brand`, `Product line`, `Character`, `Release date`, `Release check`. One row per item, plain values, frozen header. The script owns it: at the end of every `sync` and every `add` it clears everything below the header and writes the tab again in one call, in Items order. The numbers use the app's definitions (see "The four numbers per item" and "Cost and margin"); `Stock value at cost` is on hand (zero when below zero) times the average cost, and both are blank when no receipt has a cost. A basic filter on the tab stays in place. A sort is not kept: the next rewrite puts the rows back in Items order. `setup()` creates the tab, and the first write creates it when `setup()` has not been run again yet.
+
+**Edits** (item changes typed in the sheet): `SKU`, `Field`, `New value`, `Status`, `Note`. `Field` has a dropdown with Name, Category, Price, Reorder at, Active, Manufacturer, Brand, Product line, Character, Release date and Release check. At the start of every `sync` and `add`, under the script lock, each row with a SKU or field and an empty `Status` is applied as an `edit` entry through the same code and checks, before the app's own entries. The script then writes `Status` `Done`, or `Refused` with the reason in `Note`. `Active` takes Yes or No, `Release check` takes Verify or blank, and a blank `Price` or `Reorder at` clears it. A refused row is not tried again until its `Status` is cleared. The change reaches each phone at its next sync, because the phone reads Items.
+
+## How the script writes
+
+The owner may sort, filter or edit any tab while a phone syncs; the script lock only keeps two requests apart. So no write trusts a row number the script read earlier.
+
+1. An `add` (or a `sync` with rows waiting in Edits) first plans every entry in memory, reading each tab once. Each record it changes remembers which entries changed it.
+2. Before writing, the script reads the key column of every tab it changes in place: SKU for Items (without regard to case), and the ID for Customers, Supplier orders, Pre-orders and Invoices (column B on Invoices). Invoice lines, Returns and Movements are only ever appended. A record whose key is now missing, or appears more than once, is not written, and every entry in the request that changed it fails with `The <tab> tab was changed in Google Sheets (<key> not found)` or `(<key> appears twice)`, followed by `Nothing was written for this entry; fix the tab and sync again.` The plan is then made again without those entries, so nothing they would have written (an invoice, a movement, a pre-order change) is written anywhere. The app keeps a refused entry and lists it under Activity.
+3. Rows changed in place are written first. Just before each write the script reads the key cell of the row it expects; if the key is not there it reads the key column again. Each row is written whole, in one call. If the key has gone at this point, that entry fails the same way and its new rows are left out.
+4. New rows are added after the last used row of the key column, worked out at that moment.
+5. `On hand` is written for every item (see Items), then the Inbox marks, then the Edits statuses, then Browse.
+
+Results for entries are final only after the writes. Inbox marks find a row by its row number and name, and also by `Added`, `Type` and `Qty` when the app sends them (app 2.2.0 does); when the row has moved, they fall back to the one row with that name, `Added`, `Type` and `Qty`. A mark that finds no row, or finds a row that already has a `Status`, changes nothing and does not fail the entry, so a row edited in the sheet keeps waiting. Edits statuses are found again the same way, by row number, SKU, field and value.
 
 ## Documents and what they do to stock
 
@@ -77,7 +93,7 @@ A document never changes stock directly. `Code.gs` writes ordinary movements for
 | Sale invoice issued (Sales > New sale) | Invoices (`Sale`) + lines; a linked pre-order becomes `Fulfilled`, and the app first marks any balance on it as paid, because payment comes before the invoice | `Out` / `Sale` per line, `Ref` = invoice number |
 | Marked delivered (or unmarked) | `Shipping` set to `Delivered` or blank | None |
 | Return recorded | Returns | `Restock`: `In` / `Return`, `Ref` = return ID. `Write-off`: none. See `RETURN_STOCK_`. |
-| Inbox rows applied or dismissed | `Status` on the Inbox rows (`Done` or `Dismissed`) | None from the marking; applying also queues the normal entries, which write their own movements |
+| Inbox rows applied or dismissed | `Status` on the Inbox rows: `Done` on the rows that were recorded, `Dismissed` on every row shown when the owner dismisses | None from the marking; applying also queues the normal entries, which write their own movements |
 
 A return cannot exceed what the invoice sold of that item, less what was already returned. The stock effect of each outcome lives in one table, `RETURN_STOCK_` in `Code.gs` and `RETURN_STOCK` in `index.html`; change both together.
 
@@ -102,8 +118,10 @@ All calls are `POST` to the Apps Script `/exec` URL with a `text/plain` JSON bod
 | Action | Payload | Returns |
 | --- | --- | --- |
 | `ping` | none | `{ version }`, used by Settings to test the code |
-| `sync` | `have: { rows, lastId }` | `{ items, moves, rows, lastId, reset, syncedAt, custs, orders, pres, invs, rets, inbox }` |
-| `add` | `entries`, `have` | `{ results: [{ id, ok, error, sku?, from?, no?, fromNo? }], sync }` |
+| `sync` | `have: { rows, lastId }` | `{ items, moves, rows, lastId, reset, syncedAt, custs, orders, pres, invs, rets, inbox, warnings }` |
+| `add` | `entries`, `have` | `{ results: [{ id, ok, error, sku?, from?, no?, fromNo? }], sync, warnings }` |
+
+`warnings` (added in 2.2.0) is a list of plain sentences about problems the script found in the tabs, for example `Items: SKU T0013 appears on 2 rows. The first is used.` App 2.2.0 shows them on Home as a banner under the two buttons, in the danger colour, and replaces them at every sync; the banner is absent when the list is missing or empty. Older apps ignore the field. Results for rows of the Edits tab are never sent to the app.
 
 Items, documents and the waiting `inbox` rows are always sent whole (a shop has hundreds of them). Each `inbox` row carries its sheet row number (`row`), `type` (`count` or `receive`) and the cell values as text. Movements are incremental: the app says how many movement rows it holds and the ID of the last one; if the sheet still has that ID at that row, only later rows come back, otherwise everything comes back with `reset: true` and the app replaces its copy. Hand-editing or deleting movement rows in the sheet therefore heals itself at the next sync.
 
@@ -124,7 +142,7 @@ Items, documents and the waiting `inbox` rows are always sent whole (a shop has 
 | `invoice` | `invoice { id, no, date, custId, lines: [{ sku, qty, price, cost }], preId }` | Sale invoice and its stock-out |
 | `ship` | `invId, ship` (`'Delivered'` or `''`) | Delivered mark on a sale invoice |
 | `ret` | `ret { id, date, invId, sku, qty, outcome, refund, note }` | Return (`outcome` is `Restock` or `Write-off`) |
-| `inboxDone` | `rows: [{ row, name }], mark: 'Done' or 'Dismissed'` | Sets `Status` on Inbox rows. A row is marked only when the name at that row still matches and its `Status` is blank. |
+| `inboxDone` | `rows: [{ row, name, added?, type?, qty? }], mark: 'Done' or 'Dismissed'` | Sets `Status` on Inbox rows that still have a blank `Status`, found as described in "How the script writes". App 2.2.0 sends `added`, `type` and `qty` as it received them; app 2.1.1 sends only `row` and `name`, which are matched at that row as before. |
 
 ### SKU collisions
 
@@ -182,7 +200,7 @@ The `fulfil` action (a ready row on Home, or "Issue invoice" on a pre-order's sh
 
 ### Update stock
 
-The `import` route (`renderImport()`). With Inbox rows waiting it shows them for review as before (see "Importing"). With none waiting it shows one line on sending Claude photos, then a list of other ways to change stock: "Receive a supplier order (N on the way)" when orders are on the way, "One item by hand" (the Move screen with a picker) and "Add a new item", then the folded "Paste a block by hand" section. That section is open by default while no connection code is set. When a sync raises the number of waiting Inbox rows and Update stock is not on screen, a toast says "N rows from Claude to review".
+The `import` route (`renderImport()`). With Inbox rows waiting it shows them for review (see "Importing"). With none waiting it shows one line on sending Claude photos, then a list of other ways to change stock: "Receive a supplier order (N on the way)" when orders are on the way, "One item by hand" (the Move screen with a picker) and "Add a new item", then the folded "Paste a block by hand" section. That section is open by default while no connection code is set. When a sync raises the number of waiting Inbox rows and Update stock is not on screen, a toast says "N rows from Claude to review".
 
 ### Theme
 
@@ -204,7 +222,7 @@ Every rule uses the tokens (`--bg`, `--text`, `--muted`, `--line`, `--field`, `-
 | `queue` | Entries not yet confirmed by the sheet; `status` is `pending` or `failed` |
 | `prefs` | Current tab (default `home`), currency symbol, default reorder level, `theme` (`auto`, `light` or `dark`), and `shop` (name, contact, footer, logo) for the PDF and the Home header |
 
-Everything the owner does is written to the queue first and flushed when a connection exists. Without a connection the app works fully on the device; the queue holds everything until the connection code is pasted. `live()` merges synced data with pending entries (failed entries are not counted) and is the only thing the screens read. Inbox rows that have a pending `inboxDone` entry drop out of `live().inbox` at once. It replays pending documents the way `Code.gs` will apply them, including the movements they write, so an invoice issued offline already counts against stock. The app is the only writer to the sheet.
+Everything the owner does is written to the queue first and flushed when a connection exists. Without a connection the app works fully on the device; the queue holds everything until the connection code is pasted. `live()` merges synced data with pending entries (failed entries are not counted) and is the only thing the screens read. Inbox rows that have a pending `inboxDone` entry drop out of `live().inbox` at once. It replays pending documents the way `Code.gs` will apply them, including the movements they write, so an invoice issued offline already counts against stock. The script writes the data tabs only for the app's entries and for rows in Edits; Claude writes the Inbox rows.
 
 ## Stock math
 
@@ -214,11 +232,23 @@ Everything the owner does is written to the queue first and flushed when a conne
 
 There are two ways in, and both end in the same preview. Nothing is written before the preview is applied. The app has no lookup service: the assistant identifies the item, looks up its details and writes the rows.
 
-**Inbox (the main path).** Claude appends rows to the Inbox tab after reading photos of boxes, shelves or supplier paperwork. The photos reach Claude either attached in chat or uploaded to a Google Drive folder that the skill checks; that part lives in the skill and is outside this repo. Every sync returns the waiting rows as `inbox`. Update stock shows them at once in the same preview used for pasted blocks, one `Type` at a time (the type of the first waiting row, then the next type after those are handled). `Count` rows go through the Count from photo rules and `Receive` rows through the Receive rules below. Apply queues the normal entries plus one `inboxDone` entry with `mark: 'Done'`. Dismiss queues `inboxDone` with `mark: 'Dismissed'` and records nothing. `Code.gs` marks a row only when the name at that row still matches, so rows that were edited or moved in the sheet in the meantime keep waiting. When the last waiting row is applied, the app returns to Stock.
+**Inbox (the main path).** Claude appends rows to the Inbox tab after reading photos of boxes, shelves or supplier paperwork. The photos reach Claude either attached in chat or uploaded to a Google Drive folder that the skill checks; that part lives in the skill and is outside this repo. Every sync returns the waiting rows as `inbox`. Update stock shows them at once in the review, one `Type` at a time (the type of the first waiting row, then the next type after those are handled). `Count` rows go through the Count from photo rules and `Receive` rows through the Receive rules below. The review is kept in memory with a key made of the type and the full content of the waiting rows, so a row edited in the sheet after it was loaded shows as it is now after the next sync. Corrections, ticks and "Use" choices stay for rows whose content did not change. Apply queues the normal entries plus one `inboxDone` entry with `mark: 'Done'` for the rows that were recorded: ticked rows that could be recorded, including a count that already matched stock. Rows that were unticked, rows that need a name, problems and rows with an unknown count stay in the Inbox and come back in the next review. "Dismiss these rows" queues `inboxDone` with `mark: 'Dismissed'` for every row shown and records nothing. When no waiting rows are left after Apply, the app goes to Stock.
+
+**The review groups** (`impGroup()`), in this order, each a section titled with its row count:
+
+- **Check these** (open): a similar name is on file ("Looks like ..." with a "Use ..." button, unticked), the same new name on more than one Inbox row (shown as "Possibly the same box in two photos" with the total and each source row and count; the rows are summed), a release date marked to verify, a movement that would take stock below zero, or a likely duplicate movement.
+- **Ready**: everything else that will be recorded. With more than 8 rows it is folded behind a line that says what it holds, for example "172 new items, 3 count changes, 11 with new details".
+- **Needs a name** (folded): rows with an unknown count (`?`, blank or not a whole number) or a name starting with "Unidentified", and other rows that cannot be recorded. They are never recorded as they are.
+
+The Apply button reads "Apply N changes" (N is the ticked rows) and stays at the bottom of the screen above the tab bar on a phone (`.applybar`, `position: sticky`). The Movements paste keeps one flat list.
+
+**Correcting a row.** Tapping a row's name in a Count or Receive review opens a small sheet with Name, Count (Qty for Receive) and Release date, and "Use the existing item ..." when a similar item is on file. Saving changes the review only: the corrected values are what Apply records, and the Inbox row in the sheet stays as Claude wrote it. A row under Needs a name that gets a name and a whole-number count moves to Ready (or to Check these when it still needs a decision).
+
+**After Apply** a sheet stays open until it is closed. It says "Recorded: N new items, N count changes, N items with new details." (receipts in place of count changes for Receive), for an Inbox review "Left in the Inbox: N rows that need a name; N rows you unticked.", and whether the entries have synced or are waiting. It follows the sync while it is open.
 
 **Paste a block by hand (the fallback).** When nothing is waiting, Update stock offers "Paste a block by hand" with three modes: Count from photo, Receive and Movements. The importers parse pasted text split on tabs (or `|`, or `;`) and queue only the ticked rows. "Copy the prompt and item list for Claude" builds the exact instructions for the current mode plus the catalogue, so existing names are reused.
 
-**Count from photo** (`Name, Category, Count, Price, Note, Manufacturer, Brand, Product line, Character, Release date, Verify`), for photos of boxes or of the stockroom. A count is an absolute quantity. For an item already on file the app records only the difference as a `Count` movement; an item that is new is created with its details and given an `Opening` movement. Re-pasting the same counts therefore changes nothing. Details in the paste fill blank fields on an item already on file and never overwrite what is there. Items missing from the paste are left alone. Names match after lower-casing and stripping punctuation; a name that is similar but not equal (token overlap of 50% or more) is held back unticked with a "Use ..." button. `?` or a blank count skips the row. An item listed twice in one paste is flagged, and its counts are not added. `Verify` set to `Y` raises the release-date flag. An Inbox `Count` row supplies `Name`, `Qty` (the count), `Note` and the item details; it has no category or price. Inbox `Count` rows for the same item (one per photo it appears in) are added into one count before the preview, so each box must be photographed once. Inbox `Receive` rows are dated on the day they are applied.
+**Count from photo** (`Name, Category, Count, Price, Note, Manufacturer, Brand, Product line, Character, Release date, Verify`), for photos of boxes or of the stockroom. A count is an absolute quantity. For an item already on file the app records only the difference as a `Count` movement; an item that is new is created with its details and given an `Opening` movement. Re-pasting the same counts therefore changes nothing. Details in the paste fill blank fields on an item already on file and never overwrite what is there. Items missing from the paste are left alone. Names match after lower-casing and stripping punctuation; a name that is similar but not equal (token overlap of 50% or more) is held back unticked with a "Use ..." button. `?` or a blank count skips the row. An item listed twice in one paste is flagged, and its counts are not added. `Verify` set to `Y` raises the release-date flag. An Inbox `Count` row supplies `Name`, `Qty` (the count), `Note` and the item details; it has no category or price. Inbox `Count` rows for the same item (one per photo it appears in) are added into one count before the review, so each box must be photographed once. Rows with no usable count or a name starting with "Unidentified" are kept apart and are not added in. Inbox `Receive` rows are dated on the day they are applied.
 
 **Receive** (`Name, Qty, Cost each, Category, Manufacturer, Brand, Product line, Character, Release date, Verify, Note`), for supplier invoices and packing lists. Each row adds stock as a `Restock` at its cost on the "Received on" date. A new item is created first. When the item has a supplier order on the way, the row receives that order (oldest first) so it stops counting as incoming.
 
@@ -255,6 +285,16 @@ Each of these was undecided when v2 or v2.1 was built. They are listed so they c
 | Pre-order receipt | Always made when a pre-order is saved | `pre` in `addEntries_` |
 | Balance on a pre-order at invoice time | Marked as paid when the invoice is issued | `issueInvoice()` |
 | Inbox | Claude writes the rows and the app reviews them; the app never writes an Inbox row, and only sets `Status` after the owner applies or dismisses | `INBOX_HEAD_`, `readInbox_()`, `inboxDone` |
+| Key of each tab | Items by SKU without regard to case; Customers, Supplier orders and Pre-orders by the ID in column A; Invoices by the ID in column B | `T_[k].col`, `tabsOf_()` |
+| An Inbox mark that finds no row | Changes nothing and does not fail the entry, as in 2.0.0, so the row keeps waiting | `markInbox_()` |
+| How an Inbox mark or Edits status is written | Only the status cells, in one call | `markInbox_()`, `finishEdits_()` |
+| A count that already matches stock, from the Inbox | Ticked, recorded as no change, and marked `Done` | `resettle()` |
+| "Possibly the same box in two photos" | Only for a name not on file; rows for an item already on file are summed under Ready as before | `impGroup()` |
+| Rows that cannot be recorded for other reasons (a bad quantity, no name) | Under Needs a name | `impGroup()` |
+| Corrections | Count and Receive reviews, from the Inbox or a paste; correcting a release date leaves the Verify flag as it was | `openFix()`, `saveFix()` |
+| Result after Apply | Shown for every Apply, including a pasted block | `openImpResult()` |
+| Warnings banner | Kept in memory and replaced at every sync | `ui.warn`, `renderHome()` |
+| Duplicated rows in tabs other than Items | Not reported as warnings; an entry that changes one is refused | `check_()` |
 
 Not built because the brief left them undecided: an ID-confidence field, holds on unpaid units, return windows, refund approval, payment method and reference, voiding an invoice, and exchanges as a return outcome.
 
@@ -266,8 +306,13 @@ Not built because the brief left them undecided: an ID-confidence field, holds o
 - The average cost follows sheet order and ignores movement dates, and a reversed receipt does not take its cost back out of the average.
 - The movement log and all documents live in `localStorage` (about 5 MB), which is enough for tens of thousands of rows. Beyond that the app would need IndexedDB.
 - The Inbox depends on the assistant writing well-formed rows (a name, a numeric `Qty`, a `Type` of `Count` or `Receive`). A malformed row shows up in the preview as skipped or flagged, and the app cannot fix it. The Inbox has never been exercised against a real sheet or the real Google Sheets connector, only against the test fake.
-- Release 2.1.0 made no backend or sheet change. The tests run against the mock backend only, so they do not prove behaviour on a real sheet.
+- The tests run against the mock backend only, so they do not prove behaviour on a real sheet. The fake now also models protections, data validation, clearing contents and a hook that rearranges rows in the middle of a request.
+- A change to a row made in the few milliseconds between the script's check of a key cell and its write to that row is not caught. If an entry changes two rows and the second one has gone by the time it is written, the first stays written.
+- `On hand` is written after the other writes; a sort in that moment can put a number on the wrong row until the next `add` writes the column again. Browse and the app are not affected, because they work stock out from Movements.
+- Every `sync` and `add` now reads all of Movements and rewrites Browse, which takes longer on a sheet with many thousands of movements.
+- A sort of Browse lasts until the next sync. A filter or a filter view is the way to keep a view.
+- The protections are warnings. Google Sheets asks before an edit or a sort on those tabs, and the owner can still go ahead.
 - The latin font subsets have no peso sign, so ₱ is drawn with a system font next to Bebas Neue and Geist.
-- The sheet keeps its own header names, including `Toy line` on Items and Inbox, because `Code.gs` and the deployed sheet were left unchanged; only the app's labels say Product line.
+- The sheet keeps its own header names, including `Toy line` on Items and Inbox, so that each release works with the other's previous one; the app's labels, Browse and Edits say Product line.
 - Settings cannot be opened from Update stock, Stock in and out, Activity or the New sale form on a phone, because the close button takes its place there.
 - `Code.gs` was tested only against a fake of Google's services. The fake enforces plain-text formatting on the columns that hold free text; the real behaviour of `setup()` and of every write should be confirmed once on a real sheet.

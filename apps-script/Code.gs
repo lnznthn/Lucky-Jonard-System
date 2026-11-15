@@ -3,12 +3,15 @@
  *
  * Install: Extensions > Apps Script, paste this whole file over Code.gs, save, run setup() once,
  * then Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
+ * After pasting a newer version, run setup() again and publish a new version of the existing deployment.
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
- * The app is the only writer. Movements, invoice lines and returns are append-only. Items, customers,
+ * The app is the writer of the data tabs. Movements, invoice lines and returns are append-only. Items, customers,
  * supplier orders, pre-orders and invoices are one row each; only their status-type fields change later.
+ * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
+ * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes item changes typed in the sheet.
  */
-var VERSION_ = '2.0.0';
+var VERSION_ = '2.2.0';
 var ITEM_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
@@ -20,42 +23,52 @@ var TYPE_SALE_ = 'Sale', TYPE_RECEIPT_ = 'Pre-order receipt';
 // What a return does to stock, per outcome: 'In' writes a Return movement, null writes none.
 // Change it here and in index.html together.
 var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
-// Rows Claude writes after reading photos. The app shows them under Import and marks them Done or Dismissed.
-// This is the one tab the app does not write first; nothing in it counts as stock until the app applies it.
+// Rows Claude writes after reading photos. The app shows the rows whose Status is blank and marks them Done or Dismissed.
+// An intake run may set Status to Working while it still researches a row; any non-blank Status keeps a row out of the app.
+// Nothing in this tab counts as stock until the app applies it.
 var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status'];
-// One formula in Items!G2 fills the whole On hand column, so new items need no formula copying.
-var ON_HAND_ = '=ARRAYFORMULA(IF(LEN(A2:A), SUMIFS(Movements!F:F, Movements!C:C, A2:A, Movements!E:E, "In") - SUMIFS(Movements!F:F, Movements!C:C, A2:A, Movements!E:E, "Out"), ))';
+// Browse: one row per item with the computed numbers, rewritten in full at the end of every sync and add.
+var BROWSE_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Stock value at cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
+var BROWSE_TEXT_ = ['A:C', 'F:F', 'M:R'];
+// Edits: item changes typed in the sheet, applied as edit entries at the start of every sync and add.
+var EDIT_HEAD_ = ['SKU', 'Field', 'New value', 'Status', 'Note'];
+var EDIT_FIELDS_ = { 'Name': 'name', 'Category': 'cat', 'Price': 'price', 'Reorder at': 'min', 'Active': 'active', 'Manufacturer': 'mfr', 'Brand': 'brand',
+  'Product line': 'line', 'Character': 'chr', 'Release date': 'rel', 'Release check': 'relCheck' };
+var PROTECT_NOTE_ = 'Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.';
 
 function s_(v) { return String(v == null ? '' : v).trim(); }
 function num_(v) { if (v === '' || v == null) return null; var n = Number(v); return isNaN(n) ? null : n; }
 function blank_(v) { return v == null ? '' : v; }
+function r2_(n) { return Math.round(n * 100) / 100; }
 
 /**
  * The document tabs. Each has a header row, the columns to keep as plain text (so a phone number such as
- * +63917... or a note starting with "=" is stored as typed), and the mapping between a row and an object.
+ * +63917... or a note starting with "=" is stored as typed), the mapping between a row and an object,
+ * and col, the column of the key a changed row is found by (the ID; for Invoices the ID in column B).
  */
 var T_ = {
-  cust: { name: 'Customers', head: ['ID', 'Name', 'Contact'], text: ['A:C'],
+  cust: { name: 'Customers', col: 1, head: ['ID', 'Name', 'Contact'], text: ['A:C'],
     from: function (v) { return { id: s_(v[0]), name: s_(v[1]), contact: s_(v[2]) }; },
     to: function (o) { return [o.id, o.name, o.contact]; } },
-  order: { name: 'Supplier orders', head: ['ID', 'Date', 'SKU', 'Item', 'Qty', 'Expected', 'Status', 'Received qty', 'Received on', 'Note'], text: ['A:D', 'F:G', 'I:J'],
+  order: { name: 'Supplier orders', col: 1, head: ['ID', 'Date', 'SKU', 'Item', 'Qty', 'Expected', 'Status', 'Received qty', 'Received on', 'Note'], text: ['A:D', 'F:G', 'I:J'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), name: s_(v[3]), qty: Number(v[4]), expected: dateStr_(v[5]), status: s_(v[6]), recQty: num_(v[7]), recDate: dateStr_(v[8]), note: String(v[9]) }; },
     to: function (o) { return [o.id, o.date, o.sku, o.name, o.qty, o.expected, o.status, blank_(o.recQty), o.recDate, o.note]; } },
-  pre: { name: 'Pre-orders', head: ['ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'SKU', 'Item', 'Qty', 'Price', 'Paid', 'Balance', 'Status', 'Kept', 'Receipt no', 'Invoice no', 'Note'], text: ['A:G', 'L:L', 'P:P'],
+  pre: { name: 'Pre-orders', col: 1, head: ['ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'SKU', 'Item', 'Qty', 'Price', 'Paid', 'Balance', 'Status', 'Kept', 'Receipt no', 'Invoice no', 'Note'], text: ['A:G', 'L:L', 'P:P'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), custId: s_(v[2]), cust: s_(v[3]), contact: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), price: Number(v[8]), paid: Number(v[9]), balance: Number(v[10]), status: s_(v[11]), kept: num_(v[12]), recNo: num_(v[13]), invNo: num_(v[14]), note: String(v[15]) }; },
     to: function (o) { return [o.id, o.date, o.custId, o.cust, o.contact, o.sku, o.name, o.qty, o.price, o.paid, o.balance, o.status, blank_(o.kept), blank_(o.recNo), blank_(o.invNo), o.note]; } },
-  inv: { name: 'Invoices', head: ['No', 'ID', 'Date', 'Type', 'Customer ID', 'Customer', 'Contact', 'Total', 'Shipping', 'Pre-order ID'], text: ['B:G', 'I:J'],
+  inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Type', 'Customer ID', 'Customer', 'Contact', 'Total', 'Shipping', 'Pre-order ID'], text: ['B:G', 'I:J'],
     from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), type: s_(v[3]), custId: s_(v[4]), cust: s_(v[5]), contact: s_(v[6]), total: Number(v[7]), ship: s_(v[8]), preId: s_(v[9]) }; },
     to: function (o) { return [o.no, o.id, o.date, o.type, o.custId, o.cust, o.contact, o.total, o.ship, o.preId]; } },
-  line: { name: 'Invoice lines', head: ['Invoice no', 'Invoice ID', 'SKU', 'Item', 'Qty', 'Listed price', 'Charged price', 'Unit cost'], text: ['B:D'],
+  // Invoice lines and returns are only ever appended.
+  line: { name: 'Invoice lines', col: 1, head: ['Invoice no', 'Invoice ID', 'SKU', 'Item', 'Qty', 'Listed price', 'Charged price', 'Unit cost'], text: ['B:D'],
     from: function (v) { return { invNo: Number(v[0]), invId: s_(v[1]), sku: s_(v[2]), name: s_(v[3]), qty: Number(v[4]), list: num_(v[5]), price: Number(v[6]), cost: num_(v[7]) }; },
     to: function (o) { return [o.invNo, o.invId, o.sku, o.name, o.qty, blank_(o.list), o.price, blank_(o.cost)]; } },
-  ret: { name: 'Returns', head: ['ID', 'Date', 'Invoice no', 'Invoice ID', 'Customer', 'SKU', 'Item', 'Qty', 'Outcome', 'Refund', 'Note'], text: ['A:B', 'D:G', 'I:I', 'K:K'],
+  ret: { name: 'Returns', col: 1, head: ['ID', 'Date', 'Invoice no', 'Invoice ID', 'Customer', 'SKU', 'Item', 'Qty', 'Outcome', 'Refund', 'Note'], text: ['A:B', 'D:G', 'I:I', 'K:K'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), invNo: Number(v[2]), invId: s_(v[3]), cust: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), outcome: s_(v[8]), refund: Number(v[9]), note: String(v[10]) }; },
     to: function (o) { return [o.id, o.date, o.invNo, o.invId, o.cust, o.sku, o.name, o.qty, o.outcome, o.refund, o.note]; } }
 };
 
-/** Run once. Creates the tabs, formats them, and makes the connection key. Safe to run again. */
+/** Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data. */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var items = ensureSheet_(ss, 'Items', ITEM_HEAD_);
@@ -68,16 +81,29 @@ function setup() {
   moves.getRange('A:E').setNumberFormat('@');
   moves.getRange('G:I').setNumberFormat('@');
   moves.getRange('J:J').setNumberFormat('#,##0.00');
-  if (!items.getRange('G2').getFormula()) items.getRange('G2').setFormula(ON_HAND_);
+  // 2.0.0 filled On hand with one ARRAYFORMULA in G2. It is now a plain number the script writes.
+  if (items.getRange('G2').getFormula()) items.getRange('G2').clearContent();
   Object.keys(T_).forEach(function (k) {
     var sh = ensureSheet_(ss, T_[k].name, T_[k].head);
     T_[k].text.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
   });
   ensureSheet_(ss, 'Inbox', INBOX_HEAD_).getRange('A:M').setNumberFormat('@');
+  browseSheet_(ss);
+  var ed = ensureSheet_(ss, 'Edits', EDIT_HEAD_);
+  ed.getRange('A:E').setNumberFormat('@');
+  ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
+  // A warning, not a lock: the owner can still edit, but is asked first.
+  ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; })).forEach(function (n) {
+    var sh = ss.getSheetByName(n);
+    var has = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).some(function (p) { return p.getDescription() === PROTECT_NOTE_; });
+    if (!has) sh.protect().setDescription(PROTECT_NOTE_).setWarningOnly(true);
+  });
   var first = ss.getSheetByName('Sheet1');
   if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('KEY')) props.setProperty('KEY', Utilities.getUuid().replace(/-/g, ''));
+  writeOnHand_();
+  writeBrowse_();
   Logger.log('Setup done. Key: ' + props.getProperty('KEY'));
 }
 
@@ -100,7 +126,7 @@ function doPost(e) {
   try {
     switch (body.action) {
       case 'ping': return out_({ ok: true, data: { version: VERSION_ } });
-      case 'sync': return out_({ ok: true, data: snapshot_(body.have) });
+      case 'sync': return out_({ ok: true, data: syncAll_(body.have) });
       case 'add': return out_({ ok: true, data: addEntries_(body.entries || [], body.have) });
       default: return out_({ ok: false, error: 'Unknown action' });
     }
@@ -111,7 +137,7 @@ function doPost(e) {
   }
 }
 
-// Keys starting with "_" are bookkeeping (sheet row, dirty flag) and never leave the script.
+// Keys starting with "_" are bookkeeping (sheet row, dirty flag, owning entries) and never leave the script.
 function out_(obj) {
   var text = JSON.stringify(obj, function (k, v) { return k.charAt(0) === '_' ? undefined : v; });
   return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
@@ -133,10 +159,10 @@ function sheet_(name) {
 function itemsSheet_() { return sheet_('Items'); }
 function movesSheet_() { return sheet_('Movements'); }
 
-// Last row with something in column A. getLastRow() would count the On hand formula's spill.
-function lastRowOf_(sh) {
+// Last row with something in the key column (default A). getLastRow() would count other columns.
+function lastRowOf_(sh, col) {
   var n = sh.getMaxRows();
-  var v = sh.getRange(1, 1, n, 1).getValues();
+  var v = sh.getRange(1, col || 1, n, 1).getValues();
   for (var i = n - 1; i >= 1; i--) if (String(v[i][0]).trim() !== '') return i + 1;
   return 1;
 }
@@ -150,25 +176,85 @@ function dateStr_(v) {
   return String(v).trim();
 }
 
-function readItems_() {
+/** Items, first row per SKU. warn, when given, collects a sentence for each SKU found on more than one row. */
+function readItems_(warn) {
   var sh = itemsSheet_();
   var last = lastRowOf_(sh);
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, ITEM_HEAD_.length).getValues();
-  var out = [];
+  var out = [], seen = {}, twice = {};
   for (var i = 0; i < vals.length; i++) {
-    var v = vals[i];
-    if (!String(v[0]).trim()) continue;
+    var v = vals[i], k = s_(v[0]).toLowerCase();
+    if (!k) continue;
+    if (seen[k]) { twice[k] = twice[k] || { sku: s_(v[0]), n: 1 }; twice[k].n++; continue; }
+    seen[k] = true;
     out.push({ _row: i + 2, sku: s_(v[0]), name: s_(v[1]), cat: s_(v[2]), price: num_(v[3]), min: num_(v[4]), active: s_(v[5]).toLowerCase() !== 'no',
       mfr: s_(v[7]), brand: s_(v[8]), line: s_(v[9]), chr: s_(v[10]), rel: dateStr_(v[11]), relCheck: s_(v[12]).toLowerCase() === 'verify' });
   }
+  if (warn) Object.keys(twice).forEach(function (k) { warn.push('Items: SKU ' + twice[k].sku + ' appears on ' + twice[k].n + ' rows. The first is used.'); });
   return out;
 }
-// Column G (On hand) belongs to the formula, so an item row is written as two blocks around it.
-function itemLeft_(it) { return [it.sku, it.name, it.cat, it.price == null ? '' : it.price, it.min == null ? '' : it.min, it.active ? 'Yes' : 'No']; }
-function itemRight_(it) { return [it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : '']; }
+// One 13-column Items row; On hand is the number the script last worked out.
+function itemRow_(it, have) {
+  return [it.sku, it.name, it.cat, it.price == null ? '' : it.price, it.min == null ? '' : it.min, it.active ? 'Yes' : 'No', have || 0,
+    it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
+}
+function readMoves_() {
+  var sh = movesSheet_(), last = lastRowOf_(sh);
+  if (last < 2) return [];
+  var vals = sh.getRange(2, 1, last - 1, MOVE_HEAD_.length).getValues(), out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var v = vals[i];
+    if (!String(v[0]).trim()) continue;
+    out.push({ id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) });
+  }
+  return out;
+}
+/** Stock per lower-case SKU (In minus Out) and the moving average cost, replayed in sheet order the way the app does it. */
+function stockOf_(moves) {
+  var stock = {}, avg = {};
+  moves.forEach(function (m) {
+    var k = m.sku.toLowerCase(), have = stock[k] || 0;
+    if (m.dir === 'In') {
+      if (m.cost != null) avg[k] = have <= 0 || avg[k] == null ? m.cost : (have * avg[k] + m.qty * m.cost) / (have + m.qty);
+      stock[k] = have + m.qty;
+    } else stock[k] = have - m.qty;
+  });
+  return { stock: stock, avg: avg };
+}
+/** Writes On hand (column G) for every item in one call, aligned by the SKU in each row now. */
+function writeOnHand_() {
+  var sh = itemsSheet_(), last = lastRowOf_(sh);
+  if (last < 2) return;
+  var stock = stockOf_(readMoves_()).stock;
+  var skus = sh.getRange(2, 1, last - 1, 1).getValues();
+  sh.getRange(2, 7, last - 1, 1).setValues(skus.map(function (v) { var k = s_(v[0]).toLowerCase(); return [k ? stock[k] || 0 : '']; }));
+}
+function browseSheet_(ss) {
+  var sh = ss.getSheetByName('Browse');
+  if (sh) return sh;
+  sh = ensureSheet_(ss, 'Browse', BROWSE_HEAD_);
+  BROWSE_TEXT_.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
+  return sh;
+}
+/** Rewrites Browse: contents below the header cleared, then one write. A filter on the tab stays. */
+function writeBrowse_() {
+  var sh = browseSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  var m = stockOf_(readMoves_()), inc = {}, owed = {};
+  readTab_('order').forEach(function (o) { if (o.status === 'Ordered') { var k = o.sku.toLowerCase(); inc[k] = (inc[k] || 0) + o.qty; } });
+  readTab_('pre').forEach(function (p) { if (p.status === PRE_OPEN_) { var k = p.sku.toLowerCase(); owed[k] = (owed[k] || 0) + p.qty; } });
+  var rows = readItems_().map(function (it) {
+    var k = it.sku.toLowerCase(), have = m.stock[k] || 0, a = m.avg[k], i = inc[k] || 0, o = owed[k] || 0;
+    return [it.sku, it.name, it.cat, blank_(it.price), blank_(it.min), it.active ? 'Yes' : 'No', have, i, o, have + i - o,
+      a == null ? '' : r2_(a), a == null ? '' : r2_(Math.max(have, 0) * a), it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
+  });
+  if (sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, BROWSE_HEAD_.length).clearContent();
+  ensureRows_(sh, rows.length + 1);
+  sh.getRange(1, 1, rows.length + 1, BROWSE_HEAD_.length).setValues([BROWSE_HEAD_].concat(rows));
+}
 
 /** Inbox rows still waiting: a name and no status. Tolerates a sheet set up before the Inbox tab existed. */
+function inboxType_(v) { return /^r/i.test(s_(v)) ? 'receive' : 'count'; }
 function readInbox_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox');
   if (!sh) return [];
@@ -178,7 +264,7 @@ function readInbox_() {
   for (var i = 0; i < vals.length; i++) {
     var v = vals[i];
     if (!s_(v[2]) || s_(v[12])) continue;
-    out.push({ row: i + 2, added: dateStr_(v[0]), type: /^r/i.test(s_(v[1])) ? 'receive' : 'count', name: s_(v[2]), qty: s_(v[3]), cost: s_(v[4]), mfr: s_(v[5]), brand: s_(v[6]), line: s_(v[7]), chr: s_(v[8]), rel: dateStr_(v[9]), verify: s_(v[10]), note: s_(v[11]) });
+    out.push({ row: i + 2, added: dateStr_(v[0]), type: inboxType_(v[1]), name: s_(v[2]), qty: s_(v[3]), cost: s_(v[4]), mfr: s_(v[5]), brand: s_(v[6]), line: s_(v[7]), chr: s_(v[8]), rel: dateStr_(v[9]), verify: s_(v[10]), note: s_(v[11]) });
   }
   return out;
 }
@@ -194,20 +280,6 @@ function readTab_(k) {
   }
   return out;
 }
-/** Rewrites the rows that changed and appends the new ones. */
-function writeTab_(k, list) {
-  var t = T_[k], sh = null, fresh = [];
-  list.forEach(function (o) {
-    if (!o._row) fresh.push(t.to(o));
-    else if (o._dirty) { sh = sh || sheet_(t.name); sh.getRange(o._row, 1, 1, t.head.length).setValues([t.to(o)]); }
-  });
-  if (fresh.length) {
-    sh = sh || sheet_(t.name);
-    var start = lastRowOf_(sh) + 1;
-    ensureRows_(sh, start + fresh.length - 1);
-    sh.getRange(start, 1, fresh.length, t.head.length).setValues(fresh);
-  }
-}
 
 // ---------- reading ----------
 
@@ -216,6 +288,7 @@ function writeTab_(k, list) {
  * have = { rows, lastId } describes the movement rows the app already holds. If the sheet still has
  * that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
  * Customers, supplier orders, pre-orders, invoices (with their lines), returns and waiting Inbox rows are always sent whole.
+ * warnings lists problems found in the tabs, one plain sentence each; older apps ignore it.
  */
 function snapshot_(have) {
   var sh = movesSheet_();
@@ -234,11 +307,11 @@ function snapshot_(have) {
     }
   }
   var lastId = rows > 0 ? String(sh.getRange(rows + 1, 1).getValue()) : '';
-  var invs = readTab_('inv'), byInv = {};
+  var invs = readTab_('inv'), byInv = {}, warnings = [];
   invs.forEach(function (x) { x.lines = []; byInv[x.id] = x; });
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost }); });
-  return { items: readItems_(), moves: moves, rows: rows, lastId: lastId, reset: reset, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), orders: readTab_('order'), pres: readTab_('pre'), invs: invs, rets: readTab_('ret'), inbox: readInbox_() };
+  return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, syncedAt: new Date().toISOString(),
+    custs: readTab_('cust'), orders: readTab_('order'), pres: readTab_('pre'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
 }
 
 // ---------- validation ----------
@@ -310,16 +383,8 @@ function freeSku_(bySku) {
   while (n.length < 4) n = '0' + n;
   return 'T' + n;
 }
-
-function idSet_(sh) {
-  var last = lastRowOf_(sh);
-  var set = {};
-  if (last < 2) return set;
-  var v = sh.getRange(2, 1, last - 1, 1).getValues();
-  for (var i = 0; i < v.length; i++) { var id = String(v[i][0]).trim(); if (id) set[id] = true; }
-  return set;
-}
-function index_(list, key) { var m = {}; list.forEach(function (o) { m[o[key]] = o; }); return m; }
+// First record per key; a repeated key is caught when that record is written.
+function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasOwnProperty(o[key])) m[o[key]] = o; }); return m; }
 
 // ---------- writing ----------
 
@@ -328,8 +393,8 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { m[o[key]] =
  * else by its own ID, a status change by being an absolute value), so a retry after a lost response changes nothing.
  *
  * kind        payload                                                  effect
- * item        item, auto                                               new toy
- * edit        sku, patch                                               change a toy's details
+ * item        item, auto                                               new item
+ * edit        sku, patch                                               change an item's details
  * move        move { id, date, sku, dir, qty, reason, ref, note, cost } one stock movement
  * cust        cust { id, name, contact }                               new customer, or new details for one
  * order       order { id, date, sku, qty, expected, note }             supplier order (status Ordered)
@@ -341,27 +406,212 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { m[o[key]] =
  * invoice     invoice { id, no, date, custId, lines, preId }           sale invoice + Out/Sale movement per line, Ref = invoice no
  * ship        invId, ship ('Delivered' or '')                          delivered mark on a sale invoice
  * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return against an invoice + movement per RETURN_STOCK_
- * inboxDone   rows [{ row, name }], mark 'Done' | 'Dismissed'          Inbox rows handled
+ * inboxDone   rows [{ row, name, added?, type?, qty? }], mark          Inbox rows handled ('Done' or 'Dismissed')
  *
  * Two phones can each invent the same next SKU while offline. An item sent with auto: true that meets a
- * different toy on its SKU is renumbered, the rest of the batch follows the new SKU, and the result carries
+ * different item on its SKU is renumbered, the rest of the batch follows the new SKU, and the result carries
  * { sku, from } so the app can renumber what is still queued. A refused item blocks the rest of the batch
- * for its SKU, so a movement or document can never land on another toy that happens to own that SKU.
+ * for its SKU, so a movement or document can never land on another item that happens to own that SKU.
  * Invoice and receipt numbers are plain sequential numbers picked by the phone. A number already used by a
  * different document is replaced by the next free one and the result carries { no, fromNo }.
- * Returns { results: [{ id, ok, error, sku?, from?, no?, fromNo? }], sync }.
+ * Pending rows of the Edits tab are applied first, as edit entries. Their results go to the Edits tab, not the app.
+ * Returns { results: [{ id, ok, error, sku?, from?, no?, fromNo? }], sync, warnings }.
  */
 function addEntries_(entries, have) {
-  var itemSh = itemsSheet_(), moveSh = movesSheet_();
-  var items = readItems_();
-  var bySku = {}, byName = {};
+  var eds = editRows_(), mine = eds.filter(function (x) { return x.entry; }).map(function (x) { return x.entry; });
+  var results = apply_(mine.concat(entries));
+  finishEdits_(eds, results.slice(0, mine.length));
+  writeBrowse_();
+  var sync = snapshot_(have);
+  return { results: results.slice(mine.length), sync: sync, warnings: sync.warnings };
+}
+/** sync: applies the Edits tab, rewrites Browse, and returns the snapshot. */
+function syncAll_(have) {
+  var eds = editRows_(), mine = eds.filter(function (x) { return x.entry; }).map(function (x) { return x.entry; });
+  if (eds.length) finishEdits_(eds, mine.length ? apply_(mine) : []);
+  writeBrowse_();
+  return snapshot_(have);
+}
+
+/**
+ * Plans the entries in memory, checks that every row to change in place is still found by its key exactly once,
+ * plans again without the entries that touched a row that was not, then writes. An entry is final only after the writes.
+ */
+function apply_(entries) {
+  var skip = {}, p;
+  for (var round = 0; round <= entries.length; round++) {
+    p = plan_(entries, skip);
+    var bad = check_(p), more = false;
+    Object.keys(bad).forEach(function (id) { if (!skip[id]) { skip[id] = bad[id]; more = true; } });
+    if (!more) break;
+  }
+  write_(p, skip);
+  return p.results.map(function (r) { return skip[r.id] ? { id: r.id, ok: false, error: skip[r.id] } : r; });
+}
+
+function moved_(tab, key, n) {
+  return 'The ' + tab + ' tab was changed in Google Sheets (' + key + (n ? ' appears twice' : ' not found') + '). Nothing was written for this entry; fix the tab and sync again.';
+}
+function itemKey_(o) { return o.sku.toLowerCase(); }
+function idKey_(o) { return s_(o.id); }
+// Row numbers per key in a tab's key column, as the tab is now. Items match SKUs without regard to case.
+function keyRows_(sh, col, lower) {
+  var last = lastRowOf_(sh, col), map = {};
+  if (last < 2) return map;
+  sh.getRange(2, col, last - 1, 1).getValues().forEach(function (v, i) {
+    var k = s_(v[0]); if (lower) k = k.toLowerCase();
+    if (k) (map[k] = map[k] || []).push(i + 2);
+  });
+  return map;
+}
+// The tabs whose rows change in place: [sheet name, key column, key of a record, records, record -> row, width].
+function tabsOf_(p) {
+  var out = [['Items', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
+  ['cust', 'order', 'pre', 'inv'].forEach(function (k) { out.push([T_[k].name, T_[k].col, idKey_, p.tabs[k], T_[k].to, T_[k].head.length]); });
+  return out;
+}
+/** Plan-time check: { entryId: message } for each entry that touched a row whose key is now missing or repeated. */
+function check_(p) {
+  var bad = {};
+  tabsOf_(p).forEach(function (t) {
+    var dirty = t[3].filter(function (o) { return o._row && o._dirty; });
+    if (!dirty.length) return;
+    var map = keyRows_(sheet_(t[0]), t[1], t[0] === 'Items');
+    dirty.forEach(function (o) {
+      var n = (map[t[2](o)] || []).length;
+      if (n !== 1) o._by.forEach(function (id) { bad[id] = bad[id] || moved_(t[0], t[0] === 'Items' ? o.sku : o.id, n); });
+    });
+  });
+  return bad;
+}
+
+/**
+ * Writes a plan. Rows changed in place go first, each one to the row that holds its key at that moment
+ * (the key cell is read again just before the write, and the column again if it moved), as one row in one call.
+ * New rows follow, after the last used row of the key column, without those of entries refused on the way.
+ * Then On hand, then the Inbox marks.
+ */
+function write_(p, skip) {
+  var changed = false;
+  tabsOf_(p).forEach(function (t) {
+    var dirty = t[3].filter(function (o) { return o._row && o._dirty; });
+    if (!dirty.length) return;
+    var sh = sheet_(t[0]), lower = t[0] === 'Items', map = keyRows_(sh, t[1], lower), width = t[5];
+    dirty.forEach(function (o) {
+      var key = t[2](o), shown = lower ? o.sku : o.id, gone = o._by.filter(function (id) { return skip[id]; })[0];
+      if (gone) { o._by.forEach(function (id) { skip[id] = skip[id] || skip[gone]; }); return; }
+      var rows = map[key] || [], at = rows.length === 1 ? rows[0] : 0, cell = at ? s_(sh.getRange(at, t[1]).getValue()) : '';
+      if (!at || (lower ? cell.toLowerCase() : cell) !== key) { map = keyRows_(sh, t[1], lower); rows = map[key] || []; at = rows.length === 1 ? rows[0] : 0; }
+      if (!at) { o._by.forEach(function (id) { skip[id] = skip[id] || moved_(t[0], shown, rows.length); }); return; }
+      sh.getRange(at, 1, 1, width).setValues([t[4](o)]);
+      if (lower) changed = true;
+    });
+  });
+  var keep = function (o) { return !skip[o._by[0]]; };
+  var items = p.newItems.filter(keep), moves = p.newMoves.filter(function (m) { return !skip[m.by]; });
+  append_(itemsSheet_(), 1, items.map(function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }));
+  append_(movesSheet_(), 1, moves.map(function (m) { return m.v; }));
+  Object.keys(T_).forEach(function (k) { append_(sheet_(T_[k].name), T_[k].col, p.tabs[k].filter(function (o) { return !o._row && keep(o); }).map(T_[k].to)); });
+  if (changed || items.length || moves.length) writeOnHand_();
+  markInbox_(p.marks.filter(function (m) { return !skip[m.by]; }));
+}
+function append_(sh, col, rows) {
+  if (!rows.length) return;
+  var start = lastRowOf_(sh, col) + 1;
+  ensureRows_(sh, start + rows.length - 1);
+  sh.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+}
+/**
+ * Sets Status on Inbox rows. A row is found at its row number when the name there matches (and, when the app sent them,
+ * Added, Type and Qty too); otherwise by a single row anywhere with that name, Added, Type and Qty. A row that is not
+ * found, or already has a Status, is left alone and keeps waiting.
+ */
+function markInbox_(marks) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox');
+  if (!sh || !marks.length) return;
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var vals = sh.getRange(2, 1, last - 1, INBOX_HEAD_.length).getValues();
+  marks.forEach(function (m) {
+    var x = m.x, rr = Number(x.row), full = x.added != null && x.type != null && x.qty != null;
+    var same = function (v) { return norm_(v[2]) === norm_(x.name) && (!full || (dateStr_(v[0]) === s_(x.added) && inboxType_(v[1]) === s_(x.type) && s_(v[3]) === s_(x.qty))); };
+    var at = rr >= 2 && rr <= last && Math.floor(rr) === rr && same(vals[rr - 2]) ? rr - 2 : -1;
+    if (at < 0 && full) {
+      var hits = [];
+      vals.forEach(function (v, i) { if (same(v)) hits.push(i); });
+      if (hits.length === 1) at = hits[0];
+    }
+    if (at < 0 || s_(vals[at][12])) return;
+    sh.getRange(at + 2, 13, 1, 1).setValues([[m.mark]]);
+    vals[at][12] = m.mark;
+  });
+}
+
+/** Pending rows of the Edits tab: a SKU or field filled and no Status. Each becomes an edit entry, or carries the reason it cannot. */
+function editRows_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Edits');
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var out = [];
+  sh.getRange(2, 1, last - 1, EDIT_HEAD_.length).getValues().forEach(function (v, i) {
+    if (s_(v[3]) || (!s_(v[0]) && !s_(v[1]) && !s_(v[2]))) return;
+    var x = { row: i + 2, sku: s_(v[0]), field: s_(v[1]), value: v[2] };
+    try {
+      if (!x.sku) throw new Error('SKU is required');
+      x.entry = { id: 'Edits!' + x.row, kind: 'edit', sku: x.sku, patch: editPatch_(x.field, x.value) };
+    } catch (err) { x.error = String(err.message || err); }
+    out.push(x);
+  });
+  return out;
+}
+// One field of the Edits tab as an edit patch. The values are checked again by the edit entry itself.
+function editPatch_(field, v) {
+  var f = EDIT_FIELDS_[field];
+  if (!f) throw new Error('Field must be one of: ' + Object.keys(EDIT_FIELDS_).join(', '));
+  var t = typeof v === 'number' ? v : dateStr_(v), p = {};
+  if (f === 'active') {
+    if (!/^(yes|no)$/i.test(t)) throw new Error('Active must be Yes or No');
+    p.active = /^yes$/i.test(t);
+  } else if (f === 'relCheck') {
+    if (!/^(verify)?$/i.test(t)) throw new Error('Release check must be Verify or blank');
+    p.relCheck = t !== '';
+  } else p[f] = t === '' && (f === 'price' || f === 'min') ? null : t;
+  return p;
+}
+/** Writes Done or Refused and the reason on each Edits row, found again by its row, SKU, field and value. */
+function finishEdits_(eds, results) {
+  if (!eds.length) return;
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Edits'), last = sh.getLastRow();
+  if (last < 2) return;
+  var vals = sh.getRange(2, 1, last - 1, EDIT_HEAD_.length).getValues(), byId = {};
+  results.forEach(function (r) { byId[r.id] = r; });
+  eds.forEach(function (x) {
+    var r = x.entry ? byId[x.entry.id] : { ok: false, error: x.error };
+    if (!r) return;
+    var same = function (v) { return !s_(v[3]) && s_(v[0]) === x.sku && s_(v[1]) === x.field && String(v[2]) === String(x.value); };
+    var at = x.row <= last && same(vals[x.row - 2]) ? x.row - 2 : -1;
+    if (at < 0) { var hits = []; vals.forEach(function (v, i) { if (same(v)) hits.push(i); }); if (hits.length === 1) at = hits[0]; }
+    if (at < 0) return;
+    sh.getRange(at + 2, 4, 1, 2).setValues([[r.ok ? 'Done' : 'Refused', r.ok ? '' : r.error]]);
+    vals[at][3] = 'x';
+  });
+}
+
+/** Works out every entry in memory. Nothing is written here. skip: { entryId: message } for entries refused in an earlier round. */
+function plan_(entries, skip) {
+  var items = readItems_(), moveList = readMoves_();
+  var bySku = {}, byName = {}, existingIds = {};
   items.forEach(function (it) { bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; });
-  var existingIds = idSet_(moveSh);
+  moveList.forEach(function (m) { existingIds[m.id] = true; });
   var custs = readTab_('cust'), orders = readTab_('order'), pres = readTab_('pre'), invs = readTab_('inv'), lines = readTab_('line'), rets = readTab_('ret');
   var custById = index_(custs, 'id'), orderById = index_(orders, 'id'), preById = index_(pres, 'id'), invById = index_(invs, 'id'), invByNo = index_(invs, 'no'), retById = index_(rets, 'id');
-  var newItems = [], newMoves = [], results = [], remap = {}, refused = {};
+  var newItems = [], newMoves = [], results = [], remap = {}, refused = {}, marks = [], who = null;
+  // Every record remembers the entries that changed it (_by), so a row that cannot be written fails exactly those.
+  function touch_(o) { o._dirty = true; o._by = o._by || []; if (o._by.indexOf(who) < 0) o._by.push(who); }
+  function made_(o) { o._by = [who]; return o; }
   function skuOf_(sku) { var k = String(sku || '').toLowerCase(); return remap[k] || String(sku || ''); }
-  function guard_(sku) { if (refused[String(sku || '').toLowerCase()]) throw new Error('Skipped because its toy was refused'); }
+  function guard_(sku) { if (refused[String(sku || '').toLowerCase()]) throw new Error('Skipped because its item was refused'); }
   function toy_(sku) {
     var real = skuOf_(sku);
     guard_(real);
@@ -373,7 +623,7 @@ function addEntries_(entries, have) {
   function pushMove_(id, date, it, dir, qty, reason, ref, note, cost) {
     if (existingIds[id]) return;
     existingIds[id] = true;
-    newMoves.push([id, date, it.sku, it.name, dir, qty, reason, ref, note, cost == null ? '' : cost]);
+    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, cost == null ? '' : cost], by: who });
   }
   // The number the phone picked, or the next free one when a different document already holds it.
   function docNo_(asked) {
@@ -390,6 +640,8 @@ function addEntries_(entries, have) {
   }
 
   entries.forEach(function (e) {
+    who = e.id;
+    if (skip[e.id]) { results.push({ id: e.id, ok: false, error: skip[e.id] }); return; }
     try {
       if (e.kind === 'item') {
         var it = cleanItem_(e.item);
@@ -404,7 +656,7 @@ function addEntries_(entries, have) {
         }
         if (!cur) {
           if (byName[norm_(it.name)]) throw new Error('An item named "' + byName[norm_(it.name)].name + '" already exists');
-          bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; newItems.push(it);
+          bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; newItems.push(made_(it));
         }
         if (it.sku !== asked) { results.push({ id: e.id, ok: true, sku: it.sku, from: asked }); return; }
 
@@ -418,7 +670,7 @@ function addEntries_(entries, have) {
         delete byName[norm_(target.name)];
         Object.keys(merged).forEach(function (f) { target[f] = merged[f]; });
         byName[norm_(target.name)] = target;
-        target._dirty = true;
+        touch_(target);
 
       } else if (e.kind === 'move') {
         var m = cleanMove_(e.move);
@@ -428,7 +680,7 @@ function addEntries_(entries, have) {
         var c = e.cust || {}, cid = id_(c.id, 'Customer'), cname = text_(c.name, 120);
         if (!cname) throw new Error('Customer name is required');
         var have_ = custById[cid];
-        if (!have_) { have_ = { id: cid }; custs.push(have_); custById[cid] = have_; } else have_._dirty = true;
+        if (!have_) { have_ = made_({ id: cid }); custs.push(have_); custById[cid] = have_; } else touch_(have_);
         have_.name = cname; have_.contact = text_(c.contact, 120);
 
       } else if (e.kind === 'order') {
@@ -436,7 +688,7 @@ function addEntries_(entries, have) {
         if (!orderById[oid]) {
           var oit = toy_(o.sku);
           var ord = { id: oid, date: date_(o.date), sku: oit.sku, name: oit.name, qty: qty_(o.qty), expected: s_(o.expected) ? date_(o.expected, 'Expected arrival') : '', status: 'Ordered', recQty: null, recDate: '', note: text_(o.note, 300) };
-          orders.push(ord); orderById[oid] = ord;
+          orders.push(made_(ord)); orderById[oid] = ord;
         }
 
       } else if (e.kind === 'receive') {
@@ -446,14 +698,14 @@ function addEntries_(entries, have) {
         if (ro.status !== 'Received') {
           var rq = qty_(e.qty), rd = date_(e.date), rc = moneyOrNull_(e.cost, 'Unit cost');
           pushMove_('rcv-' + ro.id, rd, toy_(ro.sku), 'In', rq, 'Restock', ro.id, '', rc);
-          ro.status = 'Received'; ro.recQty = rq; ro.recDate = rd; ro._dirty = true;
+          ro.status = 'Received'; ro.recQty = rq; ro.recDate = rd; touch_(ro);
         }
 
       } else if (e.kind === 'orderCancel') {
         var co = orderById[s_(e.orderId)];
         if (!co) throw new Error('Unknown supplier order');
         if (co.status === 'Received') throw new Error('That supplier order was already received');
-        if (co.status !== 'Cancelled') { co.status = 'Cancelled'; co._dirty = true; }
+        if (co.status !== 'Cancelled') { co.status = 'Cancelled'; touch_(co); }
 
       } else if (e.kind === 'pre') {
         var q = e.pre || {}, pid = id_(q.id, 'Pre-order'), rid = id_(q.invId, 'Receipt');
@@ -465,9 +717,9 @@ function addEntries_(entries, have) {
         var pdate = date_(q.date);
         var rec = { no: docNo_(q.no), id: rid, date: pdate, type: TYPE_RECEIPT_, custId: pc.id, cust: pc.name, contact: pc.contact, total: tot, ship: '', preId: pid };
         var pre = { id: pid, date: pdate, custId: pc.id, cust: pc.name, contact: pc.contact, sku: pit.sku, name: pit.name, qty: pq, price: pp, paid: paid, balance: Math.round((tot - paid) * 100) / 100, status: PRE_OPEN_, kept: null, recNo: rec.no, invNo: null, note: text_(q.note, 300) };
-        pres.push(pre); preById[pid] = pre;
-        invs.push(rec); invById[rid] = rec; invByNo[rec.no] = rec;
-        lines.push({ invNo: rec.no, invId: rid, sku: pit.sku, name: pit.name, qty: pq, list: pit.price, price: pp, cost: null });
+        pres.push(made_(pre)); preById[pid] = pre;
+        invs.push(made_(rec)); invById[rid] = rec; invByNo[rec.no] = rec;
+        lines.push(made_({ invNo: rec.no, invId: rid, sku: pit.sku, name: pit.name, qty: pq, list: pit.price, price: pp, cost: null }));
         results.push(numbered_(e, rec, q.no)); return;
 
       } else if (e.kind === 'prePay') {
@@ -476,7 +728,7 @@ function addEntries_(entries, have) {
         if (pp_.status !== PRE_OPEN_) throw new Error('That pre-order is closed');
         var np = money_(e.paid, 'Amount paid'), pt = Math.round(pp_.qty * pp_.price * 100) / 100;
         if (np > pt) throw new Error('Amount paid is more than the total');
-        pp_.paid = np; pp_.balance = Math.round((pt - np) * 100) / 100; pp_._dirty = true;
+        pp_.paid = np; pp_.balance = Math.round((pt - np) * 100) / 100; touch_(pp_);
 
       } else if (e.kind === 'preCancel') {
         var pcx = preById[s_(e.preId)];
@@ -486,7 +738,7 @@ function addEntries_(entries, have) {
           // Kept is the deposit the shop keeps; zero means the customer was refunded in full.
           var kept = money_(e.kept == null || e.kept === '' ? 0 : e.kept, 'Deposit kept');
           if (kept > pcx.paid) throw new Error('The deposit kept is more than what was paid');
-          pcx.status = PRE_CANCEL_; pcx.kept = kept; pcx._dirty = true;
+          pcx.status = PRE_CANCEL_; pcx.kept = kept; touch_(pcx);
         }
 
       } else if (e.kind === 'invoice') {
@@ -508,12 +760,12 @@ function addEntries_(entries, have) {
         var total = 0;
         vlines.forEach(function (l) { total += l.qty * l.price; });
         var inv = { no: docNo_(v.no), id: vid, date: vdate, type: TYPE_SALE_, custId: vc.id, cust: vc.name, contact: vc.contact, total: Math.round(total * 100) / 100, ship: '', preId: vpre ? vpre.id : '' };
-        invs.push(inv); invById[vid] = inv; invByNo[inv.no] = inv;
+        invs.push(made_(inv)); invById[vid] = inv; invByNo[inv.no] = inv;
         vlines.forEach(function (l, i) {
-          lines.push({ invNo: inv.no, invId: vid, sku: l.it.sku, name: l.it.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost });
+          lines.push(made_({ invNo: inv.no, invId: vid, sku: l.it.sku, name: l.it.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost }));
           pushMove_(vid + '-' + (i + 1), vdate, l.it, 'Out', l.qty, 'Sale', String(inv.no), '', l.cost);
         });
-        if (vpre) { vpre.status = PRE_DONE_; vpre.invNo = inv.no; vpre._dirty = true; }
+        if (vpre) { vpre.status = PRE_DONE_; vpre.invNo = inv.no; touch_(vpre); }
         results.push(numbered_(e, inv, v.no)); return;
 
       } else if (e.kind === 'ship') {
@@ -522,7 +774,7 @@ function addEntries_(entries, have) {
         if (si.type !== TYPE_SALE_) throw new Error('Only a sale invoice has a shipping status');
         var st = s_(e.ship);
         if (SHIP_.indexOf(st) < 0) throw new Error('Shipping status must be Delivered or blank');
-        if (si.ship !== st) { si.ship = st; si._dirty = true; }
+        if (si.ship !== st) { si.ship = st; touch_(si); }
 
       } else if (e.kind === 'ret') {
         var r = e.ret || {}, retId = id_(r.id, 'Return');
@@ -539,19 +791,14 @@ function addEntries_(entries, have) {
           if (rqty > sold - back) throw new Error('Only ' + (sold - back) + ' of ' + rit.name + ' can still be returned on invoice ' + ri.no);
           var rdate = date_(r.date);
           var ret = { id: retId, date: rdate, invNo: ri.no, invId: ri.id, cust: ri.cust, sku: rit.sku, name: rit.name, qty: rqty, outcome: outcome, refund: money_(r.refund == null || r.refund === '' ? 0 : r.refund, 'Refund'), note: text_(r.note, 300) };
-          rets.push(ret); retById[retId] = ret;
+          rets.push(made_(ret)); retById[retId] = ret;
           if (RETURN_STOCK_[outcome] === 'In') pushMove_('ret-' + retId, rdate, rit, 'In', rqty, 'Return', retId, 'Invoice ' + ri.no, null);
         }
 
       } else if (e.kind === 'inboxDone') {
-        // Marks Inbox rows as handled. The name is checked so a row is never marked by position alone.
-        var ish = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox'), mark = e.mark === 'Dismissed' ? 'Dismissed' : 'Done';
-        if (ish) (e.rows || []).forEach(function (x) {
-          var rr = Number(x.row);
-          if (!(rr >= 2) || rr > ish.getLastRow()) return;
-          var cur_ = ish.getRange(rr, 1, 1, INBOX_HEAD_.length).getValues()[0];
-          if (s_(x.name) && norm_(cur_[2]) === norm_(x.name) && !s_(cur_[12])) ish.getRange(rr, 13).setValue(mark);
-        });
+        // Marked after the other writes, by markInbox_; a row that cannot be found is left waiting.
+        var mark = e.mark === 'Dismissed' ? 'Dismissed' : 'Done';
+        (e.rows || []).forEach(function (x) { if (x && s_(x.name)) marks.push({ x: x, mark: mark, by: who }); });
 
       } else {
         throw new Error('Unknown entry type');
@@ -563,22 +810,7 @@ function addEntries_(entries, have) {
     }
   });
 
-  items.forEach(function (it) {
-    if (!it._dirty) return;
-    itemSh.getRange(it._row, 1, 1, 6).setValues([itemLeft_(it)]);
-    itemSh.getRange(it._row, 8, 1, 6).setValues([itemRight_(it)]);
-  });
-  if (newItems.length) {
-    var start = lastRowOf_(itemSh) + 1;
-    ensureRows_(itemSh, start + newItems.length - 1);
-    itemSh.getRange(start, 1, newItems.length, 6).setValues(newItems.map(itemLeft_));
-    itemSh.getRange(start, 8, newItems.length, 6).setValues(newItems.map(itemRight_));
-  }
-  if (newMoves.length) {
-    var mStart = lastRowOf_(moveSh) + 1;
-    ensureRows_(moveSh, mStart + newMoves.length - 1);
-    moveSh.getRange(mStart, 1, newMoves.length, MOVE_HEAD_.length).setValues(newMoves);
-  }
-  writeTab_('cust', custs); writeTab_('order', orders); writeTab_('pre', pres); writeTab_('inv', invs); writeTab_('line', lines); writeTab_('ret', rets);
-  return { results: results, sync: snapshot_(have) };
+  var stock = stockOf_(moveList.concat(newMoves.map(function (m) { return { sku: m.v[2], dir: m.v[4], qty: m.v[5], cost: num_(m.v[9]) }; }))).stock;
+  return { results: results, items: items, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
+    tabs: { cust: custs, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
 }

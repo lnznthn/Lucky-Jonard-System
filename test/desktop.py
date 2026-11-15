@@ -13,6 +13,10 @@ def post_inbox(rows): urllib.request.urlopen(urllib.request.Request(API + '/_inb
 post_inbox([{'type': 'Count', 'name': 'Grandista Son Goku', 'qty': 3, 'brand': 'Banpresto', 'line': 'Grandista', 'chr': 'Son Goku', 'rel': '2019-06', 'verify': 'Y'},
             {'type': 'Count', 'name': 'Maximatic Monkey D. Luffy', 'qty': 0, 'brand': 'Banpresto', 'line': 'Maximatic', 'chr': 'Monkey D. Luffy'},
             {'type': 'Count', 'name': 'Gigo Roronoa Zoro', 'qty': 2, 'mfr': 'Sega', 'brand': 'Gigo', 'chr': 'Roronoa Zoro'}])
+def apply(p, label):
+    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
+    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
+    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
     ctx = b.new_context(viewport={'width': 1280, 'height': 800}); p = ctx.new_page(); errors = []
@@ -30,7 +34,7 @@ with sync_playwright() as pw:
     labels = [x.inner_text().strip() for x in p.query_selector_all('#tabs button')]
     check(labels == ['Home', 'Stock', 'Sales', 'Orders', 'Update stock · 3', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Stock, Sales, Orders, Update stock with its count, Activity: {labels}")
     check(p.eval_on_selector('#tabs button.on', 'e => getComputedStyle(e).color') == p.evaluate("getComputedStyle(document.body).color"), 'the current page in the side bar is in the text colour')
-    nav('Update stock'); p.click('button:has-text("Apply 3 changes")'); synced()
+    nav('Update stock'); apply(p, 'Apply 3 changes'); synced()
     check(p.inner_text('header.top h1') == 'Stock' and fits(), 'header names the page; Stock fits the window')
     for nm, pr in [('Grandista', '1800'), ('Maximatic', '1500')]:
         p.click(f'.item:has-text("{nm}")'); p.click('button:has-text("Edit details")'); p.fill('#fPrice', pr); p.click('#sheet button.primary:has-text("Save")')

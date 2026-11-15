@@ -42,6 +42,10 @@ def paste_import(p, mode, text):
 def connect(p, code=CODE):
     p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
 
+def apply(p, label):
+    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
+    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
+    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
     ctx1 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
@@ -72,10 +76,12 @@ with sync_playwright() as pw:
     paste_import(p, 'count', photo)
     txt = p.inner_text('#impOut')
     check(txt.count('New item') == 3, 'preview: 3 new items')
+    check('Ready · 3' in txt and 'Needs a name · 2' in txt and '2 rows with no name or no count. They are not recorded.' in txt and 'Skipped' not in txt, 'preview: the skipped (?) and problem (abc) rows are folded under Needs a name')
+    p.click('#impOut details[data-grp="name"] summary'); txt = p.inner_text('#impOut')
     check('Skipped' in txt and 'Problem' in txt, 'preview: skipped (?) and problem (abc) rows flagged')
     check('Apply 3 changes' in txt, 'apply button counts only valid rows')
     p.screenshot(path=f'{SHOTS}/02-import-preview.png')
-    p.click('button:has-text("Apply 3 changes")')
+    apply(p, 'Apply 3 changes')
     sm = stock_map(p)
     check(sm == {'Barbie Dreamhouse': 2, 'Hot Wheels 5-Pack': 12, 'Plush Bear Large': 4}, f'stock after photo import: {sm}')
     # Home with toys but no sales yet
@@ -95,7 +101,7 @@ with sync_playwright() as pw:
     p.click('button:has-text("Use “Barbie Dreamhouse”")')
     check('stock 2 → counted 3 (+1)' in p.inner_text('#impOut') and 'Apply 2 changes' in p.inner_text('#impOut'), 'Use similar remaps the row and recomputes')
     p.screenshot(path=f'{SHOTS}/04-import-recount.png')
-    p.click('button:has-text("Apply 2 changes")')
+    apply(p, 'Apply 2 changes')
     sm = stock_map(p)
     check(sm['Hot Wheels 5-Pack'] == 10 and sm['Barbie Dreamhouse'] == 3 and len(sm) == 3, f'stock after recount: {sm}')
 
@@ -149,7 +155,8 @@ with sync_playwright() as pw:
     check(stock_map(p) == before, 'stock unchanged by sync')
     check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
     check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
-    check('=ARRAYFORMULA' in d['Items']['formulas'].get('2,7', ''), 'sheet has the On hand formula')
+    onh = {r[1]: r[6] for r in d['Items']['rows'][1:]}
+    check(d['Items']['formulas'] == {} and onh == before, f'On hand in the sheet is a written number per item, with no formula: {onh}')
     p.screenshot(path=f'{SHOTS}/08-synced.png')
 
     # ---- reverse a synced movement
@@ -171,7 +178,7 @@ with sync_playwright() as pw:
     txt = p2.inner_text('#impOut'); p2.screenshot(path=f'{SHOTS}/09-moves-preview.png')
     check('Below zero' in txt and 'No item matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown item, bad reason')
     check('Apply 3 changes' in txt, 'moves preview applies the 3 good rows')
-    p2.click('button:has-text("Apply 3 changes")'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    apply(p2, 'Apply 3 changes'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
     check(stock_map(p2)['Hot Wheels 5-Pack'] == 15 and stock_map(p2)['Toy Train Set'] == 5, f'stock after movement import: {stock_map(p2)}')
     paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery")
     check('Duplicate?' in p2.inner_text('#impOut') and 'Apply 0 changes' in p2.inner_text('#impOut'), 'pasting the same movement again is held as a duplicate')
@@ -237,7 +244,8 @@ with sync_playwright() as pw:
     check('Review 5 rows from Claude\nRead from your photos, not recorded yet' in p.inner_text('#view'), 'Home lists the rows from Claude')
     p.click('#view .item:has-text("Review 5 rows from Claude")')
     txt = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/11-inbox.png')
-    check('Claude read 3 rows' in txt and '2 more after these' in txt and not p.is_visible('#impText') and p.inner_text('#view .sec .badge') == '3', 'Update stock opens on the count rows from Claude, receive rows after them')
+    check('Claude read 3 rows' in txt and '2 more after these' in txt and not p.is_visible('#impText') and [h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 2', 'Ready · 1'], 'Update stock opens on the count rows from Claude, receive rows after them, grouped')
+    check(p.inner_text('#impOut .grp-check') .count('Inbox Robot') == 1 and 'Lego Castle Big' in p.inner_text('#impOut .grp-check') and 'Hot Wheels 5-Pack' in p.inner_text('#impOut .grp-ready'), 'a release date to verify and a similar name are under Check these')
     check(f"stock {before['Hot Wheels 5-Pack']} → counted 20" in txt and 'adds brand, product line' in txt, 'existing toy: count difference and the details it adds')
     check('Inbox Robot' in txt and 'opening stock 3' in txt and 'released 2024-05 (to verify)' in txt, 'new toy from Claude with its details')
     check('Looks like “Lego Castle”' in txt and 'Apply 2 changes' in txt, 'a similar-but-not-equal name is held back unticked')
@@ -247,7 +255,7 @@ with sync_playwright() as pw:
     check('Apply 2 changes' in p.inner_text('#impOut'), 'unticking a row')
     p.click('#syncBtn'); synced(p)
     check('Apply 2 changes' in p.inner_text('#impOut') and not p.is_checked('.prow:has-text("Inbox Robot") input[type=checkbox]'), 'ticks survive a sync that redraws the screen')
-    p.click('.prow:has-text("Inbox Robot") input[type=checkbox]'); p.click('button:has-text("Apply 3 changes")')
+    p.click('.prow:has-text("Inbox Robot") input[type=checkbox]'); apply(p, 'Apply 3 changes')
     txt = p.inner_text('#view')
     check(p.inner_text('#title') == 'Update stock' and 'Claude read 2 rows' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
     check(p.evaluate('live().inbox.length') == 2, 'the waiting count drops at once')
@@ -256,7 +264,7 @@ with sync_playwright() as pw:
     it = {r[1]: r for r in dump()['Items']['rows'][1:]}
     check(it['Hot Wheels 5-Pack'][8:10] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][7] == 'Bandai' and it['Inbox Robot'][11:13] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
     sm = stock_map(p); check(sm['Hot Wheels 5-Pack'] == 20 and sm['Inbox Robot'] == 3 and sm['Lego Castle'] == 9, f'counts from Claude recorded: {sm}')
-    update_stock(p); p.click('button:has-text("Apply 2 changes")')
+    update_stock(p); apply(p, 'Apply 2 changes')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class'), 'after the last group from Claude the app goes to Stock')
     check(update_label(p) == 'Update stock', 'nothing left waiting')
     synced(p); sm = stock_map(p)
@@ -270,16 +278,16 @@ with sync_playwright() as pw:
     post_inbox([{'type': 'Count', 'name': 'Dismiss Me', 'qty': 5}, {'type': 'count', 'name': 'Hot Wheels 5-Pack', 'qty': 1}])
     p.click('#syncBtn'); synced(p); update_stock(p)
     check('Claude read 2 rows' in p.inner_text('#view'), 'new rows from Claude show')
-    p.click('#view button:has-text("Dismiss")'); synced(p)
-    check('Other ways to change stock' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], 'Dismiss marks the rows Dismissed')
+    p.click('#view button[data-act="inboxDismiss"]'); synced(p)
+    check('Other ways to change stock' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], f"Dismiss marks the rows Dismissed: {[r[12] for r in dump()['Inbox']['rows'][1:]]} {p.inner_text('#view')[:200]!r}")
     check(len(dump()['Items']['rows']) == n_items and len(dump()['Movements']['rows']) == n_moves and stock_map(p)['Hot Wheels 5-Pack'] == 20, 'Dismiss records nothing')
 
-    # the same toy counted in three photos is added into one count; '?' rows do not zero it
+    # the same item counted in three photos is added into one count; the '?' row stays apart and keeps waiting
     post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 12}, {'type': 'Count', 'name': 'hot wheels 5 pack', 'qty': 9, 'note': 'second shelf'}, {'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': '?'}])
     p.click('#syncBtn'); synced(p); update_stock(p); txt = p.inner_text('#impOut')
     check('stock 20 → counted 21 (+1)' in txt and 'Apply 1 change' in txt and 'Listed twice' not in txt, f'rows for one toy are summed: {txt[:120]}')
-    p.click('button:has-text("Apply 1 change")'); synced(p)
-    check(stock_map(p)['Hot Wheels 5-Pack'] == 21 and [r[12] for r in dump()['Inbox']['rows'][1:]][-3:] == ['Done'] * 3, 'summed count applied and all three rows marked Done')
+    apply(p, 'Apply 1 change'); synced(p)
+    check(stock_map(p)['Hot Wheels 5-Pack'] == 21 and [r[12] for r in dump()['Inbox']['rows'][1:]][-3:] == ['Done', 'Done', ''], 'summed count applied; the two counted rows are Done and the ? row still waits')
 
     # ---- Stock has the Activity link; Activity and Stock read without the word
     tab(p, 'Stock'); no_toy(p, 'Stock'); p.click('#view button.tbtn:has-text("Activity")')
@@ -287,7 +295,63 @@ with sync_playwright() as pw:
     no_toy(p, 'Activity'); p.click('#backBtn'); check(p.inner_text('#title') == 'Stock', 'closing Activity returns to Stock')
     p.click('.item:has-text("Hot Wheels 5-Pack")'); no_toy(p, 'an item sheet'); p.click('button[aria-label="Close"]')
     post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 22}]); p.click('#syncBtn'); synced(p); update_stock(p); no_toy(p, 'Update stock with rows')
-    p.click('#view button:has-text("Dismiss")'); synced(p)
+    p.click('#view button[data-act="inboxDismiss"]'); synced(p)
+
+    # ---- 2.2 review: groups, corrections, only recorded rows leave the Inbox, result sheet, fresh content, warnings
+    rows_post = [{'added': '2026-11-16', 'type': 'Count', 'name': 'Fresh Box', 'qty': 2}, {'added': '2026-11-16', 'type': 'Count', 'name': 'Fresh Box', 'qty': 3},
+                 {'added': '2026-11-16', 'type': 'Count', 'name': 'Unidentified figure, blue', 'qty': 1}, {'added': '2026-11-16', 'type': 'Count', 'name': 'Mystery', 'qty': '?'},
+                 {'added': '2026-11-16', 'type': 'Count', 'name': 'Keep Me', 'qty': 4}, {'added': '2026-11-16', 'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 21}]
+    post_inbox(rows_post + [{'added': '2026-11-16', 'type': 'Count', 'name': f'Bulk {i}', 'qty': 1} for i in range(1, 11)])
+    p.click('#syncBtn'); synced(p); update_stock(p); txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/12-review-groups.png')
+    check([h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 1', 'Ready · 12', 'Needs a name · 2'], 'review grouped: Check these, Ready, Needs a name, each with its row count')
+    first = dump()['Inbox']['rows'].index(next(r for r in dump()['Inbox']['rows'] if r[2] == 'Fresh Box')) + 1
+    check(f'Possibly the same box in two photos: 5 in all, row {first} has 2, row {first + 1} has 3' in txt, 'the same new name on two rows is summed and shows each source row')
+    check(not p.is_visible('#impOut .grp-ready .prow') and '11 new items, 1 already right' in txt and not p.is_visible('#impOut .grp-name .prow'), 'Ready (more than 8) and Needs a name start folded, Ready says what it holds')
+    check('Apply 13 changes' in txt, 'Apply counts the ticked rows, including the count that is already right')
+    bar = p.eval_on_selector('.applybar', 'e => [getComputedStyle(e).position, Math.round(e.getBoundingClientRect().bottom), innerHeight, Math.round(document.querySelector("nav.tabs").getBoundingClientRect().top)]')
+    check(bar[0] == 'sticky' and bar[1] <= bar[3] + 1, f'Apply stays at the bottom of the screen above the tab bar: {bar}')
+    p.click('#impOut details[data-grp="ready"] summary'); p.click('.prow:has-text("Keep Me") input[type=checkbox]')
+    check('Apply 12 changes' in p.inner_text('#impOut'), 'unticking a Ready row')
+    # correct a row that needs a name; it moves to Ready
+    p.click('#impOut details[data-grp="name"] summary'); p.click('#impOut .prow:has-text("Mystery") button[data-act="impFix"]')
+    check(p.input_value('#fxName') == 'Mystery' and p.input_value('#fxCount') == '?' and 'stays as Claude wrote it' in p.inner_text('#sheet'), 'tapping a row opens the correction sheet with Name, Count and Release date')
+    p.fill('#fxCount', 'x'); p.click('#sheet button:has-text("Save")'); check('whole number' in p.inner_text('#toast'), 'a count that is not a whole number is refused')
+    p.fill('#fxName', 'Mystery Robot'); p.fill('#fxCount', '2'); p.fill('#fxRel', '2023'); p.click('#sheet button:has-text("Save")')
+    heads = [h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')]
+    check(heads == ['Check these · 1', 'Ready · 13', 'Needs a name · 1'] and 'Corrected here' in p.inner_text('#impOut .grp-ready') and 'Apply 13 changes' in p.inner_text('#impOut'), f'a corrected row with a name and a whole count moves to Ready: {heads}')
+    p.click('#impOut .prow:has-text("Fresh Box") button[data-act="impFix"]'); p.fill('#fxCount', '4'); p.click('#sheet button:has-text("Save")')
+    check('opening stock 4' in p.inner_text('#impOut .grp-check'), 'the corrected count is what will be recorded')
+    # the sheet changes a row while the review is open: the next sync shows it as it is now, corrections on other rows stay
+    ib = dump()['Inbox']['rows'][1:]
+    for r in ib:
+        if r[2] == 'Bulk 1': r[3] = '7'
+    urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Inbox', 'rows': ib}).encode(), method='POST')).read()
+    p.click('#syncBtn'); synced(p)
+    check('opening stock 7' in p.inner_text('.prow:has-text("Bulk 1")') and 'Corrected here' in p.inner_text('#impOut') and 'opening stock 4' in p.inner_text('#impOut .grp-check'), f"a row edited in the sheet shows its new content after a sync; corrections stay: {p.inner_text('#impOut')[:900]!r}")
+    check(not p.is_checked('.prow:has-text("Keep Me") input[type=checkbox]'), 'an untick survives that sync')
+    p.click('button:has-text("Apply 13 changes")'); p.wait_for_selector('#sheet h2:has-text("Applied")')
+    sh_txt = p.inner_text('#sheet')
+    check('Recorded: 12 new items, 0 count changes, 0 items with new details.' in sh_txt and 'Left in the Inbox: 1 row that needs a name; 1 row you unticked.' in sh_txt, f'the result sheet says what was recorded and what was left: {sh_txt!r}')
+    p.wait_for_function("document.querySelector('#resSync') && document.querySelector('#resSync').textContent === 'Synced with the sheet.'", timeout=8000)
+    p.wait_for_timeout(400); check(p.is_visible('#sheet h2:has-text("Applied")'), 'the result stays open after the sync, saying it has synced'); p.screenshot(path=f'{SHOTS}/13-result.png')
+    p.click('#sheet .btn[data-act="close"]')
+    st = {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}
+    check(st == {'Fresh Box': 'Done', 'Unidentified figure, blue': '', 'Mystery': 'Done', 'Keep Me': '', 'Hot Wheels 5-Pack': 'Done', **{f'Bulk {i}': 'Done' for i in range(1, 11)}}, f'only the recorded rows are Done in the Inbox: {st}')
+    it = {r[1]: r for r in dump()['Items']['rows'][1:]}
+    check(it['Fresh Box'][6] == 4 and it['Mystery Robot'][11] == '2023' and 'Mystery' not in it and it['Bulk 1'][6] == 7 and 'Keep Me' not in it, 'the corrected values are what was recorded')
+    check(any(r[2] == 'Mystery' and r[3] == '?' for r in dump()['Inbox']['rows']), 'the correction was not written back to the Inbox tab')
+    check('Claude read 2 rows' in p.inner_text('#view'), 'the rows left in the Inbox show again')
+    p.click('#view button[data-act="inboxDismiss"]'); synced(p)
+    check([v for k, v in {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}.items() if k in ('Keep Me', 'Unidentified figure, blue')] == ['Dismissed', 'Dismissed'], 'Dismiss these rows marks everything shown')
+    # warnings from the sheet: a banner on Home under the buttons, gone once fixed
+    items_rows = dump()['Items']['rows'][1:]
+    post_rows = lambda rows: urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Items', 'rows': rows}).encode(), method='POST')).read()
+    post_rows(items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
+    warn = f'Items: SKU {items_rows[0][0]} appears on 2 rows. The first is used.'
+    check(p.inner_text('#view .banner.danger') == warn and p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).color") == p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).borderTopColor"), 'a warning from the sheet shows on Home in the danger colour')
+    check(p.evaluate("document.querySelector('.banner.danger').previousElementSibling.classList.contains('actions')"), 'the banner sits under the buttons'); p.screenshot(path=f'{SHOTS}/14-warning.png')
+    post_rows(items_rows); p.click('#syncBtn'); synced(p)
+    check(p.query_selector('#view .banner.danger') is None, 'no banner when the sheet reports no warnings')
 
     # ---- theme: Device, Light or Dark, set in Settings only, kept on the device
     bg = lambda pg: pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toUpperCase()")
