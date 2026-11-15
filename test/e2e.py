@@ -14,7 +14,15 @@ key = urllib.request.urlopen(API + '/_reset').read().decode()
 CODE = f'{API}/exec#{key}'
 
 def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
-def activity(p): tab(p, 'Home'); p.click('#view button:has-text("All stock activity")')
+def activity(p): tab(p, 'Stock'); p.click('#view button[data-t="activity"]')
+def update_stock(p): tab(p, 'Home'); p.click('#view button[data-t="import"]')
+def update_label(p): tab(p, 'Home'); return p.inner_text('#view button[data-t="import"]')
+# Product names in the test data that contain the word; everything else on screen must not say it.
+DATA_NAMES = ['Plain Toy', 'Toy Train Set']
+def no_toy(p, where):
+    txt = p.evaluate("() => document.body.innerText + ' ' + [...document.querySelectorAll('[placeholder],[aria-label]')].filter(e => e.offsetParent || e.closest('#sheet')).map(e => (e.getAttribute('placeholder') || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')")
+    for n in DATA_NAMES: txt = txt.replace(n, '')
+    check('toy' not in txt.lower(), f'no “toy” in the text of {where}')
 def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
 def post_inbox(rows):
     urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rows).encode(), method='POST')).read()
@@ -26,7 +34,7 @@ def stock_map(p):
         out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
     return out
 def paste_import(p, mode, text):
-    tab(p, 'Import')
+    update_stock(p)
     if not p.is_visible('#impText'): p.click('#manual summary')
     if mode == 'moves': p.click('button[data-m="moves"]')
     else: p.click('button[data-m="count"]')
@@ -40,9 +48,19 @@ with sync_playwright() as pw:
     p = ctx1.new_page(); errors = []
     p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
     p.goto(APP)
-    check('No toys yet' in p.inner_text('#view'), 'empty state shows')
-    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().split('\n')[-1] for b in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sell', 'Orders', 'Import'], 'first launch opens Home; the bar is Home, Stock, Sell, Orders, Import')
-    tab(p, 'Import'); check('Nothing to review' in p.inner_text('#view') and not p.is_visible('#impText'), 'Import with nothing waiting: the paste box is folded away')
+    check('No items yet' in p.inner_text('#view') and p.is_visible('#view button.primary:has-text("Add an item")') and p.is_visible('#view button[data-t="import"]:has-text("Update stock")'), 'empty state shows, with Add an item and Update stock')
+    check(p.title() == 'Bodega' and json.load(urllib.request.urlopen('http://localhost:8765/manifest.webmanifest'))['name'] == 'Bodega', 'document title and manifest name are Bodega')
+    check(p.inner_text('#title') == 'Bodega', 'Home header shows the app name when no shop name is set')
+    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sales', 'Orders'], 'first launch opens Home; the bar is Home, Stock, Sales, Orders')
+    check(all(b.query_selector('svg') for b in p.query_selector_all('#tabs button')), 'each tab has a stroke icon')
+    no_toy(p, 'Home (empty)')
+    update_stock(p); v = p.inner_text('#view')
+    check(p.inner_text('#title') == 'Update stock' and 'Other ways to change stock' in v and 'One item by hand' in v and 'Add a new item' in v and 'Receive a supplier order' not in v, 'Update stock with nothing waiting lists the other ways to change stock')
+    check(p.is_visible('#impText'), 'with no connection code the paste box is open')
+    no_toy(p, 'Update stock')
+    p.click('#view .item:has-text("One item by hand")')
+    check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('#mvQ'), 'One item by hand opens the Move screen with a picker')
+    p.click('#backBtn'); check(p.inner_text('#title') == 'Bodega', 'the close button leaves the Move screen')
     check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
     p.screenshot(path=f'{SHOTS}/01-empty.png')
 
@@ -50,7 +68,7 @@ with sync_playwright() as pw:
     photo = "Hot Wheels 5-Pack\tCars\t12\t₱299\t\nBarbie Dreamhouse\tDolls\t2\t₱5,499\tonly 2 visible\nBlocks 500pc\tBlocks\t?\t\t\nPlush Bear Large\tPlush\t4\t650\t\nBroken Row\tCars\tabc\t\t"
     paste_import(p, 'count', photo)
     txt = p.inner_text('#impOut')
-    check(txt.count('New toy') == 3, 'preview: 3 new toys')
+    check(txt.count('New item') == 3, 'preview: 3 new items')
     check('Skipped' in txt and 'Problem' in txt, 'preview: skipped (?) and problem (abc) rows flagged')
     check('Apply 3 changes' in txt, 'apply button counts only valid rows')
     p.screenshot(path=f'{SHOTS}/02-import-preview.png')
@@ -59,9 +77,9 @@ with sync_playwright() as pw:
     check(sm == {'Barbie Dreamhouse': 2, 'Hot Wheels 5-Pack': 12, 'Plush Bear Large': 4}, f'stock after photo import: {sm}')
     # Home with toys but no sales yet
     tab(p, 'Home'); home = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/03a-home.png')
-    check('Sales today\n₱0' in home and 'Margin this month\n–' in home and '0 invoices this month' in home, 'Home with no sales shows zero sales and no margin')
-    check('Toys low or out of stock\n1' in home and 'No toys yet' not in home and 'ready to ship' not in home.lower(), 'Home lists the one low toy')
-    p.click('#view .item:has-text("Toys low or out of stock")')
+    check('Today\n₱0' in home and 'Month\n₱0' in home and 'Margin\n–' in home and 'invoice' not in home, 'Home with no sales shows the numbers strip with zero sales and no margin')
+    check('Restock 1 item\nLow or out of stock' in home and 'No items yet' not in home and 'Ship' not in home, 'Home lists the one low item')
+    p.click('#view .item:has-text("Restock 1 item")')
     check(p.get_attribute('#view .seg button[data-f="attn"]', 'class') == 'on' and list(stock_map_here(p)) == ['Barbie Dreamhouse'], 'the low-stock row opens Stock filtered to Low / out')
     p.screenshot(path=f'{SHOTS}/03-stock.png')
 
@@ -111,9 +129,9 @@ with sync_playwright() as pw:
     check('reorder at 5' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: reorder level 5 shows low state')
 
     # ---- add item by hand with starting stock; duplicate name refused
-    tab(p, 'Stock'); p.click('button:has-text("+ Toy")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fCat', 'Trains'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
+    tab(p, 'Stock'); p.click('button:has-text("Add item")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fCat', 'Trains'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
     check(stock_map(p).get('Toy Train Set') == 6, 'manual item with starting stock 6')
-    p.click('button:has-text("+ Toy")'); p.fill('#fName', 'toy train  set'); p.click('#sheet button.primary:has-text("Save")')
+    p.click('button:has-text("Add item")'); p.fill('#fName', 'toy train  set'); p.click('#sheet button.primary:has-text("Save")')
     check('already exists' in p.inner_text('#toast'), 'duplicate name is refused')
     p.click('button[aria-label="Close"]')
     before = stock_map(p)
@@ -148,7 +166,7 @@ with sync_playwright() as pw:
     # ---- movements import: dup, unknown item, bad reason, negative warning
     paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery\n11/12/26\tPlush Bear Large\tOut\t9\tSale\t\n2026-11-12\tHot Wheels 5 Pak\tOut\t1\n2026-11-12\tToy Train Set\tIn\t2\tSale\n2026-11-13\tToy Train Set\tOut\t1")
     txt = p2.inner_text('#impOut'); p2.screenshot(path=f'{SHOTS}/09-moves-preview.png')
-    check('Below zero' in txt and 'No toy matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown toy, bad reason')
+    check('Below zero' in txt and 'No item matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown item, bad reason')
     check('Apply 3 changes' in txt, 'moves preview applies the 3 good rows')
     p2.click('button:has-text("Apply 3 changes")'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
     check(stock_map(p2)['Hot Wheels 5-Pack'] == 15 and stock_map(p2)['Toy Train Set'] == 5, f'stock after movement import: {stock_map(p2)}')
@@ -172,7 +190,7 @@ with sync_playwright() as pw:
     check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
 
     def add_toy(pg, name, start, sku=None):
-        tab(pg, 'Stock'); pg.click('button:has-text("+ Toy")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
+        tab(pg, 'Stock'); pg.click('button:has-text("Add item")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
         if sku: pg.click('summary:has-text("Reorder level")'); pg.fill('#fSku', sku)
         pg.click('#sheet button.primary:has-text("Save")')
 
@@ -181,7 +199,7 @@ with sync_playwright() as pw:
     sku_dino = [r[0] for r in dump()['Items']['rows'][1:] if r[1] == 'Dino Figure'][0]
     ctx2.set_offline(True)
     add_toy(p2, 'Robot Kit', 3)
-    local_sku = p2.inner_text('.item:has-text("Robot Kit") .sub')
+    local_sku = p2.evaluate("live().list.find(i => i.name === 'Robot Kit').sku")
     check(sku_dino in local_sku, f'both phones picked the same SKU {sku_dino} ({local_sku})')
     ctx2.set_offline(False); p2.click('#syncBtn'); synced(p2); p.click('#syncBtn'); synced(p)
     items = {r[1]: r[0] for r in dump()['Items']['rows'][1:]}
@@ -194,12 +212,12 @@ with sync_playwright() as pw:
     ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
     p2.click('#syncBtn'); p2.wait_for_timeout(1500)
     check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
-    tab(p2, 'Home'); check('Refused by the sheet' in p2.inner_text('#view'), 'Home flags the refused entries')
-    p2.click('#view .item:has-text("Refused by the sheet")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
-    check('New toy “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which toy was refused and why')
+    tab(p2, 'Home'); check('Fix 2 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries')
+    p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
+    check('New item “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which item was refused and why')
     check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
     p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
-    check(stock_map(p2)['Lego Castle'] == 7 and 'LC-1' not in p2.inner_text('#stockList'), f"after Delete, Lego Castle stays at 7 and LC-1 is gone: {stock_map(p2)}")
+    check(stock_map(p2)['Lego Castle'] == 7 and not p2.evaluate("live().map.has('LC-1')"), f"after Delete, Lego Castle stays at 7 and LC-1 is gone: {stock_map(p2)}")
 
     # ---- Inbox: Claude appends rows to the sheet; the app shows them under Import to apply or dismiss
     p.click('#syncBtn'); synced(p); before = stock_map(p)
@@ -210,13 +228,14 @@ with sync_playwright() as pw:
         {'added': '2026-11-15', 'type': 'Receive', 'name': 'Dino Figure', 'qty': 2, 'cost': 150},
         {'added': '', 'type': 'Receive', 'name': 'Inbox Car', 'qty': 1, 'cost': '80', 'brand': 'Tomica'},
     ])
-    p.click('#syncBtn'); synced(p)
-    check('Import · 5' in p.inner_text('#tabs button[data-t="import"]'), f"Import tab shows the waiting count: {p.inner_text('#tabs button[data-t=import]')!r}")
-    tab(p, 'Home'); check('Rows from Claude to review\nRead from your photos, not recorded yet\n5' in p.inner_text('#view'), 'Home lists the rows from Claude')
-    p.click('#view .item:has-text("Rows from Claude to review")')
+    tab(p, 'Stock'); p.click('#syncBtn'); synced(p)
+    check(p.inner_text('#toast') == '5 rows from Claude to review', f"a toast says rows arrived: {p.inner_text('#toast')!r}")
+    check(update_label(p) == 'Update stock · 5', 'the Home button shows the waiting count')
+    check('Review 5 rows from Claude\nRead from your photos, not recorded yet' in p.inner_text('#view'), 'Home lists the rows from Claude')
+    p.click('#view .item:has-text("Review 5 rows from Claude")')
     txt = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/11-inbox.png')
-    check('3 rows from Claude' in txt and '2 more after these' in txt and not p.is_visible('#impText'), 'Import opens on the count rows from Claude, receive rows after them')
-    check(f"stock {before['Hot Wheels 5-Pack']} → counted 20" in txt and 'adds brand, toy line' in txt, 'existing toy: count difference and the details it adds')
+    check('Claude read 3 rows' in txt and '2 more after these' in txt and not p.is_visible('#impText') and p.inner_text('#view .sec .badge') == '3', 'Update stock opens on the count rows from Claude, receive rows after them')
+    check(f"stock {before['Hot Wheels 5-Pack']} → counted 20" in txt and 'adds brand, product line' in txt, 'existing toy: count difference and the details it adds')
     check('Inbox Robot' in txt and 'opening stock 3' in txt and 'released 2024-05 (to verify)' in txt, 'new toy from Claude with its details')
     check('Looks like “Lego Castle”' in txt and 'Apply 2 changes' in txt, 'a similar-but-not-equal name is held back unticked')
     p.click('button:has-text("Use “Lego Castle”")')
@@ -227,37 +246,64 @@ with sync_playwright() as pw:
     check('Apply 2 changes' in p.inner_text('#impOut') and not p.is_checked('.prow:has-text("Inbox Robot") input[type=checkbox]'), 'ticks survive a sync that redraws the screen')
     p.click('.prow:has-text("Inbox Robot") input[type=checkbox]'); p.click('button:has-text("Apply 3 changes")')
     txt = p.inner_text('#view')
-    check('on' in p.get_attribute('#tabs button[data-t="import"]', 'class') and '2 rows from Claude' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
-    check('Import · 2' in p.inner_text('#tabs button[data-t="import"]'), 'the waiting count drops at once')
+    check(p.inner_text('#title') == 'Update stock' and 'Claude read 2 rows' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
+    check(p.evaluate('live().inbox.length') == 2, 'the waiting count drops at once')
     synced(p); inbox = dump()['Inbox']['rows'][1:]
     check([r[12] for r in inbox] == ['Done', 'Done', 'Done', '', ''], f'applied rows are marked Done in the sheet: {[r[12] for r in inbox]}')
     it = {r[1]: r for r in dump()['Items']['rows'][1:]}
     check(it['Hot Wheels 5-Pack'][8:10] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][7] == 'Bandai' and it['Inbox Robot'][11:13] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
     sm = stock_map(p); check(sm['Hot Wheels 5-Pack'] == 20 and sm['Inbox Robot'] == 3 and sm['Lego Castle'] == 9, f'counts from Claude recorded: {sm}')
-    tab(p, 'Import'); p.click('button:has-text("Apply 2 changes")')
+    update_stock(p); p.click('button:has-text("Apply 2 changes")')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class'), 'after the last group from Claude the app goes to Stock')
-    check(p.inner_text('#tabs button[data-t="import"]').split('\n')[-1] == 'Import', 'nothing left waiting')
+    check(update_label(p) == 'Update stock', 'nothing left waiting')
     synced(p); sm = stock_map(p)
     check(sm['Dino Figure'] == before['Dino Figure'] + 2 and sm['Inbox Car'] == 1, f'received stock recorded: {sm}')
     mv = dump()['Movements']['rows'][1:]
     check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150], 'receive rows carry their cost')
     check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
-    tab(p, 'Import'); check('Nothing to review' in p.inner_text('#view'), 'Import is back to Nothing to review')
+    update_stock(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Update stock is back to the other ways; with a connection the paste box is folded')
     # Dismiss records nothing
     n_items, n_moves = len(dump()['Items']['rows']), len(dump()['Movements']['rows'])
     post_inbox([{'type': 'Count', 'name': 'Dismiss Me', 'qty': 5}, {'type': 'count', 'name': 'Hot Wheels 5-Pack', 'qty': 1}])
-    p.click('#syncBtn'); synced(p); tab(p, 'Import')
-    check('2 rows from Claude' in p.inner_text('#view'), 'new rows from Claude show')
+    p.click('#syncBtn'); synced(p); update_stock(p)
+    check('Claude read 2 rows' in p.inner_text('#view'), 'new rows from Claude show')
     p.click('#view button:has-text("Dismiss")'); synced(p)
-    check('Nothing to review' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], 'Dismiss marks the rows Dismissed')
+    check('Other ways to change stock' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], 'Dismiss marks the rows Dismissed')
     check(len(dump()['Items']['rows']) == n_items and len(dump()['Movements']['rows']) == n_moves and stock_map(p)['Hot Wheels 5-Pack'] == 20, 'Dismiss records nothing')
 
     # the same toy counted in three photos is added into one count; '?' rows do not zero it
     post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 12}, {'type': 'Count', 'name': 'hot wheels 5 pack', 'qty': 9, 'note': 'second shelf'}, {'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': '?'}])
-    p.click('#syncBtn'); synced(p); tab(p, 'Import'); txt = p.inner_text('#impOut')
+    p.click('#syncBtn'); synced(p); update_stock(p); txt = p.inner_text('#impOut')
     check('stock 20 → counted 21 (+1)' in txt and 'Apply 1 change' in txt and 'Listed twice' not in txt, f'rows for one toy are summed: {txt[:120]}')
     p.click('button:has-text("Apply 1 change")'); synced(p)
     check(stock_map(p)['Hot Wheels 5-Pack'] == 21 and [r[12] for r in dump()['Inbox']['rows'][1:]][-3:] == ['Done'] * 3, 'summed count applied and all three rows marked Done')
+
+    # ---- Stock has the Activity link; Activity and Stock read without the word
+    tab(p, 'Stock'); no_toy(p, 'Stock'); p.click('#view button.tbtn:has-text("Activity")')
+    check(p.inner_text('#title') == 'Activity' and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and p.is_visible('#actList .sec'), 'the Activity link on Stock opens the movement log, grouped by day')
+    no_toy(p, 'Activity'); p.click('#backBtn'); check(p.inner_text('#title') == 'Stock', 'closing Activity returns to Stock')
+    p.click('.item:has-text("Hot Wheels 5-Pack")'); no_toy(p, 'an item sheet'); p.click('button[aria-label="Close"]')
+    post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 22}]); p.click('#syncBtn'); synced(p); update_stock(p); no_toy(p, 'Update stock with rows')
+    p.click('#view button:has-text("Dismiss")'); synced(p)
+
+    # ---- theme: Device, Light or Dark, set in Settings only, kept on the device
+    bg = lambda pg: pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toUpperCase()")
+    check(p.query_selector('header [data-act="theme"]') is None and p.evaluate("document.documentElement.getAttribute('data-theme')") is None, 'no theme control in the header; Device leaves data-theme unset')
+    tab(p, 'Home'); p.click('button[aria-label="Settings"]'); no_toy(p, 'Settings')
+    check([h.inner_text() for h in p.query_selector_all('#sheet .sec > h2')] == ['Connection', 'Invoice PDF', 'Preferences', 'Data'], 'Settings is grouped under four headings')
+    p.click('#sheet button[data-act="theme"][data-v="dark"]')
+    check(p.evaluate("document.documentElement.getAttribute('data-theme')") == 'dark' and bg(p) == '#0D0D0D', 'Dark sets data-theme and the dark tokens')
+    p.reload(); p.wait_for_selector('#tabs button')
+    check(p.evaluate("document.documentElement.getAttribute('data-theme')") == 'dark' and p.evaluate("[...document.querySelectorAll('meta[name=theme-color]')].every(m => m.content === '#0D0D0D')"), 'the choice survives a reload, theme-color follows')
+    p.click('button[aria-label="Settings"]'); p.click('#sheet button[data-act="theme"][data-v="auto"]')
+    check(p.evaluate("document.documentElement.getAttribute('data-theme')") is None and bg(p) == '#FAFAFA', 'Device removes data-theme and follows the light device')
+    p.click('button[aria-label="Close"]')
+    for scheme, want in [('dark', '#0D0D0D'), ('light', '#FAFAFA')]:
+        cx = b.new_context(color_scheme=scheme); pp = cx.new_page(); pp.on('pageerror', lambda e: errors.append('theme ' + str(e))); pp.goto(APP); pp.wait_for_selector('#tabs button')
+        check(bg(pp) == want, f'Device follows a {scheme} device: {bg(pp)}')
+        pp.evaluate("prefs.theme = '" + ('light' if scheme == 'dark' else 'dark') + "'; savePrefs()"); pp.reload(); pp.wait_for_selector('#tabs button')
+        check(bg(pp) == ('#FAFAFA' if scheme == 'dark' else '#0D0D0D'), f'an explicit choice overrides a {scheme} device')
+        cx.close()
 
     # ---- wrong key
     p3 = b.new_context().new_page(); p3.goto(APP); connect(p3, f'{API}/exec#wrongkey'); p3.wait_for_timeout(800)

@@ -1,4 +1,4 @@
-# The app must open with no network after one visit. python3 test/offline.py
+# The app must open with no network after one visit, fonts included. python3 test/offline.py
 from playwright.sync_api import sync_playwright
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
@@ -7,5 +7,8 @@ with sync_playwright() as pw:
     p.reload(); p.wait_for_timeout(800)   # now controlled by the worker
     ctx.set_offline(True)
     p.goto('http://localhost:8765/index.html'); p.wait_for_selector('#tabs button')
-    print('OFFLINE LOAD OK' if 'Toy Stock' in p.title() and p.query_selector('#tabs button') else 'OFFLINE LOAD FAILED')
+    fonts = p.evaluate("document.fonts.ready.then(() => ['400 16px Geist', '500 16px Geist', '600 16px Geist', '28px \"Bebas Neue\"'].every(f => document.fonts.check(f) && [...document.fonts].some(x => x.status === 'loaded')))")
+    loaded = p.evaluate("Promise.all([document.fonts.load('28px \"Bebas Neue\"'), document.fonts.load('600 16px Geist')]).then(r => r.every(x => x.length > 0))")
+    ok = p.title() == 'Bodega' and p.query_selector('#tabs button') and fonts and loaded
+    print('OFFLINE LOAD OK' if ok else f'OFFLINE LOAD FAILED (title {p.title()!r}, fonts {fonts}, loaded {loaded})')
     b.close()

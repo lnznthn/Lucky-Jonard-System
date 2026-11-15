@@ -1,13 +1,13 @@
 {
-  "name": "Toy Stock",
-  "short_name": "Toy Stock",
-  "description": "Toy inventory, offline-first, synced with Google Sheets",
+  "name": "Bodega",
+  "short_name": "Bodega",
+  "description": "Stock, pre-orders and invoices, offline-first, synced with Google Sheets",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#faf7f2",
-  "theme_color": "#faf7f2",
+  "background_color": "#0D0D0D",
+  "theme_color": "#0D0D0D",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
