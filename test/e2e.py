@@ -14,13 +14,20 @@ key = urllib.request.urlopen(API + '/_reset').read().decode()
 CODE = f'{API}/exec#{key}'
 
 def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
+def activity(p): tab(p, 'Home'); p.click('#view button:has-text("All stock activity")')
+def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+def post_inbox(rows):
+    urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rows).encode(), method='POST')).read()
+def stock_map_here(p):
+    return {row.query_selector('.name').inner_text().strip(): int(row.query_selector('.qty').inner_text()) for row in p.query_selector_all('#stockList .item')}
 def stock_map(p):
-    tab(p, 'Stock'); out = {}
+    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); out = {}
     for row in p.query_selector_all('#stockList .item'):
         out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
     return out
 def paste_import(p, mode, text):
     tab(p, 'Import')
+    if not p.is_visible('#impText'): p.click('#manual summary')
     if mode == 'moves': p.click('button[data-m="moves"]')
     else: p.click('button[data-m="count"]')
     p.fill('#impText', text); p.click('button:has-text("Preview")')
@@ -34,6 +41,8 @@ with sync_playwright() as pw:
     p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
     p.goto(APP)
     check('No toys yet' in p.inner_text('#view'), 'empty state shows')
+    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().split('\n')[-1] for b in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sell', 'Orders', 'Import'], 'first launch opens Home; the bar is Home, Stock, Sell, Orders, Import')
+    tab(p, 'Import'); check('Nothing to review' in p.inner_text('#view') and not p.is_visible('#impText'), 'Import with nothing waiting: the paste box is folded away')
     check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
     p.screenshot(path=f'{SHOTS}/01-empty.png')
 
@@ -48,6 +57,12 @@ with sync_playwright() as pw:
     p.click('button:has-text("Apply 3 changes")')
     sm = stock_map(p)
     check(sm == {'Barbie Dreamhouse': 2, 'Hot Wheels 5-Pack': 12, 'Plush Bear Large': 4}, f'stock after photo import: {sm}')
+    # Home with toys but no sales yet
+    tab(p, 'Home'); home = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/03a-home.png')
+    check('Sales today\n₱0' in home and 'Margin this month\n–' in home and '0 invoices this month' in home, 'Home with no sales shows zero sales and no margin')
+    check('Toys low or out of stock\n1' in home and 'No toys yet' not in home and 'ready to ship' not in home.lower(), 'Home lists the one low toy')
+    p.click('#view .item:has-text("Toys low or out of stock")')
+    check(p.get_attribute('#view .seg button[data-f="attn"]', 'class') == 'on' and list(stock_map_here(p)) == ['Barbie Dreamhouse'], 'the low-stock row opens Stock filtered to Low / out')
     p.screenshot(path=f'{SHOTS}/03-stock.png')
 
     # ---- second photo: name variant matches, similar name needs confirmation, unchanged row
@@ -71,24 +86,28 @@ with sync_playwright() as pw:
     check(p.input_value('#mvQty') == '3' and 'Stock 10 → 7' in p.inner_text('#mvHint'), 'stepper and hint show stock 10 → 7')
     p.fill('#mvNote', 'Weekend sale'); p.screenshot(path=f'{SHOTS}/06-move.png')
     p.click('button:has-text("Record stock out")')
+    check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and 'Hot Wheels 5-Pack' in p.inner_text('#stockList'), 'recording a movement returns to Stock')
     check(stock_map(p)['Hot Wheels 5-Pack'] == 7, 'out 3 leaves 7')
+    # reloading while on Move lands on Home, not on an empty Move form
+    p.click('.item:has-text("Hot Wheels 5-Pack")'); p.click('button:has-text("Stock in")'); p.reload(); p.wait_for_selector('#tabs button')
+    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and not p.is_visible('#mvQty'), 'a reload on the Move screen opens Home')
 
     # ---- out more than stock asks and goes negative
-    p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.fill('#mvQty', '6'); p.click('button:has-text("Record stock out")')
+    tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.fill('#mvQty', '6'); p.click('button:has-text("Record stock out")')
     check(stock_map(p)['Plush Bear Large'] == -2, 'oversell is allowed after confirm and shows -2')
     tab(p, 'Stock'); check('neg' in p.get_attribute('.item:has-text("Plush Bear Large") .qty', 'class'), 'negative stock is styled')
 
     # ---- activity and reverse
-    tab(p, 'Activity'); p.screenshot(path=f'{SHOTS}/07-activity.png')
+    activity(p); p.screenshot(path=f'{SHOTS}/07-activity.png')
     p.click('.item:has-text("Plush Bear Large"):has-text("−6")'); p.click('button:has-text("Delete")')
     check(stock_map(p)['Plush Bear Large'] == 4, 'deleting an unsynced movement restores stock')
-    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
+    activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
     check('Waiting to sync' in p.inner_text('#sheet'), 'unsynced movement says waiting')
     p.click('button[aria-label="Close"]')
 
     # ---- edit item
     tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Edit")')
-    p.fill('#fPrice', '699'); p.fill('#fMin', '5'); p.click('#sheet button.primary:has-text("Save")')
+    p.fill('#fPrice', '699'); p.click('summary:has-text("Reorder level")'); p.fill('#fMin', '5'); p.click('#sheet button.primary:has-text("Save")')
     check('reorder at 5' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: reorder level 5 shows low state')
 
     # ---- add item by hand with starting stock; duplicate name refused
@@ -113,10 +132,10 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/08-synced.png')
 
     # ---- reverse a synced movement
-    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")'); p.click('button:has-text("Reverse this movement")')
+    activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")'); p.click('button:has-text("Reverse this movement")')
     check(stock_map(p)['Hot Wheels 5-Pack'] == 10, 'reversal restores 10')
     p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
+    activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
     check(p.is_disabled('button:has-text("Already reversed")'), 'second reversal blocked')
     p.click('button[aria-label="Close"]')
     check(any(r[6] == 'Correction' and r[7] for r in dump()['Movements']['rows'][1:]), 'correction row with Ref is in the sheet')
@@ -142,17 +161,19 @@ with sync_playwright() as pw:
 
     # ---- offline: queue then reconnect
     ctx1.set_offline(True)
-    tab(p, 'Move'); check(p.is_visible('button:has-text("Record stock out")'), 'Move form remembers the last direction (Out)'); p.click('button[data-d="In"]'); p.fill('#mvQ', 'train'); p.click('#sug button'); p.click('button:has-text("Record stock in")')
+    tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.click('button:has-text("Change")')
+    p.click('button[data-d="In"]'); p.fill('#mvQ', 'train'); p.click('#sug button')
+    check('Toy Train Set' in p.inner_text('#pick') and p.is_visible('button:has-text("Record stock in")'), 'Change on the Move screen lets another toy be searched and picked')
+    p.click('button:has-text("Record stock in")')
     p.wait_for_timeout(1500)
     check(stock_map(p)['Toy Train Set'] == 6 and 'waiting' in p.inner_text('#syncTxt') or 'failed' in p.inner_text('#syncTxt'), f"offline entry is kept ({p.inner_text('#syncTxt')})")
     ctx1.set_offline(False); p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
     p2.click('#syncBtn'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
     check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
 
-    def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
     def add_toy(pg, name, start, sku=None):
         tab(pg, 'Stock'); pg.click('button:has-text("+ Toy")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
-        if sku: pg.fill('#fSku', sku)
+        if sku: pg.click('summary:has-text("Reorder level")'); pg.fill('#fSku', sku)
         pg.click('#sheet button.primary:has-text("Save")')
 
     # ---- two phones invent the same next SKU: the second is renumbered, nobody is credited wrongly
@@ -173,11 +194,70 @@ with sync_playwright() as pw:
     ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
     p2.click('#syncBtn'); p2.wait_for_timeout(1500)
     check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
-    tab(p2, 'Activity'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
+    tab(p2, 'Home'); check('Refused by the sheet' in p2.inner_text('#view'), 'Home flags the refused entries')
+    p2.click('#view .item:has-text("Refused by the sheet")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
     check('New toy “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which toy was refused and why')
     check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
     p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
     check(stock_map(p2)['Lego Castle'] == 7 and 'LC-1' not in p2.inner_text('#stockList'), f"after Delete, Lego Castle stays at 7 and LC-1 is gone: {stock_map(p2)}")
+
+    # ---- Inbox: Claude appends rows to the sheet; the app shows them under Import to apply or dismiss
+    p.click('#syncBtn'); synced(p); before = stock_map(p)
+    post_inbox([
+        {'added': '2026-11-15', 'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 20, 'brand': 'Mattel', 'line': 'Hot Wheels'},
+        {'added': '2026-11-15', 'type': 'Count', 'name': 'Inbox Robot', 'qty': 3, 'mfr': 'Bandai', 'rel': '2024-05', 'verify': 'Y', 'note': 'box only'},
+        {'added': '2026-11-15', 'type': 'Count', 'name': 'Lego Castle Big', 'qty': 9},
+        {'added': '2026-11-15', 'type': 'Receive', 'name': 'Dino Figure', 'qty': 2, 'cost': 150},
+        {'added': '', 'type': 'Receive', 'name': 'Inbox Car', 'qty': 1, 'cost': '80', 'brand': 'Tomica'},
+    ])
+    p.click('#syncBtn'); synced(p)
+    check('Import · 5' in p.inner_text('#tabs button[data-t="import"]'), f"Import tab shows the waiting count: {p.inner_text('#tabs button[data-t=import]')!r}")
+    tab(p, 'Home'); check('Rows from Claude to review\nRead from your photos, not recorded yet\n5' in p.inner_text('#view'), 'Home lists the rows from Claude')
+    p.click('#view .item:has-text("Rows from Claude to review")')
+    txt = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/11-inbox.png')
+    check('3 rows from Claude' in txt and '2 more after these' in txt and not p.is_visible('#impText'), 'Import opens on the count rows from Claude, receive rows after them')
+    check(f"stock {before['Hot Wheels 5-Pack']} → counted 20" in txt and 'adds brand, toy line' in txt, 'existing toy: count difference and the details it adds')
+    check('Inbox Robot' in txt and 'opening stock 3' in txt and 'released 2024-05 (to verify)' in txt, 'new toy from Claude with its details')
+    check('Looks like “Lego Castle”' in txt and 'Apply 2 changes' in txt, 'a similar-but-not-equal name is held back unticked')
+    p.click('button:has-text("Use “Lego Castle”")')
+    check(f"stock {before['Lego Castle']} → counted 9" in p.inner_text('#impOut') and 'Apply 3 changes' in p.inner_text('#impOut'), 'Use … maps the row onto the toy on file')
+    p.click('.prow:has-text("Inbox Robot") input[type=checkbox]')
+    check('Apply 2 changes' in p.inner_text('#impOut'), 'unticking a row')
+    p.click('#syncBtn'); synced(p)
+    check('Apply 2 changes' in p.inner_text('#impOut') and not p.is_checked('.prow:has-text("Inbox Robot") input[type=checkbox]'), 'ticks survive a sync that redraws the screen')
+    p.click('.prow:has-text("Inbox Robot") input[type=checkbox]'); p.click('button:has-text("Apply 3 changes")')
+    txt = p.inner_text('#view')
+    check('on' in p.get_attribute('#tabs button[data-t="import"]', 'class') and '2 rows from Claude' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
+    check('Import · 2' in p.inner_text('#tabs button[data-t="import"]'), 'the waiting count drops at once')
+    synced(p); inbox = dump()['Inbox']['rows'][1:]
+    check([r[12] for r in inbox] == ['Done', 'Done', 'Done', '', ''], f'applied rows are marked Done in the sheet: {[r[12] for r in inbox]}')
+    it = {r[1]: r for r in dump()['Items']['rows'][1:]}
+    check(it['Hot Wheels 5-Pack'][8:10] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][7] == 'Bandai' and it['Inbox Robot'][11:13] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
+    sm = stock_map(p); check(sm['Hot Wheels 5-Pack'] == 20 and sm['Inbox Robot'] == 3 and sm['Lego Castle'] == 9, f'counts from Claude recorded: {sm}')
+    tab(p, 'Import'); p.click('button:has-text("Apply 2 changes")')
+    check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class'), 'after the last group from Claude the app goes to Stock')
+    check(p.inner_text('#tabs button[data-t="import"]').split('\n')[-1] == 'Import', 'nothing left waiting')
+    synced(p); sm = stock_map(p)
+    check(sm['Dino Figure'] == before['Dino Figure'] + 2 and sm['Inbox Car'] == 1, f'received stock recorded: {sm}')
+    mv = dump()['Movements']['rows'][1:]
+    check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150], 'receive rows carry their cost')
+    check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
+    tab(p, 'Import'); check('Nothing to review' in p.inner_text('#view'), 'Import is back to Nothing to review')
+    # Dismiss records nothing
+    n_items, n_moves = len(dump()['Items']['rows']), len(dump()['Movements']['rows'])
+    post_inbox([{'type': 'Count', 'name': 'Dismiss Me', 'qty': 5}, {'type': 'count', 'name': 'Hot Wheels 5-Pack', 'qty': 1}])
+    p.click('#syncBtn'); synced(p); tab(p, 'Import')
+    check('2 rows from Claude' in p.inner_text('#view'), 'new rows from Claude show')
+    p.click('#view button:has-text("Dismiss")'); synced(p)
+    check('Nothing to review' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], 'Dismiss marks the rows Dismissed')
+    check(len(dump()['Items']['rows']) == n_items and len(dump()['Movements']['rows']) == n_moves and stock_map(p)['Hot Wheels 5-Pack'] == 20, 'Dismiss records nothing')
+
+    # the same toy counted in three photos is added into one count; '?' rows do not zero it
+    post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 12}, {'type': 'Count', 'name': 'hot wheels 5 pack', 'qty': 9, 'note': 'second shelf'}, {'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': '?'}])
+    p.click('#syncBtn'); synced(p); tab(p, 'Import'); txt = p.inner_text('#impOut')
+    check('stock 20 → counted 21 (+1)' in txt and 'Apply 1 change' in txt and 'Listed twice' not in txt, f'rows for one toy are summed: {txt[:120]}')
+    p.click('button:has-text("Apply 1 change")'); synced(p)
+    check(stock_map(p)['Hot Wheels 5-Pack'] == 21 and [r[12] for r in dump()['Inbox']['rows'][1:]][-3:] == ['Done'] * 3, 'summed count applied and all three rows marked Done')
 
     # ---- wrong key
     p3 = b.new_context().new_page(); p3.goto(APP); connect(p3, f'{API}/exec#wrongkey'); p3.wait_for_timeout(800)
