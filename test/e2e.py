@@ -48,7 +48,10 @@ with sync_playwright() as pw:
     p = ctx1.new_page(); errors = []
     p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
     p.goto(APP)
-    check('No items yet' in p.inner_text('#view') and p.is_visible('#view button.primary:has-text("Add an item")') and p.is_visible('#view button[data-t="import"]:has-text("Update stock")'), 'empty state shows, with Add an item and Update stock')
+    check(p.is_visible('#view button.primary:has-text("New sale")') and p.is_visible('#view button[data-t="import"]:has-text("Update stock")') and 'Nothing needs you.' in p.inner_text('#view'), 'empty Home still shows New sale and Update stock')
+    p.click('#view button.primary:has-text("New sale")'); p.wait_for_timeout(200)
+    check('No items to sell yet' in p.inner_text('#view') and p.is_visible('#view button.primary:has-text("Add an item")'), 'New sale with no items offers Add an item')
+    p.click('nav button[data-t="home"]'); p.wait_for_timeout(200)
     check(p.title() == 'Bodega' and json.load(urllib.request.urlopen('http://localhost:8765/manifest.webmanifest'))['name'] == 'Bodega', 'document title and manifest name are Bodega')
     check(p.inner_text('#title') == 'Bodega', 'Home header shows the app name when no shop name is set')
     check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sales', 'Orders'], 'first launch opens Home; the bar is Home, Stock, Sales, Orders')
