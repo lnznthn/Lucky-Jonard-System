@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Toy Stock">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#faf7f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141417" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<title>Toy Stock</title>
+<style>
+:root{--bg:#faf7f2;--card:#fff;--ink:#1d1b20;--mute:#6f6b76;--line:#e9e3d9;--accent:#e4572e;--accent-ink:#fff;--blue:#2f6fe4;--good:#1f8f57;--warn:#b57a00;--bad:#d03b3b;--chip:#f1ece3;--r:14px}
+@media(prefers-color-scheme:dark){:root{--bg:#141417;--card:#1d1d22;--ink:#f1eee9;--mute:#9a96a3;--line:#2b2b32;--accent:#ff7447;--accent-ink:#1a0d08;--blue:#7aa6ff;--good:#4cc38a;--warn:#e7b23c;--bad:#ff6b6b;--chip:#26262c}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.app{max-width:720px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+header.top{display:flex;align-items:center;gap:8px;padding:12px 16px 8px;position:sticky;top:env(safe-area-inset-top);background:var(--bg);z-index:5}
+header.top h1{font-size:22px;margin:0;flex:1;letter-spacing:-.01em}
+main{flex:1;padding:4px 16px calc(92px + env(safe-area-inset-bottom))}
+button{font:inherit;color:inherit;cursor:pointer}
+.icon{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:18px;line-height:1}
+.sync{display:flex;align-items:center;gap:7px;height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:14px;color:var(--mute)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--mute)}
+.sync.ok .dot{background:var(--good)}.sync.pending .dot{background:var(--warn)}.sync.err .dot{background:var(--bad)}
+.sync.busy .dot{background:var(--blue);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:6}
+nav.tabs .in{display:flex;width:100%;max-width:720px}
+nav.tabs button{flex:1;border:0;background:none;padding:9px 0 8px;font-size:12px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav.tabs button b{font-size:20px;line-height:1;font-weight:400}
+nav.tabs button.on{color:var(--accent);font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:10px}
+.card small{display:block;color:var(--mute);font-size:12px}.card b{font-size:19px;letter-spacing:-.01em}
+.card.warn b{color:var(--warn)}
+.bar{display:flex;gap:8px;margin-bottom:10px}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 12px;width:100%;min-height:44px}
+textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:0 14px;min-height:44px;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{color:var(--bad)}
+.btn.big{width:100%;min-height:50px;font-size:17px}
+.btn[disabled]{opacity:.5}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--chip);border-radius:999px;padding:6px 12px;font-size:14px}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.seg{display:flex;background:var(--chip);border-radius:12px;padding:3px;gap:3px;margin-bottom:10px}
+.seg button{flex:1;border:0;background:none;border-radius:9px;min-height:38px;font-size:14px;color:var(--mute)}
+.seg button.on{background:var(--card);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg.dir button.on.in{color:var(--good)}.seg.dir button.on.out{color:var(--bad)}
+.list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:11px 12px;min-height:56px}
+.item:last-child{border-bottom:0}
+.item .main{flex:1;min-width:0}
+.item .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .sub{color:var(--mute);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qty{min-width:48px;text-align:center;font-weight:700;font-size:18px;border-radius:10px;padding:4px 8px;background:var(--chip)}
+.qty.low{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.qty.out,.qty.neg{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.delta{min-width:52px;text-align:center;font-weight:700}.delta.in{color:var(--good)}.delta.out{color:var(--bad)}
+.day{font-size:13px;color:var(--mute);margin:14px 4px 6px;text-transform:uppercase;letter-spacing:.04em}
+.tag{font-size:12px;border-radius:6px;padding:1px 6px;margin-left:6px;background:var(--chip);color:var(--mute);font-weight:500}
+.tag.warn{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}.tag.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
+label,.lbl{font-size:13px;color:var(--mute);display:block;margin-bottom:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.step{display:flex;gap:6px}.step button{width:46px;border:1px solid var(--line);background:var(--chip);border-radius:12px;font-size:22px}
+.step input{text-align:center;font-weight:700;font-size:18px}
+.sug{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:6px}
+.sug:empty{display:none}
+.sug button{border:0;border-bottom:1px solid var(--line);background:var(--card);padding:10px 12px;text-align:left;min-height:46px}
+.sug button:last-child{border-bottom:0}
+.picked{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--chip)}
+.picked .main{flex:1;min-width:0}
+.hint{color:var(--mute);font-size:14px;margin:2px 2px}
+.hint b{color:var(--ink)}
+.banner{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;font-size:14px}
+.banner.warn{border-color:var(--warn)}.banner.bad{border-color:var(--bad)}
+.banner span{flex:1}
+.empty{text-align:center;color:var(--mute);padding:34px 18px}
+.empty h3{color:var(--ink);margin:0 0 6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.actions .btn{flex:1}
+.prev{border:1px solid var(--line);border-radius:var(--r);background:var(--card);margin-top:12px;overflow:hidden}
+.prow{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);align-items:flex-start}
+.prow:last-child{border-bottom:0}
+.prow.off{opacity:.55}
+.prow input[type=checkbox]{width:22px;height:22px;min-height:0;margin-top:2px;accent-color:var(--accent)}
+.prow .main{flex:1;min-width:0}
+.prow .name{font-weight:600}
+.prow .sub{font-size:13px;color:var(--mute)}
+.prow .go{border:0;background:none;color:var(--blue);padding:2px 0;font-size:13px;text-decoration:underline}
+.layer{position:fixed;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.layer[hidden]{display:none}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.sheet{position:relative;background:var(--bg);width:100%;max-width:720px;max-height:92dvh;overflow:auto;border-radius:20px 20px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px}
+.sheet h2{margin:0;font-size:20px}
+.sheet .top{display:flex;align-items:center;gap:8px}.sheet .top h2{flex:1}
+.bigqty{font-size:44px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:30;max-width:90%;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.fab{position:fixed}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:15px}.kv dt{color:var(--mute)}.kv dd{margin:0;word-break:break-word}
+details{border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--card);margin-top:10px}
+details summary{cursor:pointer;color:var(--mute);font-size:14px}
+details pre{white-space:pre-wrap;font-size:13px;margin:8px 0 0;font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>Toy Stock</h1>
+    <button class="sync" id="syncBtn" data-act="sync" aria-label="Sync"><i class="dot"></i><span id="syncTxt"></span></button>
+    <button class="icon" data-act="settings" aria-label="Settings">⚙</button>
+  </header>
+  <main id="view"></main>
+</div>
+<nav class="tabs"><div class="in" id="tabs"></div></nav>
+<div class="layer" id="layer" hidden><div class="scrim" data-act="close"></div><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const VERSION = '1.0.0';
+
+/* ---------- small helpers ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('toys.' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('toys.' + k, JSON.stringify(v)); } catch (e) { toast('This device is out of storage space.'); } },
+};
+function norm(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+function jaccard(a, b) { const A = new Set(norm(a).split(' ').filter(Boolean)), B = new Set(norm(b).split(' ').filter(Boolean)); if (!A.size || !B.size) return 0; let n = 0; A.forEach(t => { if (B.has(t)) n++; }); return n / (A.size + B.size - n); }
+function todayISO() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+function parseDate(s) {
+  s = String(s || '').trim(); if (!s) return todayISO();
+  let y, m, d, x;
+  if ((x = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+  else if ((x = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(s))) { m = +x[1]; d = +x[2]; y = +x[3]; if (y < 100) y += 2000; }
+  else return null;
+  const t = new Date(Date.UTC(y, m - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) return null;
+  return t.toISOString().slice(0, 10);
+}
+function fmtDay(iso) {
+  const t = todayISO(); if (iso === t) return 'Today';
+  const y = new Date(); y.setDate(y.getDate() - 1); if (iso === new Date(y.getTime() - y.getTimezoneOffset() * 60000).toISOString().slice(0, 10)) return 'Yesterday';
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: iso.slice(0, 4) === t.slice(0, 4) ? undefined : 'numeric' });
+}
+const money = n => prefs.cur + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
+
+/* ---------- reasons (same rules as apps-script/Code.gs) ---------- */
+const IN_ONLY = ['Opening', 'Restock', 'Return'], OUT_ONLY = ['Sale', 'Damaged', 'Lost'], EITHER = ['Count', 'Correction', 'Other'];
+const FORM_REASONS = { In: ['Restock', 'Return', 'Opening', 'Other'], Out: ['Sale', 'Damaged', 'Lost', 'Other'] };
+const reasonOK = (dir, r) => EITHER.includes(r) || (dir === 'In' ? IN_ONLY : OUT_ONLY).includes(r);
+const defaultReason = dir => (dir === 'In' ? 'Restock' : 'Sale');
+
+/* ---------- state ---------- */
+let cfg = store.get('cfg', { url: '', key: '' });
+let items = store.get('items', []);       // synced items
+let moves = store.get('moves', []);       // synced movements, in sheet order
+let meta = store.get('meta', { rows: 0, lastId: '', syncedAt: null });
+let queue = store.get('queue', []);       // entries waiting for the sheet: item | edit | move
+let prefs = Object.assign({ tab: 'stock', cur: '₱', low: 2 }, store.get('prefs', {}));
+let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, err: '', busy: false };
+let _live = null;
+const dirty = () => { _live = null; };
+const saveQueue = () => store.set('queue', queue);
+const savePrefs = () => store.set('prefs', prefs);
+const saveSynced = () => { store.set('items', items); store.set('moves', moves); store.set('meta', meta); };
+
+/** Synced data plus pending queue entries: what the screen shows. Failed entries are not counted. */
+function live() {
+  if (_live) return _live;
+  const map = new Map(items.map(i => [i.sku, { ...i }]));
+  const pend = queue.filter(q => q.status === 'pending');
+  for (const q of pend) {
+    if (q.kind === 'item' && !map.has(q.item.sku)) map.set(q.item.sku, { ...q.item });
+    else if (q.kind === 'edit' && map.has(q.sku)) Object.assign(map.get(q.sku), q.patch);
+  }
+  const stock = new Map();
+  const add = m => stock.set(m.sku, (stock.get(m.sku) || 0) + (m.dir === 'In' ? m.qty : -m.qty));
+  moves.forEach(add);
+  pend.filter(q => q.kind === 'move').forEach(q => add(q.move));
+  const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const cats = [...new Set(list.filter(i => i.active).map(catOf))].sort((a, b) => a.localeCompare(b));
+  const all = moves.map((m, i) => ({ ...m, _i: i }));
+  queue.filter(q => q.kind === 'move').forEach((q, j) => all.push({ ...q.move, _i: moves.length + j, q }));
+  _live = { map, list, stock, cats, all };
+  return _live;
+}
+const catOf = i => i.cat || 'General';
+const stockOf = sku => live().stock.get(sku) || 0;
+const minOf = i => (i.min == null ? prefs.low : i.min);
+function status(i) { const n = stockOf(i.sku); return n < 0 ? 'neg' : n === 0 ? 'out' : n <= minOf(i) ? 'low' : 'ok'; }
+function nextSku() {
+  let max = 0; live().list.forEach(i => { const m = /^T(\d+)$/.exec(i.sku); if (m) max = Math.max(max, +m[1]); });
+  return 'T' + String(max + 1).padStart(4, '0');
+}
+function findItem(text) {
+  const t = String(text || '').trim(); if (!t) return null;
+  const L = live(); const n = norm(t);
+  return L.list.find(i => i.sku.toLowerCase() === t.toLowerCase()) || L.list.find(i => norm(i.name) === n) || null;
+}
+function similarItem(name) {
+  let best = null, bs = 0; live().list.forEach(i => { const s = jaccard(i.name, name); if (s > bs) { bs = s; best = i; } });
+  return bs >= 0.5 ? best : null;
+}
+
+/* ---------- queue ---------- */
+const qItem = (item, auto) => queue.push({ id: 'q' + uid(), kind: 'item', item, auto: !!auto, status: 'pending' });
+const entrySku = q => (q.kind === 'move' ? q.move.sku : q.kind === 'edit' ? q.sku : q.item.sku);
+const qEdit = (sku, patch) => queue.push({ id: 'q' + uid(), kind: 'edit', sku, patch, status: 'pending' });
+const qMove = move => queue.push({ id: 'q' + uid(), kind: 'move', move, status: 'pending' });
+function commit() { saveQueue(); dirty(); render(); scheduleSync(); }
+let syncTimer = null;
+function scheduleSync() { clearTimeout(syncTimer); if (cfg.url) syncTimer = setTimeout(() => syncNow(false), 700); }
+
+/* ---------- sheet connection ---------- */
+async function api(action, payload) {
+  if (!cfg.url) throw new Error('Not connected');
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 30000);
+  let res;
+  try {
+    res = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: cfg.key, action }, payload || {})), signal: ctl.signal });
+  } catch (e) {
+    throw Object.assign(new Error(e.name === 'AbortError' ? 'The sheet took too long to answer' : 'No connection to the sheet'), { network: true });
+  } finally { clearTimeout(t); }
+  let j; try { j = await res.json(); } catch (e) { throw new Error('The sheet answered with something unexpected. Check the connection code.'); }
+  if (!j.ok) throw Object.assign(new Error(j.error || 'The sheet refused the request'), { auth: !!j.auth });
+  return j.data;
+}
+function applySnapshot(s) {
+  items = s.items;
+  if (s.reset) moves = s.moves;
+  else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
+  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt };
+  saveSynced(); dirty();
+}
+const wire = q => q.kind === 'item' ? { id: q.id, kind: 'item', item: q.item, auto: q.auto } : q.kind === 'edit' ? { id: q.id, kind: 'edit', sku: q.sku, patch: q.patch } : { id: q.id, kind: 'move', move: q.move };
+async function syncNow(manual) {
+  if (ui.busy) return;
+  if (!cfg.url) { if (manual) toast('Not connected yet. Everything is saved on this device.'); return; }
+  ui.busy = true; ui.err = ''; renderSync();
+  try {
+    let batch, pushed = false;
+    while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
+      const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId } });
+      const res = new Map(data.results.map(r => [r.id, r]));
+      data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); });
+      queue = queue.filter(q => !(res.get(q.id) && res.get(q.id).ok));
+      batch.forEach(b => { const q = queue.find(x => x.id === b.id); if (!q) return; const r = res.get(q.id); q.status = 'failed'; q.error = r ? r.error : 'The sheet did not answer for this entry'; });
+      // Whatever is still queued for a toy the sheet refused must not be sent against another toy's SKU.
+      queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySku(q) === f.item.sku) { q.status = 'failed'; q.error = 'Its toy was refused'; } }));
+      applySnapshot(data.sync); saveQueue(); pushed = true;
+    }
+    if (!pushed) applySnapshot(await api('sync', { have: { rows: meta.rows, lastId: meta.lastId } }));
+    if (manual) toast('Synced');
+  } catch (e) {
+    ui.err = e.message; if (manual || !e.network) toast(e.message);
+  } finally {
+    ui.busy = false; dirty();
+    // Do not rebuild the screen under someone who is typing; the next keystroke or tap refreshes it.
+    if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) renderSync(); else render();
+  }
+}
+/** The sheet renumbered an app-made SKU (two phones picked the same one); follow it in what is still queued. */
+function renumber(from, to) {
+  queue.forEach(q => { if (q.kind === 'move' && q.move.sku === from) q.move.sku = to; else if (q.kind === 'edit' && q.sku === from) q.sku = to; });
+  if (ui.mv && ui.mv.sku === from) ui.mv.sku = to;
+  if (ui.aSku === from) ui.aSku = to;
+}
+function renderSync() {
+  const b = $('#syncBtn'), t = $('#syncTxt');
+  const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
+  let cls = 'sync', txt;
+  if (!cfg.url) { txt = pend ? pend + ' saved here' : 'Local only'; }
+  else if (ui.busy) { cls += ' busy'; txt = 'Syncing'; }
+  else if (ui.err) { cls += ' err'; txt = 'Sync failed'; }
+  else if (failed) { cls += ' err'; txt = failed + ' need attention'; }
+  else if (pend) { cls += ' pending'; txt = pend + ' waiting'; }
+  else { cls += ' ok'; txt = meta.syncedAt ? 'Synced ' + new Date(meta.syncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Connected'; }
+  b.className = cls; t.textContent = txt;
+}
+
+/* ---------- toast & sheets ---------- */
+let toastTimer;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200); }
+function openSheet(html) { $('#sheet').innerHTML = html; $('#layer').hidden = false; $('#sheet').scrollTop = 0; }
+function closeSheet() { $('#layer').hidden = true; $('#sheet').innerHTML = ''; }
+function copyText(text) {
+  const fallback = () => { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} ta.remove(); return Promise.resolve(); };
+  return navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).catch(fallback) : fallback();
+}
+
+/* ---------- rendering ---------- */
+const TABS = [['stock', '▦', 'Stock'], ['move', '⇅', 'Move'], ['activity', '☰', 'Activity'], ['import', '⇩', 'Import']];
+function render() {
+  $('#tabs').innerHTML = TABS.map(([k, g, n]) => `<button data-act="tab" data-t="${k}" class="${prefs.tab === k ? 'on' : ''}"><b>${g}</b>${n}</button>`).join('');
+  ({ stock: renderStock, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]();
+  renderSync();
+}
+const view = () => $('#view');
+
+/* Stock */
+function renderStock() {
+  const L = live(), act = L.list.filter(i => i.active);
+  let units = 0, value = 0, attention = 0;
+  act.forEach(i => { const n = Math.max(L.stock.get(i.sku) || 0, 0); units += n; if (i.price != null) value += n * i.price; if (status(i) !== 'ok') attention++; });
+  if (!L.list.length) {
+    view().innerHTML = `<div class="empty"><h3>No toys yet</h3><p>Add one by hand, or send Claude a photo of the shelves and paste the result in Import.</p>
+      <div class="actions"><button class="btn primary" data-act="newItem">Add a toy</button><button class="btn" data-act="tab" data-t="import">Import from a photo</button></div></div>`;
+    return;
+  }
+  view().innerHTML = `
+    <div class="cards">
+      <div class="card"><small>Units</small><b>${units.toLocaleString()}</b></div>
+      <div class="card"><small>Toys</small><b>${act.length}</b></div>
+      <div class="card ${attention ? 'warn' : ''}"><small>Low / out</small><b>${attention}</b></div>
+      <div class="card"><small>Retail value</small><b>${value ? money(Math.round(value)) : '–'}</b></div>
+    </div>
+    <div class="bar"><input id="q" type="search" placeholder="Search name, category or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn primary" data-act="newItem">+ Toy</button></div>
+    <div class="chips">${['All', ...L.cats].map(c => `<button class="chip ${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="seg">${[['all', 'All'], ['attn', 'Low / out'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
+    <div id="stockList"></div>`;
+  renderStockList();
+}
+function renderStockList() {
+  const L = live(), q = norm(ui.q);
+  let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
+  if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
+  if (q) rows = rows.filter(i => norm(i.name + ' ' + i.sku + ' ' + catOf(i)).includes(q));
+  if (ui.filter === 'attn') rows = rows.filter(i => status(i) !== 'ok');
+  if (ui.filter === 'out') rows = rows.filter(i => ['out', 'neg'].includes(status(i)));
+  const box = $('#stockList'); if (!box) return;
+  if (!rows.length) { box.innerHTML = `<div class="empty">Nothing matches.</div>`; return; }
+  box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
+    const s = status(i), n = stockOf(i.sku);
+    return `<button class="item" data-act="item" data-sku="${esc(i.sku)}"><div class="main"><div class="name">${esc(i.name)}</div><div class="sub">${esc(catOf(i))} · ${esc(i.sku)}${i.price != null ? ' · ' + money(i.price) : ''}${s === 'low' ? ' · reorder at ' + minOf(i) : ''}</div></div><div class="qty ${s}">${n}</div></button>`;
+  }).join('')}</div>${rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''}`;
+}
+function openItem(sku) {
+  const L = live(), i = L.map.get(sku); if (!i) return;
+  const n = stockOf(sku), s = status(i);
+  const recent = L.all.filter(m => m.sku === sku).sort(cmpMove).slice(0, 6);
+  openSheet(`
+    <div class="top"><h2>${esc(i.name)}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div class="sub hint">${esc(catOf(i))} · ${esc(i.sku)}${i.price != null ? ' · ' + money(i.price) : ''}${i.active ? '' : ' · archived'}</div>
+    <div class="picked"><div class="main"><div class="bigqty">${n}</div><div class="hint">in stock${s === 'low' ? ' · low (reorder at ' + minOf(i) + ')' : s === 'out' ? ' · out of stock' : s === 'neg' ? ' · negative, run a count' : ''}</div></div></div>
+    <div class="actions"><button class="btn primary" data-act="moveFor" data-sku="${esc(sku)}" data-dir="In">+ Stock in</button><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="Out">− Stock out</button><button class="btn" data-act="editItem" data-sku="${esc(sku)}">Edit</button></div>
+    <div><div class="lbl">Recent movements</div>${recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div><button class="btn" style="margin-top:8px;width:100%" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : `<div class="hint">None yet.</div>`}</div>`);
+}
+
+/* Item editor */
+function openItemEditor(sku) {
+  const i = sku ? live().map.get(sku) : null;
+  openSheet(`
+    <div class="top"><h2>${i ? 'Edit toy' : 'New toy'}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div><label for="fName">Name</label><input id="fName" value="${esc(i ? i.name : '')}" autocomplete="off"></div>
+    <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
+    <div class="row2"><div><label for="fMin">Reorder at</label><input id="fMin" type="number" inputmode="numeric" min="0" step="1" placeholder="${prefs.low}" value="${i && i.min != null ? i.min : ''}"></div>
+      <div><label for="fSku">SKU / barcode</label><input id="fSku" value="${esc(i ? i.sku : nextSku())}" data-sug="${esc(i ? '' : nextSku())}" ${i ? 'disabled' : ''} autocomplete="off"></div></div>
+    ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0"></div>`}
+    <div class="actions"><button class="btn primary" data-act="saveItem" ${i ? `data-sku="${esc(i.sku)}"` : ''}>Save</button>${i ? `<button class="btn ${i.active ? 'danger' : ''}" data-act="archive" data-sku="${esc(i.sku)}">${i.active ? 'Archive' : 'Restore'}</button>` : ''}</div>`);
+}
+function saveItem(sku) {
+  const name = $('#fName').value.trim().replace(/\s+/g, ' '), cat = $('#fCat').value.trim() || 'General';
+  const price = $('#fPrice').value === '' ? null : Number($('#fPrice').value);
+  const min = $('#fMin').value === '' ? null : Number($('#fMin').value);
+  if (!name) return toast('Give the toy a name.');
+  if (price != null && (isNaN(price) || price < 0)) return toast('Price must be zero or more.');
+  if (min != null && (!Number.isInteger(min) || min < 0)) return toast('Reorder level must be a whole number.');
+  const clash = live().list.find(x => norm(x.name) === norm(name) && x.sku !== sku);
+  if (clash) return toast(`“${clash.name}” already exists.`);
+  if (sku) {
+    const cur = live().map.get(sku), patch = {};
+    if (name !== cur.name) patch.name = name; if (cat !== catOf(cur)) patch.cat = cat;
+    if (price !== cur.price) patch.price = price; if (min !== (cur.min == null ? null : cur.min)) patch.min = min;
+    if (Object.keys(patch).length) qEdit(sku, patch);
+    closeSheet(); commit(); toast('Saved');
+  } else {
+    const nsku = $('#fSku').value.trim();
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(nsku)) return toast('SKU can use letters, digits, dots, dashes and underscores.');
+    if (live().map.has(nsku)) return toast('That SKU is already used.');
+    const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
+    if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
+    qItem({ sku: nsku, name, cat, price, min, active: true }, nsku === $('#fSku').dataset.sug);
+    if (start > 0) qMove({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', qty: start, reason: 'Opening', ref: '', note: '' });
+    closeSheet(); commit(); toast(`${name} added`);
+  }
+}
+
+/* Move */
+function renderMove() {
+  const m = ui.mv || (ui.mv = { sku: '', dir: 'In', qty: 1, reason: 'Restock', date: todayISO(), note: '' });
+  const it = m.sku && live().map.get(m.sku);
+  view().innerHTML = `<div class="panel">
+    <div><div class="lbl">Toy</div><div id="pick">${it
+      ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(it.sku)} · ${stockOf(it.sku)} in stock</div></div><button class="btn" data-act="unpick">Change</button></div>`
+      : `<input id="mvQ" type="search" placeholder="Search by name or SKU" autocomplete="off"><div class="sug" id="sug"></div>`}</div></div>
+    <div class="seg dir" style="margin:0"><button class="in ${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In · stock arrives</button><button class="out ${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out · stock leaves</button></div>
+    <div class="row2">
+      <div><label for="mvQty">Quantity</label><div class="step"><button data-act="qty" data-d="-1" aria-label="Less">−</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}"><button data-act="qty" data-d="1" aria-label="More">+</button></div></div>
+      <div><label for="mvReason">Reason</label><select id="mvReason">${FORM_REASONS[m.dir].map(r => `<option ${r === m.reason ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2"><div><label for="mvDate">Date</label><input id="mvDate" type="date" value="${esc(m.date)}"></div><div><label for="mvNote">Note</label><input id="mvNote" value="${esc(m.note)}" placeholder="Optional" autocomplete="off"></div></div>
+    <div class="hint" id="mvHint"></div>
+    <button class="btn primary big" data-act="saveMove">Record ${m.dir === 'In' ? 'stock in' : 'stock out'}</button>
+  </div>`;
+  updateMvHint();
+}
+function updateMvHint() {
+  const m = ui.mv, h = $('#mvHint'); if (!h) return;
+  const it = m.sku && live().map.get(m.sku), q = parseInt(m.qty, 10);
+  if (!it) { h.textContent = ''; return; }
+  const have = stockOf(it.sku), after = have + (m.dir === 'In' ? 1 : -1) * (isNaN(q) ? 0 : q);
+  h.innerHTML = `Stock <b>${have}</b> → <b style="color:${after < 0 ? 'var(--bad)' : 'inherit'}">${after}</b>${after < 0 ? ' (below zero)' : ''}`;
+}
+function renderSug(text) {
+  const box = $('#sug'); if (!box) return;
+  const n = norm(text); if (!n) { box.innerHTML = ''; return; }
+  const rows = live().list.filter(i => i.active && norm(i.name + ' ' + i.sku).includes(n)).slice(0, 8);
+  box.innerHTML = rows.length ? rows.map(i => `<button data-act="pick" data-sku="${esc(i.sku)}"><b>${esc(i.name)}</b> <span class="hint">${esc(i.sku)} · ${stockOf(i.sku)} in stock</span></button>`).join('') : `<button disabled>No match. Add it from Stock → + Toy.</button>`;
+}
+function saveMove() {
+  const m = ui.mv, it = m.sku && live().map.get(m.sku);
+  if (!it) return toast('Pick a toy first.');
+  const qty = Number(m.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  const date = parseDate(m.date); if (!date) return toast('Check the date.');
+  const have = stockOf(it.sku);
+  if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
+  qMove({ id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim() });
+  const after = have + (m.dir === 'In' ? qty : -qty);
+  ui.mv = { sku: '', dir: m.dir, qty: 1, reason: defaultReason(m.dir), date: todayISO(), note: '' };
+  commit(); toast(`${signed(m.dir, qty)} ${it.name} → ${after} in stock`);
+}
+
+/* Activity */
+const cmpMove = (a, b) => (a.date === b.date ? b._i - a._i : a.date < b.date ? 1 : -1);
+function moveRow(m, withName = true) {
+  const it = live().map.get(m.sku), q = m.q;
+  const tag = q ? (q.status === 'failed' ? '<span class="tag bad">failed</span>' : '<span class="tag warn">waiting</span>') : '';
+  return `<button class="item" data-act="move" data-id="${esc(m.id)}"><div class="delta ${m.dir === 'In' ? 'in' : 'out'}">${signed(m.dir, m.qty)}</div><div class="main"><div class="name">${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${tag}</div><div class="sub">${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.note ? ' · ' + esc(m.note) : ''}</div></div></button>`;
+}
+function renderActivity() {
+  const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
+  view().innerHTML = `
+    ${failed ? `<div class="banner bad"><span><b>${failed}</b> entr${failed === 1 ? 'y was' : 'ies were'} refused by the sheet. Tap a tagged row to see why.</span><button class="btn" data-act="retryAll">Retry</button></div>` : ''}
+    ${queue.filter(q => q.status === 'failed' && q.kind !== 'move').map(q => `<div class="banner bad"><span>${q.kind === 'item' ? `New toy “${esc(q.item.name)}” (${esc(q.item.sku)})` : `Edit of ${esc(q.sku)}`} was refused: ${esc(q.error || 'unknown reason')}.${q.kind === 'item' ? ' Deleting it also deletes stock entries waiting on it.' : ''}</span><button class="btn" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button></div>`).join('')}
+    ${pend && !failed ? `<div class="banner warn"><span><b>${pend}</b> waiting to reach the sheet.</span><button class="btn" data-act="sync">Sync</button></div>` : ''}
+    <div class="bar"><input id="aq" type="search" placeholder="Filter activity" value="${esc(ui.aq)}" autocomplete="off"></div>
+    ${ui.aSku ? `<div class="chips"><button class="chip on" data-act="clearSku">${esc((live().map.get(ui.aSku) || { name: ui.aSku }).name)} ✕</button></div>` : ''}
+    <div id="actList"></div>`;
+  renderActList();
+}
+function renderActList() {
+  const box = $('#actList'); if (!box) return;
+  const L = live(), q = norm(ui.aq);
+  let rows = L.all.slice();
+  if (ui.aSku) rows = rows.filter(m => m.sku === ui.aSku);
+  if (q) rows = rows.filter(m => norm([m.date, m.sku, (L.map.get(m.sku) || {}).name, m.reason, m.note].join(' ')).includes(q));
+  rows.sort(cmpMove);
+  if (!rows.length) { box.innerHTML = `<div class="empty">No movements yet.</div>`; return; }
+  const shown = rows.slice(0, ui.aN); let out = '', day = '';
+  shown.forEach(m => { if (m.date !== day) { if (day) out += '</div>'; day = m.date; out += `<div class="day">${esc(fmtDay(day))}</div><div class="list">`; } out += moveRow(m); });
+  box.innerHTML = out + '</div>' + (rows.length > shown.length ? `<div class="actions"><button class="btn" data-act="more">Show more (${rows.length - shown.length} older)</button></div>` : '');
+}
+function openMove(id) {
+  const m = live().all.find(x => x.id === id); if (!m) return;
+  const it = live().map.get(m.sku), q = m.q;
+  const reversed = live().all.some(x => x.ref === m.id && x.reason === 'Correction');
+  openSheet(`
+    <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(it ? it.name : m.sku)}</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd><dt>SKU</dt><dd>${esc(m.sku)}</dd>${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>Corrects</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
+    <div class="actions">${q
+      ? `${q.status === 'failed' ? `<button class="btn primary" data-act="retryOne" data-qid="${esc(q.id)}">Retry</button>` : ''}<button class="btn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button>`
+      : `<button class="btn ${reversed ? '' : 'primary'}" data-act="reverse" data-id="${esc(m.id)}" ${reversed ? 'disabled' : ''}>${reversed ? 'Already reversed' : 'Reverse this movement'}</button>`}</div>
+    ${q ? '' : `<p class="hint">Movements are never edited or deleted. Reversing adds an opposite entry, so the history stays complete.</p>`}`);
+}
+function reverseMove(id) {
+  const m = moves.find(x => x.id === id); if (!m) return;
+  qMove({ id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` });
+  closeSheet(); commit(); toast('Reversal recorded');
+}
+
+/* ---------- import ---------- */
+function splitLine(line) {
+  if (line.includes('\t')) return line.split('\t').map(s => s.trim());
+  if (line.includes('|')) return line.split('|').map(s => s.trim());
+  if (line.includes(';')) return line.split(';').map(s => s.trim());
+  return null;
+}
+function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
+function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
+
+function parseCount(text) {
+  const rows = [], seen = new Set();
+  cleanLines(text).forEach((line, idx) => {
+    const c = splitLine(line);
+    if (!c) { rows.push({ line, status: 'bad', msg: 'Columns must be separated by tabs (or |).', on: false, name: line.slice(0, 40) }); return; }
+    const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
+    if (idx === 0 && /^(count|qty|quantity|stock|on hand)/i.test(cnt.trim())) return;
+    const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '' };
+    if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; rows.push(r); return; }
+    if (cnt === '' || cnt === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; rows.push(r); return; }
+    if (!/^\d+$/.test(cnt.trim())) { r.status = 'bad'; r.msg = `“${cnt}” is not a whole number.`; rows.push(r); return; }
+    r.count = Number(cnt);
+    r.match = findItem(r.name);
+    if (!r.match) r.similar = similarItem(r.name);
+    rows.push(r);
+  });
+  settleCount(rows);
+  return rows;
+}
+/** Decides each row's status from the current stock, so remapping a row only needs one call. */
+function settleCount(rows) {
+  const used = new Set();
+  rows.forEach(r => {
+    if (['bad', 'skip'].includes(r.status) && r.count == null) return;
+    r.msg = ''; r.status = '';
+    const key = r.match ? 'sku:' + r.match.sku : 'name:' + norm(r.name);
+    if (used.has(key)) { r.status = 'bad'; r.msg = 'Listed twice in this paste. Combine the counts.'; r.on = false; return; }
+    used.add(key);
+    if (r.match) {
+      const have = stockOf(r.match.sku), d = r.count - have;
+      r.have = have; r.delta = d;
+      r.status = d === 0 ? 'same' : 'count';
+      r.on = d !== 0 || !r.match.active;
+      if (!r.match.active) r.msg = 'Archived. Applying restores it.';
+    } else {
+      r.status = 'new'; r.on = !r.similar;
+      if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
+    }
+  });
+}
+function parseMoves(text) {
+  const rows = [], L = live(), run = new Map();
+  const seenKey = new Set(L.all.map(m => [m.date, m.sku, m.dir, m.qty, m.reason].join('|')));
+  cleanLines(text).forEach((line, idx) => {
+    const c = splitLine(line);
+    if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
+    const [d = '', nm = '', dr = '', q = '', rs = '', note = ''] = c;
+    if (idx === 0 && /^date/i.test(d)) return;
+    const r = { date: parseDate(d), name: nm.trim(), dir: /^(in|\+)$/i.test(dr.trim()) ? 'In' : /^(out|-|−)$/i.test(dr.trim()) ? 'Out' : '', qty: /^\d+$/.test(q.trim()) ? Number(q) : 0, reason: '', note: note.trim(), on: false, status: 'ok', msg: '' };
+    const fail = m => { r.status = 'bad'; r.msg = m; rows.push(r); };
+    if (!r.date) return fail(`Date “${d}” not understood. Use 2026-11-15 or 11/15/26.`);
+    r.item = findItem(nm);
+    if (!r.item) { const s = similarItem(nm); return fail(`No toy matches “${nm}”.` + (s ? ` Did you mean “${s.name}”?` : '')); }
+    if (!r.dir) return fail('Direction must be In or Out.');
+    if (r.qty < 1) return fail('Quantity must be a whole number, 1 or more.');
+    const want = rs.trim(); r.reason = want ? [...IN_ONLY, ...OUT_ONLY, ...EITHER].find(x => x.toLowerCase() === want.toLowerCase()) || '' : defaultReason(r.dir);
+    if (!r.reason) return fail(`Unknown reason “${want}”.`);
+    if (!reasonOK(r.dir, r.reason)) return fail(`${r.reason} cannot be recorded as ${r.dir}.`);
+    const dup = seenKey.has([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
+    seenKey.add([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
+    const bal = (run.has(r.item.sku) ? run.get(r.item.sku) : stockOf(r.item.sku)) + (r.dir === 'In' ? r.qty : -r.qty);
+    run.set(r.item.sku, bal);
+    if (dup) { r.status = 'dup'; r.msg = 'Same date, toy, direction, quantity and reason already exist. Tick to add anyway.'; }
+    else { r.on = true; if (bal < 0) { r.status = 'warn'; r.msg = `Stock would drop to ${bal}.`; } }
+    rows.push(r);
+  });
+  return rows;
+}
+const STATUS_LABEL = { new: 'New toy', count: 'Count', same: 'No change', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+function renderImport() {
+  const count = ui.mode === 'count';
+  view().innerHTML = `
+    <div class="seg"><button class="${count ? 'on' : ''}" data-act="mode" data-m="count">Count from photo</button><button class="${count ? '' : 'on'}" data-act="mode" data-m="moves">Movements</button></div>
+    <p class="hint">${count
+      ? 'Send Claude a photo of the shelves, then paste its answer here. Counts are compared with the stock on file; only the differences are recorded. Toys missing from the paste are left alone.'
+      : 'Paste rows of <b>date, toy, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.'}</p>
+    ${count ? `<button class="btn" style="width:100%" data-act="copyPrompt">Copy the prompt and toy list for Claude</button>` : ''}
+    <textarea id="impText" rows="7" spellcheck="false" placeholder="${count ? 'Name⇥Category⇥Count⇥Price⇥Note' : 'Date⇥Toy⇥In/Out⇥Qty⇥Reason⇥Note'}"></textarea>
+    <div class="actions"><button class="btn primary" data-act="impParse">Preview</button><button class="btn" data-act="impClear">Clear</button></div>
+    <div id="impOut"></div>`;
+  $('#impText').value = ui.text;
+  renderImpOut();
+}
+function renderImpOut() {
+  const box = $('#impOut'); if (!box) return;
+  const imp = ui.imp; if (!imp || imp.mode !== ui.mode) { box.innerHTML = ''; return; }
+  if (!imp.rows.length) { box.innerHTML = `<div class="empty">No rows found. Check that columns are separated by tabs.</div>`; return; }
+  const n = imp.rows.filter(r => r.on).length;
+  box.innerHTML = `<div class="prev">${imp.rows.map((r, i) => {
+    const can = !['bad', 'skip'].includes(r.status);
+    let detail = '';
+    if (imp.mode === 'count') {
+      if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})`;
+      else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
+      else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}`;
+    } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.note ? ' · ' + esc(r.note) : ''}`;
+    return `<div class="prow ${r.on ? '' : 'off'}"><input type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Include"><div class="main"><div class="name">${esc(r.name)} <span class="tag ${['bad'].includes(r.status) ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span></div>${detail ? `<div class="sub">${detail}</div>` : ''}${r.msg ? `<div class="sub">${esc(r.msg)}</div>` : ''}${r.similar && !r.match ? `<button class="go" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
+  }).join('')}</div><div class="actions"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${n} change${n === 1 ? '' : 's'}</button></div>`;
+}
+function applyCount(rows) {
+  let nNew = 0, nMove = 0; const done = new Set();
+  rows.forEach(r => {
+    if (!r.on || !['new', 'count', 'same'].includes(r.status)) return;
+    let it = r.match, fresh = false;
+    if (it && done.has(it.sku)) return;
+    if (!it) {
+      it = { sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price, min: null, active: true };
+      qItem(it, true); dirty(); nNew++; fresh = true;
+    } else {
+      const patch = {};
+      if (!it.active) patch.active = true;
+      if (it.price == null && r.price != null) patch.price = r.price;
+      if (!it.cat && r.cat) patch.cat = r.cat;
+      if (Object.keys(patch).length) qEdit(it.sku, patch);
+    }
+    done.add(it.sku);
+    const d = r.count - (fresh ? 0 : stockOf(it.sku));
+    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note }); nMove++; }
+    dirty();
+  });
+  return { nNew, nMove };
+}
+function applyMoves(rows) {
+  let n = 0;
+  rows.forEach(r => { if (r.on && r.item) { qMove({ id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note }); n++; } });
+  return n;
+}
+function buildPrompt() {
+  const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${catOf(i)} | ${stockOf(i.sku)}`).join('\n') || '(empty: no toys yet)';
+  return `Read the attached photo of toy shelves and list every product you can identify.
+Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
+Name<TAB>Category<TAB>Count<TAB>Price<TAB>Note
+
+Rules:
+- Name: brand and product as printed on the box. When the product is already in the catalog below, reuse its exact name.
+- Category: reuse a catalog category when one fits.
+- Count: units visible on the shelf, as a whole number. Write ? when you cannot count reliably.
+- Price: the shelf price as a plain number, blank when not visible.
+- Note: a short remark such as "back row hidden, estimate". Blank when there is nothing to say.
+- If the same product appears in several places, add the counts into one line.
+
+Catalog (Name | Category | In stock):
+${cat}`;
+}
+
+/* ---------- settings ---------- */
+function openSettings() {
+  const failed = queue.filter(q => q.status === 'failed').length, pend = queue.filter(q => q.status === 'pending').length;
+  openSheet(`
+    <div class="top"><h2>Settings</h2><button class="icon" data-act="close" aria-label="Close">✕</button></div>
+    <div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <p class="hint">${cfg.url ? (ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p></div>
+    <div class="actions"><button class="btn primary" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="btn" data-act="redownload">Re-download everything</button>` : ''}</div>
+    <div class="row2"><div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="4"></div><div><label for="sLow">Default reorder level</label><input id="sLow" type="number" inputmode="numeric" min="0" value="${prefs.low}"></div></div>
+    <div class="actions"><button class="btn" data-act="savePrefs">Save preferences</button></div>
+    <div><div class="lbl">Copy for a spreadsheet</div><div class="actions" style="margin-top:0"><button class="btn" data-act="copyItems">Toys + stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
+    <details><summary>Danger zone</summary><div class="actions"><button class="btn danger" data-act="wipe">Erase data on this device</button></div><p class="hint">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p></details>
+    <p class="hint">Toy Stock ${VERSION}</p>`);
+}
+function parseCode(s) {
+  s = String(s || '').trim(); const i = s.lastIndexOf('#');
+  return i > 0 ? { url: s.slice(0, i).trim(), key: s.slice(i + 1).trim() } : { url: s, key: '' };
+}
+const tsv = rows => rows.map(r => r.map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+
+/* ---------- events ---------- */
+document.addEventListener('click', async ev => {
+  const el = ev.target.closest('[data-act]'); if (!el) return;
+  const a = el.dataset.act, d = el.dataset;
+  switch (a) {
+    case 'tab': prefs.tab = d.t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
+    case 'sync': syncNow(true); break;
+    case 'settings': openSettings(); break;
+    case 'close': closeSheet(); break;
+    case 'cat': ui.cat = d.c; renderStock(); break;
+    case 'filter': ui.filter = d.f; renderStock(); break;
+    case 'newItem': openItemEditor(null); break;
+    case 'item': openItem(d.sku); break;
+    case 'editItem': openItemEditor(d.sku); break;
+    case 'saveItem': saveItem(d.sku || null); break;
+    case 'archive': { const i = live().map.get(d.sku); if (i && (!i.active || confirm(`Archive “${i.name}”? It leaves the lists and pickers; its history stays.`))) { qEdit(d.sku, { active: !i.active }); closeSheet(); commit(); toast(i.active ? 'Archived' : 'Restored'); } break; }
+    case 'moveFor': ui.mv = { sku: d.sku, dir: d.dir, qty: 1, reason: defaultReason(d.dir), date: todayISO(), note: '' }; prefs.tab = 'move'; savePrefs(); closeSheet(); render(); break;
+    case 'seeAll': ui.aSku = d.sku; ui.aq = ''; prefs.tab = 'activity'; savePrefs(); closeSheet(); render(); break;
+    case 'clearSku': ui.aSku = ''; renderActivity(); break;
+    case 'more': ui.aN += 150; renderActList(); break;
+    case 'pick': ui.mv.sku = d.sku; renderMove(); break;
+    case 'unpick': ui.mv.sku = ''; renderMove(); break;
+    case 'dir': ui.mv.dir = d.d; if (!FORM_REASONS[d.d].includes(ui.mv.reason)) ui.mv.reason = defaultReason(d.d); renderMove(); break;
+    case 'qty': { const q = Math.max(1, (parseInt(ui.mv.qty, 10) || 0) + Number(d.d)); ui.mv.qty = q; $('#mvQty').value = q; updateMvHint(); break; }
+    case 'saveMove': saveMove(); break;
+    case 'move': openMove(d.id); break;
+    case 'reverse': reverseMove(d.id); break;
+    case 'dropQ': { const gone = queue.find(x => x.id === d.qid); queue = queue.filter(x => x.id !== d.qid); if (gone && gone.kind === 'item') queue = queue.filter(x => x.kind === 'item' || entrySku(x) !== gone.item.sku); closeSheet(); commit(); toast('Deleted'); break; }
+    case 'retryOne': { const q = queue.find(x => x.id === d.qid); if (q) { q.status = 'pending'; delete q.error; } closeSheet(); commit(); break; }
+    case 'retryAll': queue.forEach(q => { if (q.status === 'failed') { q.status = 'pending'; delete q.error; } }); commit(); syncNow(true); break;
+    case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
+    case 'copyPrompt': await copyText(buildPrompt()); toast('Copied. Paste it in Claude together with the photo.'); break;
+    case 'impParse': { ui.text = $('#impText').value; ui.imp = { mode: ui.mode, rows: ui.mode === 'count' ? parseCount(ui.text) : parseMoves(ui.text) }; renderImpOut(); break; }
+    case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
+    case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; renderImpOut(); break; }
+    case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; settleCount(ui.imp.rows); renderImpOut(); break; }
+    case 'impApply': {
+      const rows = ui.imp.rows;
+      if (ui.imp.mode === 'count') { const r = applyCount(rows); toast(`${r.nNew} new toy${r.nNew === 1 ? '' : 's'}, ${r.nMove} stock change${r.nMove === 1 ? '' : 's'} recorded`); }
+      else { const n = applyMoves(rows); toast(`${n} movement${n === 1 ? '' : 's'} recorded`); }
+      ui.text = ''; ui.imp = null; prefs.tab = 'stock'; savePrefs(); commit(); break;
+    }
+    case 'saveCfg': {
+      const c = parseCode($('#sCode').value);
+      if (!c.url) { cfg = { url: '', key: '' }; store.set('cfg', cfg); ui.err = ''; closeSheet(); render(); toast('Disconnected. Data stays on this device.'); break; }
+      if (!/^https:\/\/|^http:\/\/localhost/.test(c.url) || !c.key) { toast('Paste the web app URL, then #, then the key.'); break; }
+      const prev = cfg; cfg = c;
+      try { await api('ping'); store.set('cfg', cfg); closeSheet(); toast('Connected'); syncNow(false); }
+      catch (e) { cfg = prev; toast(e.message); }
+      break;
+    }
+    case 'redownload': meta = { rows: 0, lastId: '', syncedAt: null }; closeSheet(); syncNow(true); break;
+    case 'savePrefs': prefs.cur = $('#sCur').value.trim() || '₱'; prefs.low = Math.max(0, parseInt($('#sLow').value, 10) || 0); savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
+    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand'], ...L.list.map(i => [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', stockOf(i.sku)])])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note'], ...live().all.sort(cmpMove).map(m => [m.date, m.sku, (live().map.get(m.sku) || {}).name, m.dir, m.qty, m.reason, m.ref, m.note])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'wipe': if (confirm('Erase everything stored on this device?')) { ['cfg', 'items', 'moves', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
+  }
+});
+document.addEventListener('input', ev => {
+  const t = ev.target;
+  switch (t.id) {
+    case 'q': ui.q = t.value; renderStockList(); break;
+    case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
+    case 'mvQ': renderSug(t.value); break;
+    case 'mvQty': ui.mv.qty = t.value; updateMvHint(); break;
+    case 'mvReason': ui.mv.reason = t.value; break;
+    case 'mvDate': ui.mv.date = t.value; break;
+    case 'mvNote': ui.mv.note = t.value; break;
+    case 'impText': ui.text = t.value; break;
+  }
+});
+document.addEventListener('change', ev => { if (ev.target.id === 'mvReason') ui.mv.reason = ev.target.value; });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
+window.addEventListener('online', () => scheduleSync());
+
+/* ---------- start ---------- */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+render();
+if (cfg.url) syncNow(false);
+</script>
+</body>
+</html>

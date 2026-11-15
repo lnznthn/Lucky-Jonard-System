@@ -1,0 +1,189 @@
+# End-to-end test: python3 test/e2e.py  (needs static server on 8765, mock backend on 8766, Chrome)
+import json, sys, urllib.request
+from playwright.sync_api import sync_playwright
+
+APP, API = 'http://localhost:8765/index.html', 'http://localhost:8766'
+SHOTS = '/tmp/shots'
+import os; os.makedirs(SHOTS, exist_ok=True)
+fails = []
+def check(cond, msg):
+    print(('PASS ' if cond else 'FAIL ') + msg)
+    if not cond: fails.append(msg)
+def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
+key = urllib.request.urlopen(API + '/_reset').read().decode()
+CODE = f'{API}/exec#{key}'
+
+def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
+def stock_map(p):
+    tab(p, 'Stock'); out = {}
+    for row in p.query_selector_all('#stockList .item'):
+        out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
+    return out
+def paste_import(p, mode, text):
+    tab(p, 'Import')
+    if mode == 'moves': p.click('button[data-m="moves"]')
+    else: p.click('button[data-m="count"]')
+    p.fill('#impText', text); p.click('button:has-text("Preview")')
+def connect(p, code=CODE):
+    p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
+
+with sync_playwright() as pw:
+    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    ctx1 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
+    p = ctx1.new_page(); errors = []
+    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p.goto(APP)
+    check('No toys yet' in p.inner_text('#view'), 'empty state shows')
+    check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
+    p.screenshot(path=f'{SHOTS}/01-empty.png')
+
+    # ---- photo count import: new items, skipped row, bad row
+    photo = "Hot Wheels 5-Pack\tCars\t12\t₱299\t\nBarbie Dreamhouse\tDolls\t2\t₱5,499\tonly 2 visible\nBlocks 500pc\tBlocks\t?\t\t\nPlush Bear Large\tPlush\t4\t650\t\nBroken Row\tCars\tabc\t\t"
+    paste_import(p, 'count', photo)
+    txt = p.inner_text('#impOut')
+    check(txt.count('New toy') == 3, 'preview: 3 new toys')
+    check('Skipped' in txt and 'Problem' in txt, 'preview: skipped (?) and problem (abc) rows flagged')
+    check('Apply 3 changes' in txt, 'apply button counts only valid rows')
+    p.screenshot(path=f'{SHOTS}/02-import-preview.png')
+    p.click('button:has-text("Apply 3 changes")')
+    sm = stock_map(p)
+    check(sm == {'Barbie Dreamhouse': 2, 'Hot Wheels 5-Pack': 12, 'Plush Bear Large': 4}, f'stock after photo import: {sm}')
+    p.screenshot(path=f'{SHOTS}/03-stock.png')
+
+    # ---- second photo: name variant matches, similar name needs confirmation, unchanged row
+    paste_import(p, 'count', "Hot Wheels 5 Pack\tCars\t10\nBarbie Dreamhouse Playset\tDolls\t3\nPlush Bear Large\tPlush\t4")
+    txt = p.inner_text('#impOut')
+    check('stock 12 → counted 10 (−2)' in txt, 'recount shows delta for exact-normalised name')
+    check('Looks like “Barbie Dreamhouse”' in txt and 'Apply 1 change' in txt, 'similar name is held back by default')
+    check('No change' in txt, 'unchanged row marked No change')
+    p.click('button:has-text("Use “Barbie Dreamhouse”")')
+    check('stock 2 → counted 3 (+1)' in p.inner_text('#impOut') and 'Apply 2 changes' in p.inner_text('#impOut'), 'Use similar remaps the row and recomputes')
+    p.screenshot(path=f'{SHOTS}/04-import-recount.png')
+    p.click('button:has-text("Apply 2 changes")')
+    sm = stock_map(p)
+    check(sm['Hot Wheels 5-Pack'] == 10 and sm['Barbie Dreamhouse'] == 3 and len(sm) == 3, f'stock after recount: {sm}')
+
+    # ---- manual move via Move tab
+    p.click('.item:has-text("Hot Wheels 5-Pack")'); p.screenshot(path=f'{SHOTS}/05-item-sheet.png')
+    p.click('button:has-text("Stock out")')
+    check(p.inner_text('#pick').find('Hot Wheels 5-Pack') >= 0, 'Stock out opens Move with the toy preselected')
+    p.click('button[aria-label="More"]'); p.click('button[aria-label="More"]')
+    check(p.input_value('#mvQty') == '3' and 'Stock 10 → 7' in p.inner_text('#mvHint'), 'stepper and hint show stock 10 → 7')
+    p.fill('#mvNote', 'Weekend sale'); p.screenshot(path=f'{SHOTS}/06-move.png')
+    p.click('button:has-text("Record stock out")')
+    check(stock_map(p)['Hot Wheels 5-Pack'] == 7, 'out 3 leaves 7')
+
+    # ---- out more than stock asks and goes negative
+    p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.fill('#mvQty', '6'); p.click('button:has-text("Record stock out")')
+    check(stock_map(p)['Plush Bear Large'] == -2, 'oversell is allowed after confirm and shows -2')
+    tab(p, 'Stock'); check('neg' in p.get_attribute('.item:has-text("Plush Bear Large") .qty', 'class'), 'negative stock is styled')
+
+    # ---- activity and reverse
+    tab(p, 'Activity'); p.screenshot(path=f'{SHOTS}/07-activity.png')
+    p.click('.item:has-text("Plush Bear Large"):has-text("−6")'); p.click('button:has-text("Delete")')
+    check(stock_map(p)['Plush Bear Large'] == 4, 'deleting an unsynced movement restores stock')
+    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
+    check('Waiting to sync' in p.inner_text('#sheet'), 'unsynced movement says waiting')
+    p.click('button[aria-label="Close"]')
+
+    # ---- edit item
+    tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Edit")')
+    p.fill('#fPrice', '699'); p.fill('#fMin', '5'); p.click('#sheet button.primary:has-text("Save")')
+    check('reorder at 5' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: reorder level 5 shows low state')
+
+    # ---- add item by hand with starting stock; duplicate name refused
+    tab(p, 'Stock'); p.click('button:has-text("+ Toy")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fCat', 'Trains'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
+    check(stock_map(p).get('Toy Train Set') == 6, 'manual item with starting stock 6')
+    p.click('button:has-text("+ Toy")'); p.fill('#fName', 'toy train  set'); p.click('#sheet button.primary:has-text("Save")')
+    check('already exists' in p.inner_text('#toast'), 'duplicate name is refused')
+    p.click('button[aria-label="Close"]')
+    before = stock_map(p)
+
+    # ---- connect: queue flushes into the sheet
+    check(p.inner_text('#syncTxt').endswith('saved here'), 'pill counts items saved on the device')
+    connect(p); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    d = dump()
+    check(len(d['Items']['rows']) - 1 == 4, f"sheet has 4 items: {len(d['Items']['rows']) - 1}")
+    mv_rows = d['Movements']['rows'][1:]
+    check(len(mv_rows) == 7, f'sheet has movement rows: {len(mv_rows)}')
+    check(stock_map(p) == before, 'stock unchanged by sync')
+    check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
+    check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
+    check('=ARRAYFORMULA' in d['Items']['formulas'].get('2,7', ''), 'sheet has the On hand formula')
+    p.screenshot(path=f'{SHOTS}/08-synced.png')
+
+    # ---- reverse a synced movement
+    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")'); p.click('button:has-text("Reverse this movement")')
+    check(stock_map(p)['Hot Wheels 5-Pack'] == 10, 'reversal restores 10')
+    p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    tab(p, 'Activity'); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
+    check(p.is_disabled('button:has-text("Already reversed")'), 'second reversal blocked')
+    p.click('button[aria-label="Close"]')
+    check(any(r[6] == 'Correction' and r[7] for r in dump()['Movements']['rows'][1:]), 'correction row with Ref is in the sheet')
+
+    # ---- device 2 connects and sees the same numbers
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
+    p2.goto(APP); connect(p2); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    check(stock_map(p2) == stock_map(p), f'device 2 matches device 1: {stock_map(p2)}')
+
+    # ---- movements import: dup, unknown item, bad reason, negative warning
+    paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery\n11/12/26\tPlush Bear Large\tOut\t9\tSale\t\n2026-11-12\tHot Wheels 5 Pak\tOut\t1\n2026-11-12\tToy Train Set\tIn\t2\tSale\n2026-11-13\tToy Train Set\tOut\t1")
+    txt = p2.inner_text('#impOut'); p2.screenshot(path=f'{SHOTS}/09-moves-preview.png')
+    check('Below zero' in txt and 'No toy matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown toy, bad reason')
+    check('Apply 3 changes' in txt, 'moves preview applies the 3 good rows')
+    p2.click('button:has-text("Apply 3 changes")'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    check(stock_map(p2)['Hot Wheels 5-Pack'] == 15 and stock_map(p2)['Toy Train Set'] == 5, f'stock after movement import: {stock_map(p2)}')
+    paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery")
+    check('Duplicate?' in p2.inner_text('#impOut') and 'Apply 0 changes' in p2.inner_text('#impOut'), 'pasting the same movement again is held as a duplicate')
+
+    # ---- device 1 catches up
+    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    check(stock_map(p) == stock_map(p2), 'device 1 pulls device 2 changes incrementally')
+
+    # ---- offline: queue then reconnect
+    ctx1.set_offline(True)
+    tab(p, 'Move'); check(p.is_visible('button:has-text("Record stock out")'), 'Move form remembers the last direction (Out)'); p.click('button[data-d="In"]'); p.fill('#mvQ', 'train'); p.click('#sug button'); p.click('button:has-text("Record stock in")')
+    p.wait_for_timeout(1500)
+    check(stock_map(p)['Toy Train Set'] == 6 and 'waiting' in p.inner_text('#syncTxt') or 'failed' in p.inner_text('#syncTxt'), f"offline entry is kept ({p.inner_text('#syncTxt')})")
+    ctx1.set_offline(False); p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    p2.click('#syncBtn'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
+
+    def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    def add_toy(pg, name, start, sku=None):
+        tab(pg, 'Stock'); pg.click('button:has-text("+ Toy")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
+        if sku: pg.fill('#fSku', sku)
+        pg.click('#sheet button.primary:has-text("Save")')
+
+    # ---- two phones invent the same next SKU: the second is renumbered, nobody is credited wrongly
+    add_toy(p, 'Dino Figure', 2); synced(p)
+    sku_dino = [r[0] for r in dump()['Items']['rows'][1:] if r[1] == 'Dino Figure'][0]
+    ctx2.set_offline(True)
+    add_toy(p2, 'Robot Kit', 3)
+    local_sku = p2.inner_text('.item:has-text("Robot Kit") .sub')
+    check(sku_dino in local_sku, f'both phones picked the same SKU {sku_dino} ({local_sku})')
+    ctx2.set_offline(False); p2.click('#syncBtn'); synced(p2); p.click('#syncBtn'); synced(p)
+    items = {r[1]: r[0] for r in dump()['Items']['rows'][1:]}
+    check(items['Dino Figure'] == sku_dino and items['Robot Kit'] != sku_dino, f'Robot Kit renumbered: {items}')
+    check(stock_map(p2)['Dino Figure'] == 2 and stock_map(p2)['Robot Kit'] == 3, f'no cross-credit on device 2: {stock_map(p2)}')
+    check(stock_map(p) == stock_map(p2), 'devices agree after renumbering')
+
+    # ---- a toy the sheet refuses (name already used by another SKU) takes its stock entry down with it
+    add_toy(p, 'Lego Castle', 7); synced(p)
+    ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
+    p2.click('#syncBtn'); p2.wait_for_timeout(1500)
+    check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
+    tab(p2, 'Activity'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
+    check('New toy “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which toy was refused and why')
+    check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
+    p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
+    check(stock_map(p2)['Lego Castle'] == 7 and 'LC-1' not in p2.inner_text('#stockList'), f"after Delete, Lego Castle stays at 7 and LC-1 is gone: {stock_map(p2)}")
+
+    # ---- wrong key
+    p3 = b.new_context().new_page(); p3.goto(APP); connect(p3, f'{API}/exec#wrongkey'); p3.wait_for_timeout(800)
+    check('Wrong key' in p3.inner_text('#toast'), 'wrong key is reported')
+
+    check(not errors, f'no page errors: {errors}')
+    b.close()
+print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
+sys.exit(1 if fails else 0)
