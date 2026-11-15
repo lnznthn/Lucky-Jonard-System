@@ -1,6 +1,6 @@
 # Bodega: how the app works
 
-This file describes release 2.1.0 (`VERSION` `2.1.0`, service worker cache `toys-v2.1.0`). That release changed the app only: `apps-script/Code.gs`, the sync protocol and the sheet are as they were in 2.0.0.
+This file describes release 2.1.1 (`VERSION` `2.1.1`, service worker cache `toys-v2.1.1`). Releases 2.1.0 and 2.1.1 changed the app only: `apps-script/Code.gs`, the sync protocol and the sheet are as they were in 2.0.0.
 
 Bodega is a single-page web app (PWA) for a small shop that sells through chat, over a Google Sheet, installed on a phone's home screen. It is local-first: the phone keeps every item and movement, computes stock itself, and uses the sheet to share data between devices and to keep a record the owner can read and chart. This file is the reference for anyone changing the app, so the logic below does not have to be rediscovered from chat history.
 

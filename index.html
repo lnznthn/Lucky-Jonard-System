@@ -188,7 +188,7 @@ details>.stack{padding-top:8px}
 
 <script>
 'use strict';
-const VERSION = '2.1.0';
+const VERSION = '2.1.1';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -604,11 +604,6 @@ function needsRows() {
 function renderHome() {
   const L = live(), today = todayISO(), month = today.slice(0, 7), act = L.list.filter(i => i.active), waiting = L.inbox.length;
   const upd = 'Update stock' + (waiting ? ' · ' + waiting : '');
-  if (!L.list.length && !waiting) {
-    view().innerHTML = `<div class="empty"><h3>No items yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Update stock.</p>
-      <div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`;
-    return;
-  }
   const sales = L.invs.filter(v => v.type === SALE), tS = sales.filter(v => v.date === today), mS = sales.filter(v => v.date.slice(0, 7) === month);
   const sum = list => Math.round(list.reduce((s, v) => s + v.total, 0));
   let margin = 0, known = true, some = false; mS.forEach(v => v.lines.forEach(l => { if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } }));
@@ -621,7 +616,7 @@ function renderHome() {
   view().innerHTML = `<div class="cols"><div>
     ${sec(`${new Date().toLocaleDateString(undefined, { month: 'long' })} so far`, `<button class="strip" data-act="homeGo" data-to="invs" aria-label="Open the invoice list"><span class="cell"><small>Today</small><b>${money(sum(tS))}</b></span><span class="cell"><small>Month</small><b>${money(sum(mS))}</b></span><span class="cell"><small>Margin</small><b>${some ? money(Math.round(margin)) + (known ? '' : '*') : '–'}</b></span></button>`)}
     ${say ? `<p class="hint" style="margin-top:-12px">${say}</p>` : ''}
-    <div class="actions">${act.length ? `<button class="btn primary" data-act="homeGo" data-to="sale">New sale</button><button class="btn" data-act="tab" data-t="import">${upd}</button>` : `<button class="btn primary" data-act="tab" data-t="import">${upd}</button>`}</div>
+    <div class="actions"><button class="btn primary" data-act="homeGo" data-to="sale">New sale</button><button class="btn" data-act="tab" data-t="import">${upd}</button></div>
     </div><div>${needs}</div></div>`;
 }
 
@@ -881,6 +876,8 @@ function renderInvForm() {
   const f = ui.inv, L = live(), pre = f.preId && L.pres.find(p => p.id === f.preId), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
   const box = $('#sellBody'); if (!box) return;
+  // Nothing to sell yet: say so and offer the one step that fixes it.
+  if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No items to sell yet</h3><p>Add an item with its price, or send Claude photos and review them under Update stock.</p><div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`; return; }
   box.innerHTML = `
     ${pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : ''}
     <div class="stack">${f.lines.map((l, i) => `

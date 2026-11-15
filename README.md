@@ -32,7 +32,7 @@ The app uses Bebas Neue for titles and key numbers and Geist for all other text.
 
 ## Release 2.1.0
 
-Release 2.1.0 changes the app only. It makes no change to `apps-script/Code.gs` or to the sheet, so the sheet still labels the Items and Inbox column `Toy line` while the app calls it Product line. The cache name is `toys-v2.1.0`.
+Release 2.1.0 changes the app only. It makes no change to `apps-script/Code.gs` or to the sheet, so the sheet still labels the Items and Inbox column `Toy line` while the app calls it Product line. The cache name is `toys-v2.1.1`. Release 2.1.1 keeps New sale and Update stock on Home before any item exists.
 
 ## Tests
 
