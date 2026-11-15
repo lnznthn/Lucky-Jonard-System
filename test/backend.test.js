@@ -1,5 +1,5 @@
 // Direct tests of Code.gs through the mock. Run: node test/backend.test.js
-const vm = require('vm'), assert = require('assert');
+const vm = require('vm'), assert = require('assert'), fs = require('fs');
 const { load } = require('./mock-backend');
 const sb = load();
 const key = sb.props.KEY;
@@ -9,7 +9,7 @@ const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: '
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
 assert.equal(call('ping').ok, true);
-assert.ok(sb.sheets.find(s => s.name === 'Items').formulas['2,7'].startsWith('=ARRAYFORMULA'), 'On hand formula');
+assert.deepEqual(sb.sheets.find(s => s.name === 'Items').formulas, {}, 'Items holds no formula');
 assert.equal(sb.sheets.find(s => s.name === 'Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -85,7 +85,7 @@ const res = d => Object.fromEntries(d.results.map(x => [x.id, x]));
 const full = () => call('sync', { have: { rows: 0 } }).data;
 ['Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns'].forEach(n => assert.ok(sheet(n), n + ' tab exists'));
 
-// 9. toy details: stored, patched, validated; On hand formula column is never written
+// 9. item details: stored, patched, validated; On hand is a written number
 r = add([
   item('T0100', 'Grandista Son Goku', { cat: 'Figures', price: 1800, mfr: 'Bandai Spirits', brand: 'Banpresto', line: 'Grandista', chr: 'Son Goku', rel: '2019-06', relCheck: true }),
   { ...item('T0101', 'Bad Release', { rel: 'June 2019' }), id: 'badrel' },
@@ -97,8 +97,8 @@ assert.ok(z9.iT0100.ok && z9.ed9.ok && z9.ed10.ok); assert.match(z9.badrel.error
 let goku = r.sync.items.find(i => i.sku === 'T0100');
 assert.deepEqual([goku.mfr, goku.brand, goku.line, goku.chr, goku.rel, goku.relCheck], ['Bandai Spirits', 'Banpresto', 'Grandista', 'Goku', '2019-06-20', false]);
 assert.equal(r.sync.items.find(i => i.sku === 'T0002').brand, '=Brand', 'detail text is stored as typed');
-assert.ok(sheet('Items').formulas['2,7'].startsWith('=ARRAYFORMULA'), 'On hand formula survives item writes');
-for (let row = 3; row <= sheet('Items').getLastRow(); row++) assert.equal(sheet('Items').cell(row, 7), undefined, 'column G untouched on row ' + row);
+assert.deepEqual(sheet('Items').formulas, {}, 'no formula after item writes');
+for (let row = 2; row <= sheet('Items').getLastRow(); row++) assert.equal(typeof sheet('Items').cell(row, 7), 'number', 'On hand is a number on row ' + row);
 
 // 10. cost on a receipt movement
 r = add([move('c1', 'T0100', 'In', 4, 'Restock', { cost: 1200 }), move('c2', 'T0100', 'In', 1, 'Restock', { cost: -5 })]);
@@ -254,4 +254,179 @@ vm.runInContext('setup()', sb); assert.ok(sheet('Inbox') && sheet('Inbox').textC
 // 20. nothing internal leaks, and unknown kinds are refused
 assert.ok(!JSON.stringify(full()).includes('"_row"') && !JSON.stringify(full()).includes('"_dirty"'));
 assert.match(add([{ id: 'u1', kind: 'nuke' }]).results[0].error, /Unknown entry type/);
+// ---------- 2.2: writes find rows by key, On hand is a number, Browse, Edits, warnings ----------
+function bench(file) {
+  const b = load(file), k = b.props.KEY;
+  const c = (action, extra = {}) => { b.__e = { postData: { contents: JSON.stringify({ key: k, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', b).text); };
+  const fullB = () => c('sync', { have: { rows: 0 } }).data;
+  const addB = entries => { const s = fullB(); return c('add', { have: { rows: s.rows, lastId: s.lastId }, entries }).data; };
+  return { b, c, full: fullB, add: addB, sheet: n => b.sheets.find(x => x.name === n) };
+}
+const edit = (id, sku, patch) => ({ id, kind: 'edit', sku, patch });
+const MSG = (tab, key, what) => `The ${tab} tab was changed in Google Sheets (${key} ${what}). Nothing was written for this entry; fix the tab and sync again.`;
+const W = bench();
+const names = () => Object.fromEntries(W.sheet('Items').rowsOf().map(r => [r[0], r[1]]));
+const G = () => Object.fromEntries(W.sheet('Items').rowsOf().map(r => [r[0], r[6]]));
+r = W.add(['A', 'B', 'C', 'D', 'E', 'F'].map((x, i) => item('S' + i, 'Item ' + x)).concat([move('o1', 'S0', 'In', 5, 'Opening'), move('o2', 'S1', 'In', 2, 'Opening'), move('o3', 'S2', 'In', 7, 'Opening')]));
+assert.ok(r.results.every(x => x.ok)); assert.deepEqual(r.warnings, []); assert.deepEqual(r.sync.warnings, []);
+
+// (a) the owner sorts Items between two requests: an edit still lands on its SKU
+W.sheet('Items').putRows(W.sheet('Items').rowsOf().reverse());
+let want = names();
+r = W.add([edit('a1', 'S2', { name: 'Item C renamed', price: 5 }), edit('a2', 's4', { cat: 'Lower' })]);
+assert.ok(r.results.every(x => x.ok)); want.S2 = 'Item C renamed';
+assert.deepEqual(names(), want, 'every row keeps its own item');
+let rowS2 = W.sheet('Items').rowsOf().find(x => x[0] === 'S2'), rowS4 = W.sheet('Items').rowsOf().find(x => x[0] === 'S4');
+assert.deepEqual([rowS2[1], rowS2[3], rowS2[6], rowS4[1], rowS4[2]], ['Item C renamed', 5, 7, 'Item E', 'Lower'], 'whole row written on the right SKU, SKU matched without case');
+
+// (b) rows move between the read and the write inside one request
+let fired = 0;
+W.b.ss.onSetValues = sh => { if (sh.name === 'Items' && !fired++) { const rows = sh.rowsOf(); sh.putRows([rows[3], rows[0], rows[5], rows[1], rows[4], rows[2]]); } };
+const writesBefore = W.sheet('Items').writes;
+r = W.add([edit('b1', 'S0', { name: 'Item A2' }), edit('b2', 'S5', { name: 'Item F2' }), edit('b3', 'S3', { name: 'Item D2' }), move('b4', 'S5', 'In', 1, 'Restock')]);
+W.b.ss.onSetValues = null;
+assert.equal(fired > 0, true, 'the hook fired'); assert.ok(r.results.every(x => x.ok), JSON.stringify(r.results));
+Object.assign(want, { S0: 'Item A2', S5: 'Item F2', S3: 'Item D2' });
+assert.deepEqual(names(), want, 'the shuffle in the middle sends no edit to a wrong row');
+assert.ok(W.sheet('Items').writes - writesBefore <= 5, 'one call per changed row, plus On hand');
+assert.equal(G().S5, 1, 'On hand follows the SKU after the shuffle');
+// a row deleted in the middle: that entry is refused, the others still apply (S1 is put last so it is written after the hook)
+const lastFirst = (sh, key) => sh.putRows(sh.rowsOf().filter(x => x[0] !== key).concat(sh.rowsOf().filter(x => x[0] === key)));
+lastFirst(W.sheet('Items'), 'S1'); fired = 0;
+W.b.ss.onSetValues = sh => { if (sh.name === 'Items' && !fired++) sh.putRows(sh.rowsOf().filter(x => x[0] !== 'S1')); };
+r = W.add([edit('b5', 'S0', { name: 'Item A3' }), edit('b6', 'S1', { name: 'Item B3' }), move('b7', 'S0', 'In', 2, 'Restock')]);
+W.b.ss.onSetValues = null;
+let rb = res(r);
+assert.ok(rb.b5.ok && rb.qb7.ok); assert.equal(rb.b6.error, MSG('Items', 'S1', 'not found'));
+assert.ok(!Object.values(names()).includes('Item B3'), 'the refused edit is written nowhere');
+assert.equal(names().S0, 'Item A3'); assert.equal(G().S0, 7);
+W.add([item('S1', 'Item B')]);   // put the deleted row back for the later cases
+
+// (c) a duplicated SKU is reported and refused; a missing one too; other entries in the same request apply
+const items0 = W.sheet('Items').rowsOf();
+W.sheet('Items').putRows(items0.concat([items0.find(x => x[0] === 'S2')]));
+assert.deepEqual(W.full().warnings, ['Items: SKU S2 appears on 2 rows. The first is used.']);
+assert.equal(W.full().items.filter(i => i.sku === 'S2').length, 1, 'the app gets the first row only');
+r = W.add([edit('c1', 'S2', { name: 'Item C again' }), edit('c2', 'S3', { price: 9 }), move('c3', 'S2', 'In', 1, 'Restock')]);
+let rc = res(r);
+assert.equal(rc.c1.error, MSG('Items', 'S2', 'appears twice')); assert.ok(rc.c2.ok && rc.qc3.ok);
+assert.deepEqual(r.warnings, ['Items: SKU S2 appears on 2 rows. The first is used.'], 'add carries the warning too');
+assert.equal(W.sheet('Items').rowsOf().filter(x => x[1] === 'Item C again').length, 0, 'neither copy was written');
+assert.ok(W.sheet('Items').rowsOf().filter(x => x[0] === 'S2').every(x => x[6] === 8), 'On hand on both copies');
+W.sheet('Items').putRows(W.sheet('Items').rowsOf().filter((x, i, all) => all.findIndex(y => y[0] === x[0]) === i));
+assert.deepEqual(W.full().warnings, []);
+
+// (d) the same for a Pre-orders row, and an entry refused there writes nothing anywhere
+W.add([{ id: 'dk', kind: 'cust', cust: { id: 'c1', name: 'Ana', contact: '0917' } }]);
+const preD = (id, no) => ({ id: 'p' + id, kind: 'pre', pre: { id, date: '2026-11-12', custId: 'c1', sku: 'S0', qty: 1, price: 100, paid: 10, note: '', invId: 'r-' + id, no } });
+r = W.add([preD('d1', 1), preD('d2', 2), preD('d3', 3), preD('d4', 4)]); assert.ok(r.results.every(x => x.ok));
+const preRows = () => Object.fromEntries(W.sheet('Pre-orders').rowsOf().map(x => [x[0], x]));
+W.sheet('Pre-orders').putRows(W.sheet('Pre-orders').rowsOf().reverse());
+r = W.add([{ id: 'dp2', kind: 'prePay', preId: 'd2', paid: 60 }]); assert.ok(r.results[0].ok);
+assert.deepEqual([preRows().d2[9], preRows().d2[10], preRows().d1[9], preRows().d3[9]], [60, 40, 10, 10], 'payment on the right pre-order after a sort');
+fired = 0;
+W.b.ss.onSetValues = sh => { if (sh.name === 'Pre-orders' && !fired++) { const rows = sh.rowsOf(); sh.putRows([rows[2], rows[0], rows[3], rows[1]]); } };
+r = W.add([{ id: 'dp1', kind: 'prePay', preId: 'd1', paid: 20 }, { id: 'dp3', kind: 'prePay', preId: 'd3', paid: 30 }, { id: 'dc4', kind: 'preCancel', preId: 'd4', kept: 5 }]);
+W.b.ss.onSetValues = null;
+assert.ok(fired && r.results.every(x => x.ok)); assert.deepEqual([preRows().d1[9], preRows().d3[9], preRows().d4[11], preRows().d4[12], preRows().d2[9]], [20, 30, 'Cancelled', 5, 60], 'rows moved mid-request still get their own changes');
+const pr0 = W.sheet('Pre-orders').rowsOf();
+W.sheet('Pre-orders').putRows(pr0.concat([pr0.find(x => x[0] === 'd1')]));
+const movesBefore = W.full().rows, invsBefore = W.sheet('Invoices').rowsOf().length;
+r = W.add([{ id: 'dp1b', kind: 'prePay', preId: 'd1', paid: 50 }, { id: 'vd', kind: 'invoice', invoice: { id: 'sale-d1', no: 9, date: '2026-11-15', custId: 'c1', lines: [{ sku: 'S0', qty: 1, price: 100 }], preId: 'd1' } }, { id: 'dp3b', kind: 'prePay', preId: 'd3', paid: 40 }]);
+let rd = res(r);
+assert.equal(rd.dp1b.error, MSG('Pre-orders', 'd1', 'appears twice')); assert.equal(rd.vd.error, MSG('Pre-orders', 'd1', 'appears twice')); assert.ok(rd.dp3b.ok);
+assert.equal(W.full().rows, movesBefore, 'the refused invoice wrote no movement'); assert.equal(W.sheet('Invoices').rowsOf().length, invsBefore, 'and no invoice row');
+assert.ok(W.sheet('Pre-orders').rowsOf().filter(x => x[0] === 'd1').every(x => x[9] === 20 && x[11] === 'Open'), 'neither copy of d1 changed');
+assert.equal(preRows().d3[9], 40);
+lastFirst(W.sheet('Pre-orders'), 'd3'); fired = 0;
+W.b.ss.onSetValues = sh => { if (sh.name === 'Pre-orders' && !fired++) sh.putRows(sh.rowsOf().filter(x => x[0] !== 'd3')); };
+r = W.add([{ id: 'dp2c', kind: 'prePay', preId: 'd2', paid: 70 }, { id: 'dp3c', kind: 'prePay', preId: 'd3', paid: 50 }]);
+W.b.ss.onSetValues = null;
+assert.ok(res(r).dp2c.ok); assert.equal(res(r).dp3c.error, MSG('Pre-orders', 'd3', 'not found'));
+assert.ok(!W.sheet('Pre-orders').rowsOf().some(x => x[9] === 50), 'the refused payment was written nowhere');
+W.sheet('Pre-orders').putRows(W.sheet('Pre-orders').rowsOf().filter((x, i, all) => all.findIndex(y => y[0] === x[0]) === i));
+
+// (e) On hand is a number per SKU, right after every add, with no formula
+const stockNow = () => { const m = {}; W.full().moves.forEach(x => { m[x.sku] = (m[x.sku] || 0) + (x.dir === 'In' ? x.qty : -x.qty); }); return m; };
+W.add([move('e1', 'S0', 'Out', 2, 'Sale'), move('e2', 'S4', 'In', 3, 'Restock'), item('S9', 'Item New')]);
+const st = stockNow();
+assert.deepEqual(G(), Object.fromEntries(Object.keys(names()).map(k => [k, st[k] || 0])), 'On hand matches the movements for every row');
+assert.deepEqual(W.sheet('Items').formulas, {}); assert.equal(G().S9, 0);
+
+// (f) Browse: every item with its numbers, rewritten on add and on sync; a filter stays
+W.add([{ id: 'f1', kind: 'order', order: { id: 'fo1', date: '2026-11-10', sku: 'S5', qty: 4, expected: '', note: '' } }, move('f2', 'S5', 'In', 2, 'Restock', { cost: 100 }), move('f3', 'S5', 'In', 2, 'Restock', { cost: 200 }), move('f4', 'S5', 'Out', 1, 'Sale'), preD('f5', 20)]);
+W.add([{ ...preD('f6', 21), pre: { ...preD('f6', 21).pre, sku: 'S5', qty: 2, paid: 0 } }]);
+const br = W.sheet('Browse');
+assert.equal(br.frozen, 1);
+assert.deepEqual(br.getRange(1, 1, 1, 18).getValues()[0], ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Stock value at cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
+let bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
+assert.equal(Object.keys(bs).length, Object.keys(names()).length, 'one row per item');
+assert.deepEqual(bs.S5.slice(6, 12), [4, 4, 2, 6, 140, 560], 'on hand, incoming, owed, left to promise, average cost (1 uncosted, then 2 at 100 and 2 at 200), stock value');
+assert.deepEqual(bs.S2.slice(0, 6), ['S2', 'Item C renamed', 'Cars', 5, 2, 'Yes']); assert.equal(bs.S2[10], '', 'no cost on file leaves the average blank');
+br.filter = { range: 'A1:R' };
+W.sheet('Items').set(2, 2, 'Typed in the sheet');
+W.full(); bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
+assert.ok(br.rowsOf().some(x => x[1] === 'Typed in the sheet'), 'sync rewrites Browse'); assert.deepEqual(br.filter, { range: 'A1:R' }, 'the filter stays');
+assert.equal(br.getLastRow(), Object.keys(names()).length + 1, 'nothing left below the last item');
+
+// (g) the Edits tab: applied as edit entries at the start of a sync or add, Done or Refused with the reason
+const ed = W.sheet('Edits');
+assert.deepEqual(ed.getRange(1, 1, 1, 5).getValues()[0], ['SKU', 'Field', 'New value', 'Status', 'Note']);
+assert.deepEqual(ed.validation.rule.list, ['Name', 'Category', 'Price', 'Reorder at', 'Active', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
+[['s3', 'Price', '300', '', ''], ['S4', 'Colour', 'red', '', ''], ['T9999', 'Name', 'Ghost', '', ''], ['S5', 'Active', 'maybe', '', ''], ['S9', 'Name', 'Item A3', '', ''],
+ ['S9', 'Product line', '=Line', '', ''], ['S9', 'Release check', 'Verify', '', ''], ['S0', 'Name', 'Old row', 'Done', ''], ['', 'Price', '5', '', '']].forEach((v, i) => v.forEach((x, j) => { if (x !== '') ed.set(i + 2, j + 1, x); }));
+let sy = W.full(), its = Object.fromEntries(sy.items.map(i => [i.sku, i]));
+const edCol = c => ed.rowsOf().map(x => x[c] === undefined ? '' : x[c]);
+assert.deepEqual(edCol(3), ['Done', 'Refused', 'Refused', 'Refused', 'Refused', 'Done', 'Done', 'Done', 'Refused']);
+assert.deepEqual(edCol(4).map(n => n.split(' ').slice(0, 3).join(' ')), ['', 'Field must be', 'Unknown item T9999', 'Active must be', 'An item named', '', '', '', 'SKU is required']);
+assert.deepEqual([its.S3.price, its.S9.line, its.S9.relCheck, its.S0.name], [300, '=Line', true, 'Item A3'], 'applied rows reach Items; a Done row is not applied again');
+assert.equal(Object.fromEntries(W.sheet('Browse').rowsOf().map(x => [x[0], x])).S3[3], 300, 'Browse shows the edit at once');
+ed.set(11, 1, 'S1'); ed.set(11, 2, 'Brand'); ed.set(11, 3, 'Tomica');
+r = W.add([move('g1', 'S1', 'In', 1, 'Restock')]);
+assert.deepEqual(r.results.map(x => x.id), ['qg1'], 'Edits results stay out of the reply to the app');
+assert.equal(ed.cell(11, 4), 'Done'); assert.equal(r.sync.items.find(i => i.sku === 'S1').brand, 'Tomica');
+// an Edits row moved by a sort before its status is written is still found
+ed.set(12, 1, 'S2'); ed.set(12, 2, 'Brand'); ed.set(12, 3, 'Gigo');
+fired = 0; W.b.ss.onSetValues = sh => { if (sh.name === 'Items' && !fired++) ed.putRows(ed.rowsOf().reverse()); };
+W.full(); W.b.ss.onSetValues = null;
+assert.deepEqual(ed.rowsOf().filter(x => x[0] === 'S2' && x[1] === 'Brand').map(x => x[3]), ['Done']);
+
+// Inbox marks from app 2.2 carry Added, Type and Qty and find a row that moved
+const ibx = W.sheet('Inbox');
+[['2026-11-15', 'Count', 'Box One', '2'], ['2026-11-15', 'Count', 'Box Two', '3'], ['2026-11-15', 'Count', 'Box One', '?']].forEach((v, i) => v.forEach((x, j) => ibx.set(i + 2, j + 1, x)));
+const ref = row => { const x = W.full().inbox.find(y => y.row === row); return { row, name: x.name, added: x.added, type: x.type, qty: x.qty }; };
+const refs = [ref(2), ref(3)];
+ibx.putRows([ibx.rowsOf()[2], ibx.rowsOf()[1], ibx.rowsOf()[0]]);   // now Box One ? / Box Two / Box One 2
+r = W.add([{ id: 'ibm', kind: 'inboxDone', rows: refs, mark: 'Done' }]);
+assert.ok(r.results[0].ok);
+assert.deepEqual(ibx.rowsOf().map(x => [x[2], x[3], x[12]]), [['Box One', '?', undefined], ['Box Two', '3', 'Done'], ['Box One', '2', 'Done']], 'the unknown count stays waiting');
+ibx.set(5, 1, '2026-11-15'); ibx.set(5, 2, 'Count'); ibx.set(5, 3, 'Box Three'); ibx.set(5, 4, '1'); ibx.set(5, 13, 'Working');
+assert.ok(!W.full().inbox.some(x => x.name === 'Box Three'), 'a Working row is not sent');
+W.add([{ id: 'ibw', kind: 'inboxDone', rows: [{ row: 5, name: 'Box Three', added: '2026-11-15', type: 'count', qty: '1' }], mark: 'Done' }]);
+assert.equal(ibx.cell(5, 13), 'Working', 'a row with a status is never overwritten');
+
+// (h) setup() on a sheet left by 2.0.0: the formula goes, On hand becomes numbers, nothing is lost; running it again is harmless
+const O = bench(require('path').join(__dirname, 'Code-2.0.0.gs'));
+r = O.add([item('T0001', 'Old One'), item('T0002', 'Old Two', { brand: '=Brand' }), move('h1', 'T0001', 'In', 4, 'Opening'), move('h2', 'T0001', 'Out', 1, 'Sale'), move('h3', 'T0002', 'In', 2, 'Opening', { cost: 50 }),
+  { id: 'hk', kind: 'cust', cust: { id: 'c-h', name: 'Hal', contact: '+63 900' } }]);
+assert.ok(r.results.every(x => x.ok)); assert.ok(O.sheet('Items').formulas['2,7'].startsWith('=ARRAYFORMULA'), 'a 2.0.0 sheet has the formula');
+const tabsH = ['Items', 'Movements', 'Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Inbox'];
+const snap = () => Object.fromEntries(tabsH.map(n => [n, O.sheet(n).rowsOf().map(x => x.filter((v, j) => !(n === 'Items' && j === 6)))]));
+const before22 = snap();
+vm.runInContext(fs.readFileSync(require('path').join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), O.b);
+vm.runInContext('setup()', O.b);
+assert.deepEqual(O.sheet('Items').formulas, {}, 'the formula is gone');
+assert.deepEqual(O.sheet('Items').rowsOf().map(x => x[6]), [3, 2], 'On hand written as numbers');
+assert.deepEqual(snap(), before22, 'every other cell kept');
+assert.ok(O.sheet('Browse') && O.sheet('Edits'), 'Browse and Edits created');
+assert.deepEqual(O.sheet('Browse').rowsOf().map(x => [x[0], x[6], x[10], x[13]]), [['T0001', 3, '', ''], ['T0002', 2, 50, '=Brand']]);
+const prot = () => tabsH.slice(0, 8).map(n => O.sheet(n).getProtections().map(p => [p.desc, p.warn]));
+assert.deepEqual(prot(), tabsH.slice(0, 8).map(() => [['Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.', true]]), 'warning-only protection on the app tabs');
+assert.deepEqual(O.sheet('Inbox').getProtections(), [], 'the Inbox stays open for Claude');
+vm.runInContext('setup()', O.b);
+assert.deepEqual(prot().map(x => x.length), [1, 1, 1, 1, 1, 1, 1, 1], 'running setup again adds no second protection'); assert.deepEqual(snap(), before22);
+assert.equal(O.c('ping').data.version, '2.2.0');
+// app 2.1.1 against backend 2.2.0: the same request shapes still work, the new fields are extra
+r = O.add([move('h4', 'T0002', 'Out', 1, 'Sale'), { id: 'hi', kind: 'inboxDone', rows: [{ row: 2, name: 'Nothing' }], mark: 'Done' }]);
+assert.ok(r.results.every(x => x.ok) && Array.isArray(r.sync.items) && r.sync.items.length === 2); assert.deepEqual(O.sheet('Items').rowsOf().map(x => x[6]), [3, 1]);
 console.log('backend tests passed');

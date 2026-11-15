@@ -46,6 +46,10 @@ def pdf(p, name):
     subprocess.run(['pdftoppm', '-r', '70', '-png', path, f'{SHOTS}/{name}'])
     return d.value.suggested_filename, open(path, 'rb').read(5), info.returncode == 0 and re.search(r'Pages:\s+(\d+)', info.stdout).group(1)
 
+def apply(p, label):
+    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
+    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
+    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, accept_downloads=True)
@@ -61,7 +65,7 @@ with sync_playwright() as pw:
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/01-import-details.png')
     check('Banpresto / Grandista / Son Goku · released 2019-06 (to verify)' in txt, 'preview shows brand, line, character and the verify flag')
     check('Release date “sometime” not understood' in txt and 'Apply 3 changes' in txt, 'an unreadable release date is left blank, row still applies')
-    p.click('button:has-text("Apply 3 changes")'); synced(p)
+    apply(p, 'Apply 3 changes'); synced(p)
     it = {r[1]: r for r in rows('Items')}
     check(it['Grandista Son Goku'][7:13] == ['Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Verify'], f"details reached the sheet: {it['Grandista Son Goku'][7:13]}")
     check(it['Maximatic Luffy'][11:13] == ['', ''], 'no release date, no flag')
@@ -90,15 +94,16 @@ with sync_playwright() as pw:
     paste_import(p, 'count', T.join(['Plain Toy', 'Figures', '1', '', '', 'Sega', 'Gigo', '', 'Zoro', '2023', '']) + '\n' + T.join(['Grandista Son Goku', 'Figures', '2', '', '', 'Other Maker', '', '', '', '', '']))
     txt = p.inner_text('#impOut')
     check('Details' in txt and 'adds manufacturer, brand, character, release date' in txt and 'Apply 1 change' in txt, 'blank details are offered, existing ones are not')
-    p.click('button:has-text("Apply 1 change")'); synced(p)
+    apply(p, 'Apply 1 change'); synced(p)
     it = {r[1]: r for r in rows('Items')}
     check(it['Plain Toy'][7:9] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][7] == 'Bandai Spirits', 'details filled without overwriting')
 
     # ---- receive mode: supplier paperwork adds stock at its cost and sets the average
     paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tFigures\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/03-receive-preview.png')
-    check('+3 at ₱1,200 each' in txt and 'New item' in txt and 'Problem' in txt and 'Apply 2 changes' in txt, 'receive preview')
-    p.click('button:has-text("Apply 2 changes")'); synced(p)
+    check('+3 at ₱1,200 each' in txt and 'New item' in txt and 'Needs a name · 1' in txt and 'Apply 2 changes' in txt, 'receive preview')
+    p.click('#impOut details[data-grp="name"] summary'); check('Problem' in p.inner_text('#impOut') and 'must be a whole number' in p.inner_text('#impOut'), 'the bad receive row is under Needs a name')
+    apply(p, 'Apply 2 changes'); synced(p)
     sm = stock_map(p)
     check(sm['Grandista Son Goku'] == 5 and sm['Gigo Zoro'] == 2, f'stock after receiving: {sm}')
     mv = [r for r in rows('Movements') if r[6] == 'Restock']

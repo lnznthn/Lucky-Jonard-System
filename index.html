@@ -108,7 +108,7 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .hint b{color:var(--text);font-weight:500}
 .lead{font-size:15px}
 .banner{border:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;column-gap:12px;flex-wrap:wrap;font-size:15px}
-.banner.bad{border-color:var(--danger)}.banner.warn{border-color:var(--attn)}
+.banner.bad{border-color:var(--danger)}.banner.warn{border-color:var(--attn)}.banner.danger{border-color:var(--danger);color:var(--danger)}
 .banner>span{flex:1;min-width:180px;padding:6px 0}
 .notice{border:1px solid var(--attn);padding:12px 14px 2px;display:flex;flex-direction:column;gap:4px}
 .notice .t{font-size:15px;font-weight:500}
@@ -139,6 +139,10 @@ details>.stack{padding-top:8px}
 .prow input[type=checkbox]{width:22px;height:22px;min-height:0;margin:1px 0 0;flex:none}
 .prow .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .prow .name{font-size:15px;font-weight:500;color:var(--text);margin:0;cursor:pointer}
+.prow button.name{border:0;background:none;padding:0;text-align:left;font:inherit;font-weight:500;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:4px}
+details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font-weight:500}
+/* Apply stays in reach on a phone: it sits just above the tab bar while the review scrolls. */
+.applybar{position:sticky;bottom:calc(61px + env(safe-area-inset-bottom));z-index:4;background:var(--bg);padding:12px 0 2px;display:flex;flex-direction:column;gap:6px}
 .prow.off .name{color:var(--muted)}
 .prow .sub{font-size:13px;color:var(--muted)}
 .cols,.cols>div{display:flex;flex-direction:column;gap:20px}
@@ -168,6 +172,7 @@ details>.stack{padding-top:8px}
   .layer{align-items:center}
   .sheet{max-width:560px;max-height:88dvh;border-bottom:1px solid var(--line);padding:20px 24px 24px}
   .toast{left:calc(50% + 114px);bottom:28px}
+  .applybar{bottom:0}
 }
 @media(hover:hover){button.item:hover .name,.sug button:not([disabled]):hover b,nav.tabs button:hover{text-decoration:underline;text-underline-offset:4px}.icon:hover,.sync:hover{color:var(--text)}}
 </style>
@@ -188,7 +193,7 @@ details>.stack{padding-top:8px}
 
 <script>
 'use strict';
-const VERSION = '2.1.1';
+const VERSION = '2.2.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -279,7 +284,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
 let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, pdf: null, manual: null, homeMore: false, from: 'home' };
+  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, pdf: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -462,9 +467,10 @@ async function syncNow(manual) {
   let note = '';
   const waitBefore = live().inbox.length;
   try {
-    let batch, pushed = false;
+    let batch, pushed = false, warn = [];
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
       const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId } });
+      warn = (data.sync && data.sync.warnings) || data.warnings || [];
       const res = new Map(data.results.map(r => [r.id, r]));
       data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); if (r.ok && r.fromNo != null) note = `The sheet already had no. ${r.fromNo}, so that document is now no. ${r.no}. Share its PDF again.`; });
       queue = queue.filter(q => !(res.get(q.id) && res.get(q.id).ok));
@@ -473,7 +479,8 @@ async function syncNow(manual) {
       queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySkus(q).includes(f.item.sku)) { q.status = 'failed'; q.error = 'Its item was refused'; } }));
       applySnapshot(data.sync); saveQueue(); pushed = true;
     }
-    if (!pushed) applySnapshot(await api('sync', { have: { rows: meta.rows, lastId: meta.lastId } }));
+    if (!pushed) { const snap = await api('sync', { have: { rows: meta.rows, lastId: meta.lastId } }); warn = snap.warnings || []; applySnapshot(snap); }
+    ui.warn = Array.isArray(warn) ? warn.map(String) : [];   // problems the sheet found in its tabs this sync (backend 2.2 and later)
     const waitNow = (dirty(), live().inbox.length);
     if (note) toast(note);
     else if (waitNow > waitBefore && prefs.tab !== 'import') toast(`${plural(waitNow, 'row')} from Claude to review`);
@@ -617,6 +624,7 @@ function renderHome() {
     ${sec(`${new Date().toLocaleDateString(undefined, { month: 'long' })} so far`, `<button class="strip" data-act="homeGo" data-to="invs" aria-label="Open the invoice list"><span class="cell"><small>Today</small><b>${money(sum(tS))}</b></span><span class="cell"><small>Month</small><b>${money(sum(mS))}</b></span><span class="cell"><small>Margin</small><b>${some ? money(Math.round(margin)) + (known ? '' : '*') : '–'}</b></span></button>`)}
     ${say ? `<p class="hint" style="margin-top:-12px">${say}</p>` : ''}
     <div class="actions"><button class="btn primary" data-act="homeGo" data-to="sale">New sale</button><button class="btn" data-act="tab" data-t="import">${upd}</button></div>
+    ${ui.warn.map(w => `<p class="banner danger" role="alert"><span>${esc(w)}</span></p>`).join('')}
     </div><div>${needs}</div></div>`;
 }
 
@@ -1182,22 +1190,28 @@ const detailNames = p => DETAILS.filter(([k]) => p[k]).map(d => d[1]).join(', ')
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
 const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price == null ? null : r.price, min: null, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
+const unnamed = name => /^unidentified/i.test(String(name || '').trim());
+/** One Count row from its columns: Name, Category, Count, Price, Note, then the item details. */
+function countRow(c) {
+  const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
+  if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
+  if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
+  if (cnt.trim() === '' || cnt.trim() === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; return r; }
+  if (!/^\d+$/.test(cnt.trim())) { r.status = 'bad'; r.msg = `“${cnt}” is not a whole number.`; return r; }
+  r.count = Number(cnt);
+  r.match = findItem(r.name);
+  if (!r.match) r.similar = similarItem(r.name);
+  return r;
+}
 function parseCount(text) {
   const rows = [];
   cleanLines(text).forEach((line, idx) => {
     const c = splitLine(line);
     if (!c) { rows.push({ line, status: 'bad', msg: 'Columns must be separated by tabs (or |).', on: false, name: line.slice(0, 40) }); return; }
-    const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
-    if (idx === 0 && /^(count|qty|quantity|stock|on hand)/i.test(cnt.trim())) return;
-    const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '' };
-    readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
-    if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; rows.push(r); return; }
-    if (cnt === '' || cnt === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; rows.push(r); return; }
-    if (!/^\d+$/.test(cnt.trim())) { r.status = 'bad'; r.msg = `“${cnt}” is not a whole number.`; rows.push(r); return; }
-    r.count = Number(cnt);
-    r.match = findItem(r.name);
-    if (!r.match) r.similar = similarItem(r.name);
-    rows.push(r);
+    if (idx === 0 && /^(count|qty|quantity|stock|on hand)/i.test((c[2] || '').trim())) return;
+    rows.push(countRow(c));
   });
   settleCount(rows);
   return rows;
@@ -1206,7 +1220,7 @@ function parseCount(text) {
 function settleCount(rows) {
   const used = new Set();
   rows.forEach(r => {
-    if (['bad', 'skip'].includes(r.status) && r.count == null) return;
+    if (['bad', 'skip'].includes(r.status) && r.count == null) { r.on = false; return; }
     r.msg = ''; r.status = '';
     const key = r.match ? 'sku:' + r.match.sku : 'name:' + norm(r.name);
     if (used.has(key)) { r.status = 'bad'; r.msg = 'Listed twice in this paste. Combine the counts.'; r.on = false; return; }
@@ -1225,21 +1239,26 @@ function settleCount(rows) {
   });
 }
 /** Supplier paperwork: Name, Qty, Cost each, then the optional toy details and a note. */
+/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note. */
+function recvRow(c) {
+  const [name = '', q = '', cost = '', cat = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: null, note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
+  if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
+  if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
+  if (!/^\d+$/.test(q.trim()) || Number(q) < 1) { r.status = 'bad'; r.msg = `Quantity “${q}” must be a whole number, 1 or more.`; return r; }
+  r.qty = Number(q);
+  r.match = findItem(r.name);
+  if (!r.match) r.similar = similarItem(r.name);
+  return r;
+}
 function parseReceive(text) {
-  const rows = [], taken = new Set(), L = live();
+  const rows = [];
   cleanLines(text).forEach((line, idx) => {
     const c = splitLine(line);
     if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
-    const [name = '', q = '', cost = '', cat = ''] = c;
-    if (idx === 0 && /^(qty|quantity)/i.test(q.trim())) return;
-    const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: null, note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '' };
-    readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
-    if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; rows.push(r); return; }
-    if (!/^\d+$/.test(q.trim()) || Number(q) < 1) { r.status = 'bad'; r.msg = `Quantity “${q}” must be a whole number, 1 or more.`; rows.push(r); return; }
-    r.qty = Number(q);
-    r.match = findItem(r.name);
-    if (!r.match) r.similar = similarItem(r.name);
-    rows.push(r);
+    if (idx === 0 && /^(qty|quantity)/i.test((c[1] || '').trim())) return;
+    rows.push(recvRow(c));
   });
   settleReceive(rows);
   return rows;
@@ -1247,7 +1266,7 @@ function parseReceive(text) {
 function settleReceive(rows) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
-    if (r.status === 'bad' && !r.qty) return;
+    if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
     r.msg = ''; r.order = null;
     if (r.match) {
       r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
@@ -1300,31 +1319,68 @@ const IMP = {
   moves: { name: 'Movements', cols: 'Date⇥Item⇥In/Out⇥Qty⇥Reason⇥Note', parse: parseMoves,
     hint: 'Paste rows of <b>date, item, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.' },
 };
-/** Loads the rows Claude left in the sheet into the same preview the paste box uses. One type at a time. */
+/**
+ * Loads the rows Claude left in the sheet into the review, one Type at a time. The key holds the rows' content,
+ * so a row edited in the sheet after it was first loaded shows as it is now. Corrections, ticks and "Use" choices
+ * are kept for rows that did not change.
+ */
 function inboxLoad() {
   const rows = live().inbox;
   if (!rows.length) { if (ui.imp && ui.imp.src === 'inbox') ui.imp = null; return false; }
-  const type = rows[0].type, set = rows.filter(r => r.type === type), key = type + ':' + set.map(r => r.row).join(',');
+  const type = rows[0].type, set = rows.filter(r => r.type === type), key = type + ':' + JSON.stringify(set);
   if (ui.imp && ui.imp.src === 'inbox' && ui.imp.key === key) return true;
-  // The same toy counted in several photos arrives as several rows: add them into one count.
-  let lines = set;
+  const ref = r => ({ row: r.row, name: r.name, added: r.added, type: r.type, qty: r.qty });
+  // The same item counted in several photos arrives as several rows: add them into one count. Rows with no usable count or name stay apart.
+  let groups = set.map(r => ({ ...r, parts: [r] }));
   if (type === 'count') {
-    const by = new Map();
+    const by = new Map(); groups = [];
     set.forEach(r => {
-      const k = norm(r.name) || r.name, m = by.get(k), n = /^\d+$/.test(String(r.qty).trim()) ? Number(r.qty) : null;
-      if (!m) { by.set(k, { ...r, n }); return; }
-      if (n != null) m.n = (m.n || 0) + n;
+      const ok = /^\d+$/.test(String(r.qty).trim()) && !unnamed(r.name), k = norm(r.name) || r.name, m = ok && by.get(k);
+      if (!m) { const g = { ...r, parts: [r], n: ok ? Number(r.qty) : null }; groups.push(g); if (ok) by.set(k, g); return; }
+      m.parts.push(r); m.n += Number(r.qty);
       ['mfr', 'brand', 'line', 'chr', 'rel', 'verify'].forEach(f => { if (!m[f] && r[f]) m[f] = r[f]; });
       if (r.note && !String(m.note).includes(r.note)) m.note = [m.note, r.note].filter(Boolean).join('; ');
     });
-    lines = [...by.values()].map(m => ({ ...m, qty: m.n == null ? m.qty : m.n }));
+    groups.forEach(g => { if (g.n != null) g.qty = g.n; });
   }
-  const c = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
-  const text = lines.map(r => (type === 'count' ? [r.name, '', r.qty, '', r.note, r.mfr, r.brand, r.line, r.chr, r.rel, r.verify] : [r.name, r.qty, r.cost, '', r.mfr, r.brand, r.line, r.chr, r.rel, r.verify, r.note]).map(c).join('\t')).join('\n');
-  const mode = type === 'count' ? 'count' : 'receive';
+  const mode = type === 'count' ? 'count' : 'receive', c = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+  const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
   ui.rdate = todayISO();
-  ui.imp = { src: 'inbox', key, mode, rows: IMP[mode].parse(text), refs: set.map(r => ({ row: r.row, name: r.name })) };
+  ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
+    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(c);
+    const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
+    if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
+    return impRow(mode, src);
+  }) };
+  resettle(ui.imp);
   return true;
+}
+/** A review row from its source columns with the owner's correction and "Use" choice applied. */
+function impRow(mode, src) {
+  const c = src.cols.slice(), f = src.fix, at = mode === 'count' ? [0, 2, 9] : [0, 1, 8];
+  while (c.length < 11) c.push('');
+  if (f) { c[at[0]] = f.name; c[at[1]] = f.count; c[at[2]] = f.rel; }
+  const r = (mode === 'count' ? countRow : recvRow)(c), use = src.use && live().map.get(src.use);
+  if (use && r.match !== use && (r.count != null || r.qty)) { r.match = use; r.similar = null; }
+  r.src = src;
+  return r;
+}
+/** Works out every row's status again, then puts back what the owner ticked or unticked. */
+function resettle(imp) {
+  (imp.mode === 'receive' ? settleReceive : settleCount)(imp.rows);
+  imp.rows.forEach(r => {
+    if (!r.src || !canTick(r)) return;
+    if (r.src.user != null) r.on = r.src.user;
+    else if (imp.src === 'inbox' && r.status === 'same') r.on = true;   // a count that matches stock is confirmed, so its row can leave the Inbox
+  });
+}
+const canTick = r => !['bad', 'skip'].includes(r.status);
+const relToCheck = r => r.relCheck && !!r.rel && (!r.match || (r.adds || '').includes('release date'));
+/** Which group of the review a row belongs to: check (needs a decision), ready, or name (cannot be recorded as it is). */
+function impGroup(r) {
+  if (!canTick(r)) return 'name';
+  const twice = r.src && r.src.parts && r.src.parts.length > 1 && !r.match;
+  return (r.similar && !r.match) || twice || relToCheck(r) || ['dup', 'warn'].includes(r.status) ? 'check' : 'ready';
 }
 function renderImport() {
   // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
@@ -1354,60 +1410,121 @@ function renderImpOut() {
   const box = $('#impOut'); if (!box) return;
   const imp = ui.imp; if (!imp || (imp.src !== 'inbox' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
   if (!imp.rows.length) { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
-  const n = imp.rows.filter(r => r.on).length;
-  box.innerHTML = sec('To review', `<div class="list">${imp.rows.map((r, i) => {
-    const can = !['bad', 'skip'].includes(r.status);
-    let detail = '';
-    if (imp.mode === 'count') {
-      if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-      else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
-      else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
-      else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}`;
-    } else if (imp.mode === 'receive') {
-      if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-      else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}`;
-    } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
-    const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
-    const sub = [detail, esc(dl), esc(r.msg)].filter(Boolean).join(' · ');
-    return `<div class="prow ${r.on ? '' : 'off'}"><input id="imp${i}" type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'}><div class="main"><label class="name" for="imp${i}">${esc(r.name)}<span class="tag ${r.status === 'bad' ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span></label>${sub ? `<div class="sub">${sub}</div>` : ''}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
-  }).join('')}</div>`, `<span class="badge">${imp.rows.length}</span>`)
-  + `<div class="stack" style="gap:6px"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : ''}</div>`;
+  const n = imp.rows.filter(r => r.on).length, list = idx => `<div class="list">${idx.map(i => prowHtml(imp, i)).join('')}</div>`;
+  let body;
+  if (imp.mode === 'moves') body = sec('To review', list(imp.rows.map((r, i) => i)), `<span class="badge">${imp.rows.length}</span>`);
+  else {
+    const g = { check: [], ready: [], name: [] };
+    imp.rows.forEach((r, i) => g[impGroup(r)].push(i));
+    imp.open = imp.open || {};
+    // A folded group keeps whatever the owner last chose for it while this review is open.
+    const fold = (k, line, idx, dflt) => `<details class="grp" data-grp="${k}" ${(imp.open[k] != null ? imp.open[k] : dflt) ? 'open' : ''}>${summary(line)}${list(idx)}</details>`;
+    const left = imp.src === 'inbox' ? 'They stay in the Inbox.' : 'They are not recorded.';
+    body = [
+      g.check.length ? sec('Check these · ' + g.check.length, list(g.check), '', 'grp-check') : '',
+      g.ready.length ? sec('Ready · ' + g.ready.length, g.ready.length > 8 ? fold('ready', readyLine(imp, g.ready), g.ready, false) : list(g.ready), '', 'grp-ready') : '',
+      g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
+    ].join('');
+  }
+  box.innerHTML = body + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : ''}</div>`;
 }
-/** Fills blank details on a toy already on file; restores it when archived. */
+/** What a folded Ready group holds, for example "172 new items, 3 count changes, 11 with new details". */
+function readyLine(imp, idx) {
+  const rows = idx.map(i => imp.rows[i]), k = st => rows.filter(r => r.status === st).length, det = rows.filter(r => r.match && (r.adds || r.status === 'details')).length;
+  return [k('new') ? plural(k('new'), 'new item') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
+}
+function prowHtml(imp, i) {
+  const r = imp.rows[i], can = canTick(r), fixable = imp.mode !== 'moves' && r.src;
+  let detail = '';
+  if (imp.mode === 'count') {
+    if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
+    else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
+    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}`;
+  } else if (imp.mode === 'receive') {
+    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}`;
+  } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
+  const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
+  const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
+  const sub = [parts, detail, esc(dl), r.match && relToCheck(r) ? 'Release date to verify' : '', esc(r.msg), r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
+  const name = `${esc(r.name)}<span class="tag ${r.status === 'bad' ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>`;
+  return `<div class="prow ${r.on ? '' : 'off'}"><input id="imp${i}" type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Record ${esc(r.name)}"><div class="main">${fixable
+    ? `<button class="name fix" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
+    : `<label class="name" for="imp${i}">${name}</label>${sub ? `<div class="sub">${sub}</div>` : ''}`}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
+}
+/** The small sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
+function openFix(i) {
+  const imp = ui.imp, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  const src = r.src, c = src.cols, cnt = imp.mode === 'count' ? 2 : 1, rel = imp.mode === 'count' ? 9 : 8;
+  const f = src.fix || { name: c[0] || '', count: c[cnt] || '', rel: c[rel] || '' }, sim = src.use ? live().map.get(src.use) : r.similar;
+  openSheet(`<div class="top"><h2>Correct this row</h2>${closeBtn}</div>
+    <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
+    <div><label for="fxName">Name</label><input id="fxName" value="${esc(f.name)}" autocomplete="off"></div>
+    <div class="row2"><div><label for="fxCount">${imp.mode === 'count' ? 'Count' : 'Qty'}</label><input id="fxCount" inputmode="numeric" value="${esc(f.count)}"></div>
+    <div><label for="fxRel">Release date</label><input id="fxRel" value="${esc(f.rel)}" placeholder="2024-07"></div></div>
+    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
+    <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
+}
+function saveFix(i, simSku) {
+  const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
+  const name = $('#fxName').value.replace(/\s+/g, ' ').trim(), count = $('#fxCount').value.trim(), rel = $('#fxRel').value.trim();
+  if (!name) { toast('Type a name.'); return; }
+  if (count && count !== '?' && !/^\d+$/.test(count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
+  if (rel && !parseRel(rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
+  const src = r.src; src.fix = { name, count, rel };
+  src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
+  imp.rows[i] = impRow(imp.mode, src);
+  resettle(imp); closeSheet(); renderImpOut();
+}
+/** The result of Apply. It stays until closed and follows the sync. */
+function openImpResult() {
+  const x = ui.impResult; if (!x) return;
+  const pend = queue.filter(q => q.status === 'pending').length;
+  const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
+  openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
+    <p class="lead" id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new item')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'item')} with new details`}.</p>
+    ${x.inbox ? `<p class="lead" id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
+    <p class="hint" id="resSync">${esc(state)}</p>
+    <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
+}
+/** Fills blank details on an item already on file; restores it when archived. True when it queued a change. */
 function patchExisting(it, r) {
   const patch = detailPatch(it, r);
   if (!it.active) patch.active = true;
   if (it.price == null && r.price != null) patch.price = r.price;
   if (!it.cat && r.cat) patch.cat = r.cat;
   if (Object.keys(patch).length) qEdit(it.sku, patch);
+  return Object.keys(patch).length > 0;
 }
+// Both return what they queued and done, the indexes of the rows that were recorded.
 function applyCount(rows) {
-  let nNew = 0, nMove = 0; const done = new Set();
-  rows.forEach(r => {
+  const out = { nNew: 0, nMove: 0, nCount: 0, nDetails: 0, done: new Set() }, seen = new Set();
+  rows.forEach((r, i) => {
     if (!r.on || !['new', 'count', 'same', 'details'].includes(r.status)) return;
     let it = r.match, fresh = false;
-    if (it && done.has(it.sku)) return;
-    if (!it) { it = newItemFrom(r); qItem(it, true); dirty(); nNew++; fresh = true; }
-    else patchExisting(it, r);
-    done.add(it.sku);
+    if (it && seen.has(it.sku)) return;
+    if (!it) { it = newItemFrom(r); qItem(it, true); dirty(); out.nNew++; fresh = true; }
+    else if (patchExisting(it, r)) out.nDetails++;
+    seen.add(it.sku); out.done.add(i);
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
-    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null }); nMove++; }
+    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null }); out.nMove++; if (!fresh) out.nCount++; }
     dirty();
   });
-  return { nNew, nMove };
+  return out;
 }
 function applyReceive(rows) {
-  let nNew = 0, nMove = 0; const date = parseDate(ui.rdate) || todayISO(), made = new Map();
-  rows.forEach(r => {
+  const out = { nNew: 0, nMove: 0, nRecv: 0, nDetails: 0, done: new Set() }, date = parseDate(ui.rdate) || todayISO(), made = new Map();
+  rows.forEach((r, i) => {
     if (!r.on || !['new', 'recv'].includes(r.status)) return;
     let it = r.match || made.get(norm(r.name));
-    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); nNew++; }
-    else if (r.match) patchExisting(it, r);
+    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); out.nNew++; }
+    else if (r.match && patchExisting(it, r)) out.nDetails++;
     if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, cost: r.cost });
     else qMove({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', qty: r.qty, reason: 'Restock', ref: '', note: r.note, cost: r.cost });
-    nMove++; dirty();
+    out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
-  return { nNew, nMove };
+  return out;
 }
 function applyMoves(rows) {
   let n = 0;
@@ -1615,16 +1732,26 @@ document.addEventListener('click', async ev => {
     case 'impParse': { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); break; }
     case 'inboxDismiss': if (ui.imp && ui.imp.src === 'inbox') { qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Dismissed' }); ui.imp = null; commit(); toast('Dismissed'); } break;
     case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
-    case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; renderImpOut(); break; }
-    case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; (ui.imp.mode === 'receive' ? settleReceive : settleCount)(ui.imp.rows); renderImpOut(); break; }
+    case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; if (r.src) r.src.user = el.checked; renderImpOut(); break; }
+    case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; if (r.src) r.src.use = r.match.sku; resettle(ui.imp); renderImpOut(); break; }
+    case 'impFix': openFix(+d.i); break;
+    case 'fixSave': saveFix(+d.i, d.sim); break;
     case 'impApply': {
-      const rows = ui.imp.rows;
-      if (ui.imp.mode === 'moves') { const n = applyMoves(rows); toast(`${n} movement${n === 1 ? '' : 's'} recorded`); }
-      else { const r = (ui.imp.mode === 'count' ? applyCount : applyReceive)(rows); toast(`${plural(r.nNew, 'new item')}, ${plural(r.nMove, 'stock change')} recorded`); }
-      if (ui.imp.src === 'inbox') qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Done' });
+      const imp = ui.imp, rows = imp.rows;
+      if (imp.mode === 'moves') ui.impResult = { moves: applyMoves(rows) };
+      else {
+        const r = (imp.mode === 'count' ? applyCount : applyReceive)(rows), x = Object.assign({ mode: imp.mode }, r);
+        // Only the rows actually recorded leave the Inbox; unticked rows and rows that need a name keep waiting.
+        if (imp.src === 'inbox') {
+          const refs = rows.filter((row, i) => r.done.has(i)).flatMap(row => row.src.refs), n = list => list.reduce((s, row) => s + row.src.refs.length, 0);
+          if (refs.length) qAdd('inboxDone', { rows: refs, mark: 'Done' });
+          Object.assign(x, { inbox: true, leftName: n(rows.filter(row => impGroup(row) === 'name')), leftOff: n(rows.filter((row, i) => impGroup(row) !== 'name' && !r.done.has(i))) });
+        }
+        ui.impResult = x;
+      }
       ui.text = ''; ui.imp = null; dirty();
       if (!live().inbox.length) { prefs.tab = 'stock'; savePrefs(); }
-      commit(); break;
+      commit(); openImpResult(); break;
     }
 
     // settings
@@ -1680,7 +1807,7 @@ document.addEventListener('change', ev => {
   if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
 });
 // Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
-document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; }, true);
+document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; if (ev.target.dataset && ev.target.dataset.grp && ui.imp) ui.imp.open[ev.target.dataset.grp] = ev.target.open; }, true);
 document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(() => { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }, 0); });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
