@@ -87,9 +87,9 @@ with sync_playwright() as pw:
     # Home with toys but no sales yet
     tab(p, 'Home'); home = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/03a-home.png')
     check('Today\n₱0' in home and 'Month\n₱0' in home and 'Margin\n–' in home and 'invoice' not in home, 'Home with no sales shows the numbers strip with zero sales and no margin')
-    check('Restock 1 item\nLow or out of stock' in home and 'No items yet' not in home and 'Ship' not in home, 'Home lists the one low item')
-    p.click('#view .item:has-text("Restock 1 item")')
-    check(p.get_attribute('#view .seg button[data-f="attn"]', 'class') == 'on' and list(stock_map_here(p)) == ['Barbie Dreamhouse'], 'the low-stock row opens Stock filtered to Low / out')
+    check('Restock' not in home and 'Low or out' not in home and 'No items yet' not in home and 'Ship' not in home, 'Home has no low-stock row: a single unit on hand is normal')
+    tab(p, 'Stock')
+    check(p.query_selector('#view .seg button[data-f="attn"]') is None and p.query_selector('#stockList .qty.low') is None, 'Stock has no Low filter and no low-stock colour')
     p.screenshot(path=f'{SHOTS}/03-stock.png')
 
     # ---- second photo: name variant matches, similar name needs confirmation, unchanged row
@@ -134,8 +134,9 @@ with sync_playwright() as pw:
 
     # ---- edit item
     tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Edit")')
-    p.fill('#fPrice', '699'); p.click('summary:has-text("Reorder level")'); p.fill('#fMin', '5'); p.click('#sheet button.primary:has-text("Save")')
-    check('reorder at 5' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: reorder level 5 shows low state')
+    check(p.query_selector('#fMin') is None, 'the item editor has no reorder level')
+    p.fill('#fPrice', '699'); p.click('#sheet button.primary:has-text("Save")')
+    check('₱699' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: new price shows')
 
     # ---- add item by hand with starting stock; duplicate name refused
     tab(p, 'Stock'); p.click('button:has-text("Add item")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fCat', 'Trains'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
@@ -201,7 +202,7 @@ with sync_playwright() as pw:
 
     def add_toy(pg, name, start, sku=None):
         tab(pg, 'Stock'); pg.click('button:has-text("Add item")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
-        if sku: pg.click('summary:has-text("Reorder level")'); pg.fill('#fSku', sku)
+        if sku: pg.click('#sheet summary:has-text("SKU")'); pg.fill('#fSku', sku)
         pg.click('#sheet button.primary:has-text("Save")')
 
     # ---- two phones invent the same next SKU: the second is renumbered, nobody is credited wrongly

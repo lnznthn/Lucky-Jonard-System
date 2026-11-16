@@ -39,12 +39,23 @@ def connect(p, code=CODE):
 def pick(p, key, text):
     p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug="{key}"] button')
 def close(p): p.click('button[aria-label="Close"]')
-def pdf(p, name):
-    with p.expect_download() as d: p.click('button:has-text("Share PDF")')
-    path = f'{SHOTS}/{name}.pdf'; d.value.save_as(path)
+def pdf(p, name, blocked=False):
+    """Taps Print PDF. Normally the PDF opens in a new tab (returns 'tab'); with blocked=True no tab can open,
+    so the file downloads instead (returns its file name)."""
+    path = f'{SHOTS}/{name}.pdf'
+    if blocked:
+        p.evaluate("() => { window.__open = window.open; window.open = () => null; }")
+        with p.expect_download() as d: p.click('button:has-text("Print PDF")')
+        d.value.save_as(path); got = d.value.suggested_filename
+        p.evaluate("() => { window.open = window.__open; }")
+    else:
+        with p.expect_popup() as pop: p.click('button:has-text("Print PDF")')
+        t = pop.value; t.wait_for_url('blob:**')
+        data = t.evaluate("async () => Array.from(new Uint8Array(await (await fetch(location.href)).arrayBuffer()))")
+        t.close(); open(path, 'wb').write(bytes(data)); got = 'tab'
     info = subprocess.run(['pdfinfo', path], capture_output=True, text=True)
     subprocess.run(['pdftoppm', '-r', '70', '-png', path, f'{SHOTS}/{name}'])
-    return d.value.suggested_filename, open(path, 'rb').read(5), info.returncode == 0 and re.search(r'Pages:\s+(\d+)', info.stdout).group(1)
+    return got, open(path, 'rb').read(5), info.returncode == 0 and re.search(r'Pages:\s+(\d+)', info.stdout).group(1)
 
 def apply(p, label):
     """Taps Apply, reads the result sheet that stays until closed, and closes it."""
@@ -71,8 +82,8 @@ with sync_playwright() as pw:
     check(it['Maximatic Luffy'][11:13] == ['', ''], 'no release date, no flag')
     h = home(p); p.screenshot(path=f'{SHOTS}/01a-home.png')
     titles = [e.inner_text() for e in p.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    check(titles == ['Restock 3 items', 'Price 3 items', 'Check 1 release date'] and p.inner_text('#view .badge') == '3', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
-    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; three rows need no See more')
+    check(titles == ['Price 3 items', 'Check 1 release date'] and p.inner_text('#view .badge') == '2', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
+    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; two rows need no See more')
     check('Collect' not in h and 'supplier order' not in h and 'promised beyond supply' not in h and 'Ship' not in h, 'Home leaves out rows that are zero')
     p.click('#view .item:has-text("Check 1 release date")')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and 'Showing only: Release date to verify' in p.inner_text('#view') and stock_names(p) == ['Grandista Son Goku'], 'the verify row opens Stock with its filter named')
@@ -80,8 +91,8 @@ with sync_playwright() as pw:
     check('Showing only' not in p.inner_text('#view') and len(stock_names(p)) == 3, 'Show all clears the filter')
     home(p); p.click('#view .item:has-text("Price 3 items")')
     check('Showing only: No price yet' in p.inner_text('#view') and len(stock_names(p)) == 3, 'the no-price row opens Stock filtered')
-    p.click('#view .seg button[data-f="attn"]')
-    check('Showing only' not in p.inner_text('#view') and p.get_attribute('#view .seg button[data-f="attn"]', 'class') == 'on', 'a filter tab replaces the special filter')
+    p.click('#view .seg button[data-f="out"]')
+    check('Showing only' not in p.inner_text('#view') and p.get_attribute('#view .seg button[data-f="out"]', 'class') == 'on', 'a filter tab replaces the special filter')
     p.click('#view .seg button[data-f="all"]')
     tab(p, 'Stock'); p.click('.item:has-text("Grandista Son Goku")'); sheet = p.inner_text('#sheet')
     check('Banpresto' in sheet and 'to verify' in sheet and 'No cost recorded yet' in sheet, 'toy sheet shows details, flag and missing cost')
@@ -126,7 +137,7 @@ with sync_playwright() as pw:
     # ---- customer pre-order: partial payment, receipt PDF, no stock movement, four numbers
     n_moves = len(rows('Movements'))
     pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.lines.0.price"]', '1500')
-    check(not p.is_visible('#invNotice') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice to share.' == p.inner_text('#invHint'), 'one in stock and one wanted: the form is a sale and says what the tap does')
+    check(not p.is_visible('#invNotice') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice.' == p.inner_text('#invHint'), 'one in stock and one wanted: the form is a sale and says what the tap does')
     p.fill('[data-b="inv.lines.0.qty"]', '2')
     v = p.inner_text('#sellBody')
     check('Only 1 is free to sell, so this is saved as a pre-order' in v and 'Stock moves when the item arrives and you invoice it.' in v and p.is_visible('#iPaid') and not p.is_visible('button:has-text("Add another item")'), 'more than is free to sell: notice, Paid now, no Add another item')
@@ -140,8 +151,8 @@ with sync_playwright() as pw:
     p.click('button:has-text("Save pre-order · receipt no. 1")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/06-receipt.png')
     check('Pre-order receipt no. 1' in sheet and 'Paid ₱1,000 · balance ₱2,000' in sheet, 'receipt opens straight after saving')
-    name, magic, pages = pdf(p, 'receipt-1')
-    check(name == 'Receipt-1.pdf' and magic == b'%PDF-' and pages == '1', f'receipt PDF is a valid one-page PDF: {name} {magic} {pages}')
+    name, magic, pages = pdf(p, 'receipt-1', blocked=True)
+    check(name == 'Receipt-1.pdf' and magic == b'%PDF-' and pages == '1', f'with no tab allowed, the receipt PDF downloads as a valid one-page PDF: {name} {magic} {pages}')
     close(p); synced(p)
     check(len(rows('Movements')) == n_moves, 'pre-order moved no stock')
     pre = rows('Pre-orders')[0]
@@ -219,7 +230,7 @@ with sync_playwright() as pw:
     p.click('button:has-text("Issue invoice no. 3")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/11-invoice.png')
     check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin ₱500 at average cost' in sheet, 'invoice sheet shows override and margin')
-    name, magic, pages = pdf(p, 'invoice-3'); check(name == 'Invoice-3.pdf' and magic == b'%PDF-' and pages == '1', 'invoice PDF is valid')
+    name, magic, pages = pdf(p, 'invoice-3'); check(name == 'tab' and magic == b'%PDF-' and pages == '1', 'Print PDF opens a valid invoice PDF in a new tab')
     p.click('#sheet [data-act="ship"]'); check(p.is_checked('#sheet [data-act="ship"]'), 'ticking Delivered marks it')
     p.click('#sheet [data-act="ship"]'); check(not p.is_checked('#sheet [data-act="ship"]'), 'unticking takes the mark off')
     p.click('#sheet [data-act="ship"]'); close(p); synced(p)
@@ -361,12 +372,12 @@ with sync_playwright() as pw:
       commit();
     }""")
     names = lambda: [e.inner_text() for e in q.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Restock 2 items', 'Price 1 item', 'Check 1 release date']
-    check(names() == want[:4] and q.inner_text('#view .badge') == '10' and q.inner_text('#view .more') == 'See 6 more', f'phone shows the first four rows, the badge counts all ten jobs: {names()}')
+    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Check 1 release date']
+    check(names() == want[:4] and q.inner_text('#view .badge') == '9' and q.inner_text('#view .more') == 'See 5 more', f'phone shows the first four rows, the badge counts all nine jobs: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-collapsed.png')
-    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 6 more shows every row in the fixed order: {names()}')
+    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 5 more shows every row in the fixed order: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-expanded.png', full_page=True)
-    q.evaluate('render()'); check(len(names()) == 10, 'the expanded list survives a re-render')
+    q.evaluate('render()'); check(len(names()) == 9, 'the expanded list survives a re-render')
     tab(q, 'Stock'); tab(q, 'Home'); check(len(names()) == 4, 'entering Home from the tab bar collapses it again')
     q.click('#view .item:has-text("Ship Ben")'); check(q.input_value('[data-b="inv.cust"]') == 'Ben' and 'For the pre-order of Ben' in q.inner_text('#view'), 'a ready row opens New sale pre-filled from that pre-order')
     q.click('#backBtn')
@@ -375,7 +386,7 @@ with sync_playwright() as pw:
     check(n[1] == 'Ship 4 pre-orders now in stock' and not any(x.startswith('Ship ') and 'pre-orders' not in x for x in n), f'four ready pre-orders collapse into one row: {n[:3]}')
     q.click('#view .item:has-text("Ship 4 pre-orders")'); check(q.inner_text('#title') == 'Orders' and q.get_attribute('#view button[data-s="pre"]', 'class') == 'on', 'that row opens the pre-order list')
     q.set_viewport_size({'width': 1280, 'height': 800}); tab(q, 'Home')
-    check(len(names()) == 9 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
+    check(len(names()) == 8 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
     cx.close()
 
     check(not errors, f'no page errors: {errors}')

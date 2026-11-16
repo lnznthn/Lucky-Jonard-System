@@ -1,6 +1,6 @@
 # Bodega: how the app works
 
-This file describes release 2.2.0 (`VERSION` `2.2.0`, service worker cache `toys-v2.2.0`, `VERSION_` `2.2.0` in `Code.gs`). Release 2.2.0 changes the back end and the app together. Each works with the other's previous release: app 2.2.0 works against a deployed backend 2.0.0, and backend 2.2.0 works with app 2.1.1. The request and response shapes, entry kinds, tab names and column headers are unchanged, apart from the additions named below.
+This file describes release 2.2.0 of the back end and 2.2.1 of the app (`VERSION` `2.2.1`, service worker cache `toys-v2.2.1`, `VERSION_` `2.2.0` in `Code.gs`). App 2.2.1 removes the low-stock flag (see "Stock math") and turns Share PDF into Print PDF (see "Invoice PDF"). Release 2.2.0 changes the back end and the app together. Each works with the other's previous release: app 2.2.0 works against a deployed backend 2.0.0, and backend 2.2.0 works with app 2.1.1. The request and response shapes, entry kinds, tab names and column headers are unchanged, apart from the additions named below.
 
 Bodega is a single-page web app (PWA) for a small shop that sells through chat, over a Google Sheet, installed on a phone's home screen. It is local-first: the phone keeps every item and movement, computes stock itself, and uses the sheet to share data between devices and to keep a record the owner can read and chart. This file is the reference for anyone changing the app, so the logic below does not have to be rediscovered from chat history.
 
@@ -109,7 +109,7 @@ Cost is typed by hand on each receipt (a stock in from an item's sheet, a receiv
 
 ### Invoice PDF
 
-The PDF is made on the phone and is not stored anywhere: it is redrawn from the invoice record each time, so it can be produced offline and on any device that has synced. The page is drawn on a canvas and wrapped as a PDF with one image per A4 page, which keeps the currency symbol and any name readable without embedding fonts; the text in it cannot be selected. Shop name, contact details, footer line and logo are typed in Settings and kept on the device (`prefs.shop`), so each phone that issues invoices needs them entered once. The invoice screen has one PDF button, Share PDF. It opens the phone's share sheet when the browser can share files and downloads the file otherwise.
+The PDF is made on the phone and is not stored anywhere: it is redrawn from the invoice record each time, so it can be produced offline and on any device that has synced. The page is drawn on a canvas and wrapped as a PDF with one image per A4 page, which keeps the currency symbol and any name readable without embedding fonts; the text in it cannot be selected. Shop name, contact details, footer line and logo are typed in Settings and kept on the device (`prefs.shop`), so each phone that issues invoices needs them entered once. The invoice screen has one PDF button, Print PDF (app 2.2.1; earlier apps had Share PDF and the share sheet). It opens a blank tab during the tap, so popup blocking does not apply, then points it at the PDF, where the browser's viewer prints or saves it. When no tab opens, the file downloads instead. See `printPdf()`.
 
 ## Sync protocol
 
@@ -177,9 +177,8 @@ The header shows the page title. On Home it shows the shop name from Settings wh
    4. Order stock for N items promised beyond supply (Stock, filtered).
    5. Receive N supplier orders due, with the first two item names (Orders, supplier list).
    6. Collect ₱X on N pre-orders (Orders, pre-order list).
-   7. Restock N items (Stock, low or out).
-   8. Price N items (Stock, no price yet).
-   9. Check N release dates (Stock, release date to verify).
+   7. Price N items (Stock, no price yet).
+   8. Check N release dates (Stock, release date to verify).
 
    On a phone a list of more than five rows shows the first four and a line "See N more", which then reads "See less". The expanded state is `ui.homeMore`, kept in memory only: it survives a re-render after a sync and resets when Home is entered from the tab bar. A desktop window shows every row. With nothing to do the section says "Nothing needs you." and has no badge.
 
@@ -220,13 +219,13 @@ Every rule uses the tokens (`--bg`, `--text`, `--muted`, `--line`, `--field`, `-
 | `docs` | `{ custs, orders, pres, invs, rets, inbox }` as of the last sync |
 | `meta` | `{ rows, lastId, syncedAt }` for the incremental pull |
 | `queue` | Entries not yet confirmed by the sheet; `status` is `pending` or `failed` |
-| `prefs` | Current tab (default `home`), currency symbol, default reorder level, `theme` (`auto`, `light` or `dark`), and `shop` (name, contact, footer, logo) for the PDF and the Home header |
+| `prefs` | Current tab (default `home`), currency symbol, `theme` (`auto`, `light` or `dark`), and `shop` (name, contact, footer, logo) for the PDF and the Home header |
 
 Everything the owner does is written to the queue first and flushed when a connection exists. Without a connection the app works fully on the device; the queue holds everything until the connection code is pasted. `live()` merges synced data with pending entries (failed entries are not counted) and is the only thing the screens read. Inbox rows that have a pending `inboxDone` entry drop out of `live().inbox` at once. It replays pending documents the way `Code.gs` will apply them, including the movements they write, so an invoice issued offline already counts against stock. The script writes the data tabs only for the app's entries and for rows in Edits; Claude writes the Inbox rows.
 
 ## Stock math
 
-`stock(sku)` is the sum of signed movement quantities over synced movements plus pending queue moves. Negative stock is allowed and shown in the danger colour: recording a sale for something that was never counted in should not be blocked at the till. The New sale form saves a pre-order when a line asks for more than is free to sell; "It is here, sell it now" issues the invoice anyway, with no confirmation, and stock goes below zero. A stock out by hand for more than is on hand still asks for confirmation. A low-stock item is one with `0 < stock <= reorder level`; the item's own `Reorder at` wins over the default in Settings.
+`stock(sku)` is the sum of signed movement quantities over synced movements plus pending queue moves. Negative stock is allowed and shown in the danger colour: recording a sale for something that was never counted in should not be blocked at the till. The New sale form saves a pre-order when a line asks for more than is free to sell; "It is here, sell it now" issues the invoice anyway, with no confirmation, and stock goes below zero. A stock out by hand for more than is on hand still asks for confirmation. There is no low-stock state (app 2.2.1): an item is flagged only at zero (`out`) or below zero (`neg`), since one unit on hand is normal for collectibles. `Reorder at` stays on Items, Browse and the Edits dropdown for compatibility, and the app neither reads nor writes it.
 
 ## Importing
 
