@@ -20,7 +20,7 @@ with sync_playwright() as pw:
     p.click('nav button[data-t="home"]'); p.wait_for_timeout(200)
     check(p.title() == 'Bodega' and json.load(urllib.request.urlopen(f'http://localhost:{APP_PORT}/manifest.webmanifest'))['name'] == 'Bodega', 'document title and manifest name are Bodega')
     check(p.inner_text('#title') == 'Bodega', 'Home header shows the app name when no shop name is set')
-    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Orders'], 'first launch opens Home; the bar is Home, Inventory, Sales, Orders')
+    check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Suppliers'], 'first launch opens Home; the bar is Home, Inventory, Sales, Suppliers')
     check(all(b.query_selector('svg') for b in p.query_selector_all('#tabs button')), 'each tab has a stroke icon')
     no_toy(p, 'Home (empty)')
     add_inventory(p); v = p.inner_text('#view')
