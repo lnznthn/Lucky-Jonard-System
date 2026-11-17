@@ -50,6 +50,8 @@ with sync_playwright() as pw:
     p.select_option('#oS', 'ol1'); p.click('#sheet [data-act="followSave"]')
     check(f'To follow · expected {day(p, EXP2)}' in p.inner_text('#sheet'), 'linked to the order line, the line follows its date'); close(p); synced(p)
     check(rows('Invoice lines')[1][9:12] == ['To follow', EXP2, 'ol1'], f"the link reached the sheet: {rows('Invoice lines')[1]}")
+    tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]')
+    check('2 waiting' in p.inner_text('#view .item:has-text("Luffy Figure")'), 'the order line counts the to-follow units waiting for it')
 
     # ---- a payment, then Home asks to collect the rest
     check('Collect ₱3,500 on 1 invoice\nBalances still open' in home(p), 'Home: collect the balance')

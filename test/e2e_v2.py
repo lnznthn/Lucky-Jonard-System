@@ -86,15 +86,13 @@ with sync_playwright() as pw:
     p.click('.item:has-text("Grandista Son Goku")')
     check([e.input_value() for e in p.query_selector_all('#sheet [data-unit]')] == ['', '', '1200', '1200', '1200'] and 'Cost of stock on hand ₱3,600. 2 units have no cost yet.' in p.inner_text('#sheet'), 'the item sheet lists the units on hand, oldest first, with their costs'); close(p)
 
-    # ---- supplier order counts as incoming
-    tab(p, 'Orders'); p.click('button[data-s="sup"]'); p.click('button:has-text("New supplier order")')
-    pick(p, 'f', 'luffy'); p.fill('[data-b="f.qty"]', '4'); p.fill('[data-b="f.expected"]', TODAY); p.screenshot(path=f'{SHOTS}/04-supplier-order.png'); p.click('button:has-text("Save order")'); synced(p)
-    check(rows('Supplier orders')[0][2:7] == ['T0002', 'Maximatic Luffy', 4, TODAY, 'Ordered'], f"supplier order in the sheet: {rows('Supplier orders')[0]}")
+    # ---- supplier order counts as incoming (test/supply.py covers ordering and receiving)
+    tab(p, 'Inventory'); p.click('.item:has-text("Maximatic Luffy")'); p.click('#sheet button:has-text("Order stock")')
+    p.click('#impOut [data-act="impFix"]'); p.fill('#fxCount', '4'); p.click('#sheet button:has-text("Save")')
+    p.fill('#oSup', 'Kanto Hobby'); p.fill('#oExp', TODAY); p.screenshot(path=f'{SHOTS}/04-supplier-order.png'); apply(p, 'Apply 1 change'); synced(p)
+    check([r[5:8] + r[9:12:2] for r in rows('Supplier orders')] == [['T0002', 'Maximatic Luffy', 4, TODAY, 'Ordered']], f"supplier order line in the sheet: {rows('Supplier orders')}")
     tab(p, 'Inventory'); check('4 arriving' in p.inner_text('.item:has-text("Maximatic Luffy")'), 'stock list shows incoming')
-    check('Receive 1 supplier order due\nMaximatic Luffy' in home(p), 'Home: a supplier order expected today is due')
-    p.click('#view .item:has-text("Receive 1 supplier order due")')
-    check('on' in p.get_attribute('#tabs button[data-t="orders"]', 'class') and p.get_attribute('#view button[data-s="sup"]', 'class') == 'on' and 'on the way' in p.inner_text('#view').lower(), 'the due row opens Orders > Supplier orders')
-    check(not p.is_visible('button:has-text("New pre-order")'), 'Orders has no separate New pre-order button')
+    check('Receive 1 supplier order line due\nMaximatic Luffy' in home(p), 'Home: a supplier order line expected today is due')
     home(p); check(not p.is_visible('#view button:has-text("pre-order")'), 'Home has no New pre-order button')
     p.click('#view button:has-text("New sale")')
     check('on' in p.get_attribute('#tabs button[data-t="sell"]', 'class') and p.inner_text('#title') == 'New sale' and p.is_visible('button:has-text("Issue invoice no. 1")'), 'New sale on Home opens the form')
@@ -104,17 +102,15 @@ with sync_playwright() as pw:
     check(not p.is_checked('[data-act="invFollow"]') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice.' == p.inner_text('#invHint'), 'one in stock and one wanted: the line is sold now and the form says what the tap does')
     no_toy(p, 'New sale')
     p.click('#backBtn'); check(p.is_visible('#view [data-act="sellNew"]') and p.evaluate('ui.inv.lines[0].sku') == '', 'closing New sale clears the draft and shows the invoice list')
-    tab(p, 'Orders')
 
     # ---- supplier stock arrives: cost typed at receipt
-    p.click('button[data-s="sup"]'); p.click('.item:has-text("Maximatic Luffy")')
+    tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]'); p.click('#view .item:has-text("Maximatic Luffy")')
     check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'receiving shows one cost field per unit')
-    p.fill('#sheet [data-cost][data-k="0"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('button:has-text("Received")')
-    synced(p)
+    p.fill('#sheet [data-cost][data-k="0"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('#sheet button:has-text("Received")'); close(p); synced(p)
     so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')]
-    check(so[6:8] == ['Received', 4] and [r[0] for r in rc] == [f'rcv-{so[0]}-{k}' for k in (1, 2, 3, 4)] and all(r[4:8] == ['In', 1, 'Restock', so[0]] and r[9] == 800 for r in rc), f'order received, one movement per unit refers to it with its cost: {rc}')
+    check(so[10:12] == [4, 'Received'] and [r[0] for r in rc] == [f'rcv-{so[0]}-{k}' for k in (1, 2, 3, 4)] and all(r[4:8] == ['In', 1, 'Restock', so[1]] and r[9] == 800 for r in rc), f'order line received, one movement per unit refers to its order with its cost: {rc}')
 
-    h = home(p); check('supplier order due' not in h, 'a received supplier order is no longer due')
+    h = home(p); check('supplier order line due' not in h, 'a received supplier order line is no longer due')
 
     # ---- from a toy's sheet: Sell and Order stock start with the toy already picked
     tab(p, 'Inventory'); p.click('.item:has-text("Gigo Zoro")'); p.screenshot(path=f'{SHOTS}/19-toy-actions.png'); p.click('#sheet button:has-text("Sell")')
@@ -122,8 +118,6 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/17-new-sale-from-toy.png')
     tab(p, 'Home'); tab(p, 'Sales'); check(p.inner_text('#title') == 'New sale' and 'Gigo Zoro' in p.inner_text('#sellBody'), 'with an item picked, the Sales tab reopens the draft')
     p.click('button:has-text("Change")')
-    tab(p, 'Inventory'); p.click('.item:has-text("Gigo Zoro")'); p.click('#sheet button:has-text("Order stock")')
-    check('New supplier order' in p.inner_text('#sheet') and 'Gigo Zoro' in p.inner_text('#sheet'), 'Order stock on an item opens the form with it picked'); close(p)
 
     # ---- ordinary chat sale: one toy, listed price prefilled, overridden; the oldest unit has no cost, so the margin is unknown
     new_sale(p)
@@ -221,7 +215,7 @@ with sync_playwright() as pw:
     # ---- activity shows document movements; a refused document is explained
     tab(p, 'Inventory'); p.click('#view button[data-t="activity"]'); p.click('#syncBtn'); synced(p); p.screenshot(path=f'{SHOTS}/16-activity.png')
     check('invoice 1' in p.inner_text('#view'), 'activity names the invoice behind a sale')
-    for name in ['Home', 'Inventory', 'Sales', 'Orders']:
+    for name in ['Home', 'Inventory', 'Sales', 'Suppliers']:
         tab(p, name); p.screenshot(path=f"{SHOTS}/tab-{name.lower()}.png")
     add_inventory(p)
     if not p.is_visible('#impText'): p.click('#manual summary')
@@ -278,13 +272,13 @@ with sync_playwright() as pw:
       window.later = (sku, cust, qty, paid) => { const c = custFor(cust, '0917'); qAdd('invoice', { invoice: { id: 'v' + uid(), no: nextNo(), date: todayISO(), custId: c, paid, lines: [{ sku, qty, list: 100, price: 100, cost: null, follow: true, expected: '', orderLine: '' }] } }); dirty(); };
       it('A', 'Alpha'); mv('A', 9); it('B', 'Bravo', { price: null }); mv('B', 1); it('C', 'Charlie', { relCheck: true, rel: '2024' }); mv('C', 5); it('D', 'Delta'); dirty();
       later('A', 'Ana', 1, ''); later('A', 'Ben', 1, 50); later('D', 'Cy', 3, 0);
-      qAdd('order', { order: { id: 'o1', date: todayISO(), sku: 'D', qty: 1, expected: todayISO(), note: '' } });
+      qAdd('order', { order: { id: 'o1', date: todayISO(), supId: 's1', expected: todayISO(), note: '', lines: [{ id: 'l1', sku: 'D', qty: 1, cost: null }] } });
       docs.inbox = [{ row: 2, type: 'count', name: 'Alpha', qty: '9' }];
       qMove({ id: 'mx', date: todayISO(), sku: 'A', dir: 'In', qty: 1, reason: 'Opening', ref: '', note: '', cost: null }); queue[queue.length - 1].status = 'failed';
       commit();
     }""")
     names = lambda: [e.inner_text() for e in q.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s to-follow lines', 'Ship Ben’s to-follow lines', 'Review 1 row from Claude', 'Order stock for 1 product promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 invoices', 'Price 1 product', 'Add the cost of 15 units', 'Check 1 release date']
+    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s to-follow lines', 'Ship Ben’s to-follow lines', 'Review 1 row from Claude', 'Order stock for 1 product promised beyond supply', 'Receive 1 supplier order line due', 'Collect ₱350 on 2 invoices', 'Price 1 product', 'Add the cost of 15 units', 'Check 1 release date']
     check(names() == want[:4] and q.inner_text('#view .badge') == '10' and q.inner_text('#view .more') == 'See 6 more', f'phone shows the first four rows, the badge counts all ten jobs: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-collapsed.png')
     q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 6 more shows every row in the fixed order: {names()}')
