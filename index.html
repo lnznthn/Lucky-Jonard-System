@@ -183,6 +183,9 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl th svg.up{transform:rotate(180deg)}
   .tbl .n{text-align:right;font-variant-numeric:tabular-nums}
   .tbl .w{white-space:normal;min-width:14em}
+  .tbl .st .tag{margin-left:0}
+  .tbl tr.off td{color:var(--muted)}
+  .tbl input[type=checkbox]{width:22px;height:22px;min-height:0;margin:0}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
   .tbl tr:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
@@ -1585,7 +1588,7 @@ function renderImpOut() {
   const box = $('#impOut'); if (!box) return;
   const imp = ui.imp; if (!imp || (imp.src !== 'inbox' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
   if (!imp.rows.length) { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
-  const n = imp.rows.filter(r => r.on).length, list = idx => `<div class="list">${idx.map(i => prowHtml(imp, i)).join('')}</div>`;
+  const n = imp.rows.filter(r => r.on).length, list = (idx, k) => wide() && imp.mode !== 'moves' ? impTable(imp, idx, k) : `<div class="list">${idx.map(i => prowHtml(imp, i)).join('')}</div>`;
   let body;
   if (imp.mode === 'moves') body = sec('To review', list(imp.rows.map((r, i) => i)), `<span class="badge">${imp.rows.length}</span>`);
   else {
@@ -1593,15 +1596,27 @@ function renderImpOut() {
     imp.rows.forEach((r, i) => g[impGroup(r)].push(i));
     imp.open = imp.open || {};
     // A folded group keeps whatever the owner last chose for it while this review is open.
-    const fold = (k, line, idx, dflt) => `<details class="grp" data-grp="${k}" ${(imp.open[k] != null ? imp.open[k] : dflt) ? 'open' : ''}>${summary(line)}${list(idx)}</details>`;
+    const fold = (k, line, idx, dflt) => `<details class="grp" data-grp="${k}" ${(imp.open[k] != null ? imp.open[k] : dflt) ? 'open' : ''}>${summary(line)}${list(idx, k)}</details>`;
     const left = imp.src === 'inbox' ? 'They stay in the Inbox.' : 'They are not recorded.';
     body = [
-      g.check.length ? sec('Check these · ' + g.check.length, list(g.check), '', 'grp-check') : '',
-      g.ready.length ? sec('Ready · ' + g.ready.length, g.ready.length > 8 ? fold('ready', readyLine(imp, g.ready), g.ready, false) : list(g.ready), '', 'grp-ready') : '',
+      g.check.length ? sec('Check these · ' + g.check.length, list(g.check, 'check'), '', 'grp-check') : '',
+      g.ready.length ? sec('Ready · ' + g.ready.length, g.ready.length > 8 ? fold('ready', readyLine(imp, g.ready), g.ready, false) : list(g.ready, 'ready'), '', 'grp-ready') : '',
       g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
     ].join('');
   }
   box.innerHTML = body + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : ''}</div>`;
+}
+/** A review group on desktop: one row per review row with every field it carries. A row opens Correct this row; the tick box records it or not. */
+function impTable(imp, idx, k) {
+  const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
+  const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
+  return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`],
+    ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? `<div class="hint">Recorded as “${esc(r.match.name)}”</div>` : '') + (r.similar && !r.match ? `<div><button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button></div>` : ''); }, 'w'],
+    ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? `<div class="hint">${esc(why(r))}</div>` : ''}`; }, 'w st'],
+    [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'n'],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => !(R(i).costs || []).length ? '' : has(i).length ? esc(prefs.cur + costsText(R(i).costs)) : '<span class="hint">no cost yet</span>', 'n'],
+    ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i))], ['Note', i => R(i).note, null, 'w']],
+    idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
 }
 /** What a folded Ready group holds, for example "172 new items, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
