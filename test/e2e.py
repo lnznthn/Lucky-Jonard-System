@@ -154,7 +154,7 @@ with sync_playwright() as pw:
     d = dump()
     check(len(d['Items']['rows']) - 1 == 4, f"sheet has 4 items: {len(d['Items']['rows']) - 1}")
     mv_rows = d['Movements']['rows'][1:]
-    check(len(mv_rows) == 7, f'sheet has movement rows: {len(mv_rows)}')
+    check(len(mv_rows) == 27, f'sheet has movement rows, one per unit stocked in: {len(mv_rows)}')
     check(stock_map(p) == before, 'stock unchanged by sync')
     check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
     check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
@@ -225,7 +225,7 @@ with sync_playwright() as pw:
     ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
     p2.click('#syncBtn'); p2.wait_for_timeout(1500)
     check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
-    tab(p2, 'Home'); check('Fix 2 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries')
+    tab(p2, 'Home'); check('Fix 5 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries: the item and its four units')
     p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
     check('New item “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which item was refused and why')
     check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
@@ -273,7 +273,7 @@ with sync_playwright() as pw:
     synced(p); sm = stock_map(p)
     check(sm['Dino Figure'] == before['Dino Figure'] + 2 and sm['Inbox Car'] == 1, f'received stock recorded: {sm}')
     mv = dump()['Movements']['rows'][1:]
-    check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150], 'receive rows carry their cost')
+    check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150, 150], 'receive rows carry their cost, one row per unit')
     check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
     update_stock(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Update stock is back to the other ways; with a connection the paste box is folded')
     # Dismiss records nothing

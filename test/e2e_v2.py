@@ -84,8 +84,8 @@ with sync_playwright() as pw:
     check(it['Maximatic Luffy'][11:13] == ['', ''], 'no release date, no flag')
     h = home(p); p.screenshot(path=f'{SHOTS}/01a-home.png')
     titles = [e.inner_text() for e in p.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    check(titles == ['Price 3 items', 'Check 1 release date'] and p.inner_text('#view .badge') == '2', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
-    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; two rows need no See more')
+    check(titles == ['Price 3 items', 'Add the cost of 4 units', 'Check 1 release date'] and p.inner_text('#view .badge') == '3', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
+    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; three rows need no See more')
     check('Collect' not in h and 'supplier order' not in h and 'promised beyond supply' not in h and 'Ship' not in h, 'Home leaves out rows that are zero')
     p.click('#view .item:has-text("Check 1 release date")')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and 'Showing only: Release date to verify' in p.inner_text('#view') and stock_names(p) == ['Grandista Son Goku'], 'the verify row opens Stock with its filter named')
@@ -97,7 +97,7 @@ with sync_playwright() as pw:
     check('Showing only' not in p.inner_text('#view') and p.get_attribute('#view .seg button[data-f="out"]', 'class') == 'on', 'a filter tab replaces the special filter')
     p.click('#view .seg button[data-f="all"]')
     tab(p, 'Stock'); p.click('.item:has-text("Grandista Son Goku")'); sheet = p.inner_text('#sheet')
-    check('Banpresto' in sheet and 'to verify' in sheet and 'No cost recorded yet' in sheet, 'toy sheet shows details, flag and missing cost')
+    check('Banpresto' in sheet and 'to verify' in sheet and '2 units have no cost yet.' in sheet, 'toy sheet shows details, flag and the units with no cost')
     p.screenshot(path=f'{SHOTS}/02-toy-sheet.png')
     p.click('button:has-text("Edit")'); p.fill('#fPrice', '1800'); p.uncheck('#fRelCheck'); p.fill('#fRel', '2019-06-20'); p.click('#sheet button.primary:has-text("Save")'); synced(p)
     it = {r[1]: r for r in rows('Items')}
@@ -111,7 +111,7 @@ with sync_playwright() as pw:
     it = {r[1]: r for r in rows('Items')}
     check(it['Plain Toy'][7:9] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][7] == 'Bandai Spirits', 'details filled without overwriting')
 
-    # ---- receive mode: supplier paperwork adds stock at its cost and sets the average
+    # ---- receive mode: supplier paperwork adds stock at its cost, one unit per row
     paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tFigures\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/03-receive-preview.png')
     check('+3 at ₱1,200 each' in txt and 'New item' in txt and 'Needs a name · 1' in txt and 'Apply 2 changes' in txt, 'receive preview')
@@ -120,8 +120,9 @@ with sync_playwright() as pw:
     sm = stock_map(p)
     check(sm['Grandista Son Goku'] == 5 and sm['Gigo Zoro'] == 2, f'stock after receiving: {sm}')
     mv = [r for r in rows('Movements') if r[6] == 'Restock']
-    check(sorted(r[9] for r in mv) == [900, 1200], f'cost recorded on each receipt: {[r[9] for r in mv]}')
-    p.click('.item:has-text("Grandista Son Goku")'); check('₱1,200' in p.inner_text('#sheet .kv'), 'average cost shown on the toy'); close(p)
+    check(sorted(r[9] for r in mv) == [900, 900, 1200, 1200, 1200] and {r[5] for r in mv} == {1}, f'cost recorded on each unit received: {[r[9] for r in mv]}')
+    p.click('.item:has-text("Grandista Son Goku")')
+    check([e.input_value() for e in p.query_selector_all('#sheet [data-unit]')] == ['', '', '1200', '1200', '1200'] and 'Cost of stock on hand ₱3,600. 2 units have no cost yet.' in p.inner_text('#sheet'), 'the item sheet lists the units on hand, oldest first, with their costs'); close(p)
 
     # ---- supplier order counts as incoming
     tab(p, 'Orders'); p.click('button[data-s="sup"]'); p.click('button:has-text("New supplier order")')
@@ -188,14 +189,14 @@ with sync_playwright() as pw:
 
     # ---- supplier stock arrives: cost typed at receipt, pre-order becomes ready to ship
     p.click('button[data-s="sup"]'); p.click('.item:has-text("Maximatic Luffy")')
-    p.click('button:has-text("Received")'); check('cost each' in p.inner_text('#toast'), 'receiving asks for the cost')
-    p.fill('[data-b="sub.cost"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('button:has-text("Received")')
+    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'receiving shows one cost field per unit')
+    p.fill('#sheet [data-cost][data-k="0"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('button:has-text("Received")')
     check('1 pre-order is ready to ship' in p.inner_text('#toast'), 'receiving announces the waiting customer')
     view = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/09-ready-to-ship.png')
     check('ready to ship' in view.lower() and 'Ana Reyes' in view and '+63 917 000 0000' in view, 'ready-to-ship list shows the customer and contact')
     synced(p)
-    so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')][0]
-    check(so[6:8] == ['Received', 4] and rc[4:8] == ['In', 4, 'Restock', so[0]] and rc[9] == 800, f'order received, movement refers to it with its cost: {rc}')
+    so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')]
+    check(so[6:8] == ['Received', 4] and [r[0] for r in rc] == [f'rcv-{so[0]}-{k}' for k in (1, 2, 3, 4)] and all(r[4:8] == ['In', 1, 'Restock', so[0]] and r[9] == 800 for r in rc), f'order received, one movement per unit refers to it with its cost: {rc}')
 
     # ---- ready to ship -> one tap pre-fills the invoice; stock leaves when the invoice is issued
     h = home(p); p.screenshot(path=f'{SHOTS}/09a-home-ready.png')
@@ -221,7 +222,7 @@ with sync_playwright() as pw:
     tab(p, 'Stock'); p.click('.item:has-text("Gigo Zoro")'); p.click('#sheet button:has-text("Order stock")')
     check('New supplier order' in p.inner_text('#sheet') and 'Gigo Zoro' in p.inner_text('#sheet'), 'Order stock on an item opens the form with it picked'); close(p)
 
-    # ---- ordinary chat sale: one toy, listed price prefilled, overridden, margin at average cost
+    # ---- ordinary chat sale: one toy, listed price prefilled, overridden; the oldest unit has no cost, so the margin is unknown
     new_sale(p)
     p.click('button:has-text("Issue invoice")'); check('Pick an item' in p.inner_text('#toast'), 'invoice needs an item')
     pick(p, 'inv.lines.0', 'goku')
@@ -229,9 +230,10 @@ with sync_playwright() as pw:
     no_toy(p, 'New sale in sale mode')
     p.fill('[data-b="inv.lines.0.price"]', '1700'); p.fill('[data-b="inv.cust"]', 'Ben Cruz')
     check(p.inner_text('#invTotal') == '₱1,700', 'total follows the overridden price'); p.screenshot(path=f'{SHOTS}/10-invoice-form.png')
+    check('1 unit of this item has no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody') and p.is_visible('#sellBody button:has-text("Add the cost")'), 'the form says the unit sold has no cost')
     p.click('button:has-text("Issue invoice no. 3")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/11-invoice.png')
-    check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin ₱500 at average cost' in sheet, 'invoice sheet shows override and margin')
+    check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin unknown: an item has no cost' in sheet, 'invoice sheet shows override and the unknown margin')
     name, magic, pages = pdf(p, 'invoice-3'); check(name == 'tab' and magic == b'%PDF-' and pages == '1', 'Print PDF opens a valid invoice PDF in a new tab')
     p.click('#sheet [data-act="ship"]'); check(p.is_checked('#sheet [data-act="ship"]'), 'ticking Delivered marks it')
     p.click('#sheet [data-act="ship"]'); check(not p.is_checked('#sheet [data-act="ship"]'), 'unticking takes the mark off')
@@ -239,12 +241,12 @@ with sync_playwright() as pw:
     check(len([q for q in p.evaluate('queue') if q['kind'] == 'ship']) == 0, 'the three taps were sent and cleared')
     inv = [r for r in rows('Invoices') if r[0] == 3][0]; sale = [r for r in rows('Movements') if r[7] == '3']
     check(inv[3] == 'Sale' and inv[5] == 'Ben Cruz' and inv[7] == 1700 and inv[8] == 'Delivered', f'invoice row: {inv}')
-    check(len(sale) == 1 and sale[0][4:7] == ['Out', 1, 'Sale'] and sale[0][9] == 1200, f'issuing wrote the stock-out with Ref = invoice number: {sale}')
-    ln = [r for r in rows('Invoice lines') if r[0] == 3][0]; check(ln[4:8] == [1, 1800, 1700, 1200], f'line keeps listed price, charged price and cost: {ln}')
+    check(len(sale) == 1 and sale[0][4:7] == ['Out', 1, 'Sale'] and sale[0][9] == '', f'issuing wrote the stock-out with Ref = invoice number, with no cost: {sale}')
+    ln = [r for r in rows('Invoice lines') if r[0] == 3][0]; check(ln[4:8] == [1, 1800, 1700, ''], f'line keeps listed price, charged price and the blank cost: {ln}')
     check(stock_map(p)['Grandista Son Goku'] == 4, 'sale took one out of stock')
     tab(p, 'Sales'); check('delivered' in p.inner_text('.item:has-text("No. 3")'), 'the invoice list shows the delivered tag')
     h = home(p)
-    check('Today\n₱4,700' in h and 'Month\n₱4,700' in h and 'Margin\n₱1,900' in h and 'invoices this month' not in h, 'Home numbers strip after two sales')
+    check('Today\n₱4,700' in h and 'Month\n₱4,700' in h and 'Margin\n–' in h and 'the items sold have no cost on file' in h and 'invoices this month' not in h, 'Home numbers strip after two sales whose oldest units had no cost')
     p.click('#view .strip'); check('on' in p.get_attribute('#tabs button[data-t="sell"]', 'class') and p.is_visible('#invList .item'), 'tapping the numbers strip opens the invoice list')
 
     # ---- several toys on one invoice; known customer brings the contact; many lines paginate
@@ -295,7 +297,7 @@ with sync_playwright() as pw:
     p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 stock matches: {stock_map(p2)}')
     tab(p2, 'Sales'); check(len(p2.query_selector_all('#invList .item')) == 5, 'device 2 lists all five documents')
-    p2.click('.item:has-text("No. 3")'); check('Margin ₱500' in p2.inner_text('#sheet') and 'Restock' in p2.inner_text('#sheet'), 'device 2 sees margin and the return'); close(p2)
+    p2.click('.item:has-text("No. 3")'); check('Margin unknown' in p2.inner_text('#sheet') and 'Restock' in p2.inner_text('#sheet'), 'device 2 sees the margin and the return'); close(p2)
 
     # ---- offline: invoice issued with no signal waits, then lands once
     ctx.set_offline(True)
@@ -374,12 +376,12 @@ with sync_playwright() as pw:
       commit();
     }""")
     names = lambda: [e.inner_text() for e in q.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Check 1 release date']
-    check(names() == want[:4] and q.inner_text('#view .badge') == '9' and q.inner_text('#view .more') == 'See 5 more', f'phone shows the first four rows, the badge counts all nine jobs: {names()}')
+    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Add the cost of 15 units', 'Check 1 release date']
+    check(names() == want[:4] and q.inner_text('#view .badge') == '10' and q.inner_text('#view .more') == 'See 6 more', f'phone shows the first four rows, the badge counts all ten jobs: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-collapsed.png')
-    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 5 more shows every row in the fixed order: {names()}')
+    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 6 more shows every row in the fixed order: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-expanded.png', full_page=True)
-    q.evaluate('render()'); check(len(names()) == 9, 'the expanded list survives a re-render')
+    q.evaluate('render()'); check(len(names()) == 10, 'the expanded list survives a re-render')
     tab(q, 'Stock'); tab(q, 'Home'); check(len(names()) == 4, 'entering Home from the tab bar collapses it again')
     q.click('#view .item:has-text("Ship Ben")'); check(q.input_value('[data-b="inv.cust"]') == 'Ben' and 'For the pre-order of Ben' in q.inner_text('#view'), 'a ready row opens New sale pre-filled from that pre-order')
     q.click('#backBtn')
@@ -388,7 +390,7 @@ with sync_playwright() as pw:
     check(n[1] == 'Ship 4 pre-orders now in stock' and not any(x.startswith('Ship ') and 'pre-orders' not in x for x in n), f'four ready pre-orders collapse into one row: {n[:3]}')
     q.click('#view .item:has-text("Ship 4 pre-orders")'); check(q.inner_text('#title') == 'Orders' and q.get_attribute('#view button[data-s="pre"]', 'class') == 'on', 'that row opens the pre-order list')
     q.set_viewport_size({'width': 1280, 'height': 800}); tab(q, 'Home')
-    check(len(names()) == 8 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
+    check(len(names()) == 9 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
     cx.close()
 
     check(not errors, f'no page errors: {errors}')
