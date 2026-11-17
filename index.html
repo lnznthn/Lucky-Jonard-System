@@ -367,7 +367,7 @@ function live() {
         rets.push({ ...r, refund: r.refund || 0, invNo: v ? v.no : null, cust: v ? v.cust : '', name: nameOf(r.sku), q });
         // A restocked unit comes back at the cost of the first line of that item on the invoice, as Code.gs writes it.
         const l = v && v.lines.find(l => l.sku === r.sku);
-        if (RETURN_STOCK[r.outcome] === 'In') units({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '' }, Array(r.qty).fill(l && l.cost != null ? l.cost : null), q);
+        if (RETURN_STOCK[r.outcome] === 'In') units({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '' }, Array(r.qty).fill(l ? l.cost : null), q);
         break;
       }
     }
@@ -563,7 +563,7 @@ function renderSync() {
   const pend = queued('pending'), failed = queued('failed');
   let cls = 'sync', txt;   // plain text: attention colour while entries wait, danger when refused or failed
   if (!cfg.url) { txt = pend ? pend + ' saved here' : 'Local only'; if (failed) cls += ' err'; }
-  else if (ui.busy) { cls += ' busy'; txt = 'Syncing'; }
+  else if (ui.busy) txt = 'Syncing';
   else if (ui.err) { cls += ' err'; txt = 'Sync failed'; }
   else if (failed) { cls += ' err'; txt = failed + ' need attention'; }
   else if (pend) { cls += ' pending'; txt = pend + ' waiting'; }
@@ -609,7 +609,6 @@ const TABS = [['home', 'Home'], ['stock', 'Stock'], ['sell', 'Sales'], ['orders'
 // Routes with no phone tab, and the tab that stays lit while they show.
 const ROUTE_TAB = { import: 'home', move: 'stock', activity: 'stock' };
 const TITLES = { home: 'Home', stock: 'Stock', sell: 'Sales', orders: 'Orders', import: 'Update stock', move: 'Stock in and out', activity: 'Activity' };
-const draft = () => ui.inv.lines.some(l => l.sku);
 function pageTitle() {
   if (prefs.tab === 'home') return prefs.shop.name || APP_NAME;
   if (prefs.tab === 'sell' && !wide() && ui.sellSeg === 'new') return 'New sale';
@@ -813,7 +812,7 @@ function openItemEditor(sku) {
   if (!i) ui.f = { c: newCosts() };
   openSheet(`
     <div class="top"><h2>${i ? 'Edit item' : 'New item'}</h2>${closeBtn}</div>
-    <div><label for="fName">Name</label><input id="fName" value="${esc(i ? i.name : '')}" autocomplete="off"></div>
+    <div><label for="fName">Name</label><input id="fName" value="${v('name')}" autocomplete="off"></div>
     <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
       <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
     ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0" data-units="f.c"></div>${costFields('f.c', 0)}`}
@@ -853,7 +852,7 @@ function saveItem(sku) {
     const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
     if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
     const costs = readCosts('f.c', start); if (!costs) return toast('Cost must be zero or more.');
-    qItem(Object.assign({ sku: nsku, name, cat, price, min: null, active: true }, det), nsku === $('#fSku').dataset.sug);
+    qItem(Object.assign({ sku: nsku, name, cat, price, active: true }, det), nsku === $('#fSku').dataset.sug);
     qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs);
     closeSheet(); commit(); toast(`${name} added`);
   }
@@ -865,7 +864,7 @@ function renderMove() {
   const m = ui.mv || (ui.mv = newMv());
   view().innerHTML = `
     <div><div class="lbl">Item</div>${pickerHtml('mv', m.sku)}</div>
-    <div class="seg dir"><button class="${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In: stock arrives</button><button class="${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out: stock leaves</button></div>
+    <div class="seg"><button class="${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In: stock arrives</button><button class="${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out: stock leaves</button></div>
     <div class="row2">
       <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}" data-units="mv.c"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
       <div><label for="mvReason">Reason</label><select id="mvReason">${FORM_REASONS[m.dir].map(r => `<option ${r === m.reason ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
@@ -1044,7 +1043,7 @@ function renderInvForm() {
       ${add}</div>
     <div class="stack"><div class="row2">${cust}</div>
       ${paid}
-      <details class="mini" ${f.date !== todayISO() || (pm && f.note) ? 'open' : ''}>${summary('Dated ' + esc(fmtDay(f.date).toLowerCase()))}<div class="stack">${date}${note}</div></details></div>
+      <details ${f.date !== todayISO() || (pm && f.note) ? 'open' : ''}>${summary('Dated ' + esc(fmtDay(f.date).toLowerCase()))}<div class="stack">${date}${note}</div></details></div>
     ${end}`;
 }
 function issueInvoice() {
@@ -1200,7 +1199,7 @@ function openOrdForm() {
     <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
     <div><div class="lbl">Item</div>${pickerHtml('f', f.sku)}</div>
     <div class="row2"><div><label for="oQty">Quantity ordered</label><input id="oQty" type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="f.expected" value="${esc(f.expected)}"></div></div>
-    <details class="mini" ${f.note ? 'open' : ''}>${summary('Note')}<div class="stack"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
+    <details ${f.note ? 'open' : ''}>${summary('Note')}<div class="stack"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
     <div class="stack"><button class="btn primary big" data-act="ordSave">Save order</button>
     <p class="hint">Counts as incoming until it is received. The cost is typed when it arrives.</p></div>`, 'ordForm', openOrdForm);
 }
@@ -1353,7 +1352,7 @@ function detailPatch(it, r) {
 }
 const detailNames = p => DETAILS.filter(([k]) => k in p).map(d => d[1]).join(', ');
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
-const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price == null ? null : r.price, min: null, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
+const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
 const unnamed = name => /^unidentified/i.test(String(name || '').trim());
 /** One Count row from its columns: Name, Category, Count, Price, Note, then the item details. */
@@ -1405,7 +1404,6 @@ function settleCount(rows) {
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
-/** Supplier paperwork: Name, Qty, Cost each, then the optional toy details and a note. */
 /** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note, then the Price typed in Correct this row. */
 function recvRow(c) {
   const [name = '', q = '', cost = '', cat = ''] = c;
@@ -1444,7 +1442,7 @@ function settleReceive(rows) {
       r.status = 'new'; r.on = !r.similar;
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
-    if (r.relMsg) r.msg += ' ' + r.relMsg;
+    if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
 function parseMoves(text) {
@@ -1633,7 +1631,7 @@ function prowHtml(imp, i) {
   const sub = [parts, detail, esc(dl), r.match && relToCheck(r) ? 'Release date to verify' : '', esc(r.msg), r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
   const name = `${esc(r.name)}<span class="tag ${r.status === 'bad' ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>`;
   return `<div class="prow ${r.on ? '' : 'off'}"><input id="imp${i}" type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Record ${esc(r.name)}"><div class="main">${fixable
-    ? `<button class="name fix" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
+    ? `<button class="name" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
     : `<label class="name" for="imp${i}">${name}</label>${sub ? `<div class="sub">${sub}</div>` : ''}`}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
 /** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
@@ -1794,7 +1792,7 @@ function openSettings() {
     <button class="btn primary big" data-act="savePrefs">Save invoice details and preferences</button>
     ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Items and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
       <button class="tbtn danger" data-act="wipe">Erase data on this device</button><p class="hint" style="margin-top:-12px">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p>`, '', 'pad')}
-    <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings', null);
+    <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings');
 }
 /** What is typed in the shop fields, kept when the sheet is redrawn for a new logo. */
 function readShopFields() { if ($('#sShop')) { prefs.shop.name = $('#sShop').value.trim(); prefs.shop.contact = $('#sContact').value.trim(); prefs.shop.foot = $('#sFoot').value.trim(); } }
@@ -1822,7 +1820,7 @@ document.addEventListener('click', async ev => {
     case 'tab':
       if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
       if (d.t === 'home') ui.homeMore = false;
-      if (d.t === 'sell') ui.sellSeg = draft() ? 'new' : 'list';   // a draft in progress reopens; otherwise the invoice list
+      if (d.t === 'sell') ui.sellSeg = ui.inv.lines.some(l => l.sku) ? 'new' : 'list';   // a draft in progress reopens; otherwise the invoice list
       go(d.t); break;
     case 'back':
       if (prefs.tab === 'sell') { ui.inv = newInv(); ui.sellSeg = 'list'; }
@@ -2001,7 +1999,6 @@ document.addEventListener('input', ev => {
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
     case 'iq': ui.iq = t.value; renderInvList(); break;
     case 'mvQty': ui.mv.qty = t.value; updateMvHint(); break;
-    case 'mvReason': ui.mv.reason = t.value; break;
     case 'mvDate': ui.mv.date = t.value; break;
     case 'mvNote': ui.mv.note = t.value; break;
     case 'impText': ui.text = t.value; break;

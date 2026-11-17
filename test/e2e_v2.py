@@ -367,7 +367,7 @@ with sync_playwright() as pw:
     # ---- a 40-line invoice continues on a second image: both download with no tab, the second repeats the column header with its page number
     cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = cl.new_page(); q.on('pageerror', lambda e: errors.append('long ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
-      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, min: null, active: true }, false);
+      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, active: true }, false);
       dirty(); qAdd('invoice', { invoice: { id: 'vlong', no: nextNo(), date: todayISO(), custId: custFor('Ana Reyes', ''), lines: Array.from({ length: 40 }, (_, i) => ({ sku: 'L' + (i + 1), qty: 1, list: 100, price: 100, cost: null })), preId: '' } }); commit();
       const fill = CanvasRenderingContext2D.prototype.fillText; window._drawn = [];
       CanvasRenderingContext2D.prototype.fillText = function (s, ...a) { window._drawn.push(String(s)); return fill.call(this, s, ...a); };
@@ -390,7 +390,7 @@ with sync_playwright() as pw:
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
     cx = b.new_context(viewport={'width': 390, 'height': 844}); q = cx.new_page(); q.on('pageerror', lambda e: errors.append('needs ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
-      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, min: null, active: true }, extra), false);
+      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, active: true }, extra), false);
       const mv = (sku, qty) => qMove({ id: 'm' + uid(), date: todayISO(), sku, dir: 'In', qty, reason: 'Opening', ref: '', note: '', cost: null });
       const pre = (sku, cust, qty, paid) => { const c = custFor(cust, '0917'); qAdd('pre', { pre: { id: 'p' + uid(), date: todayISO(), custId: c, sku, qty, price: 100, paid, note: '', invId: 'v' + uid(), no: nextNo() } }); dirty(); };
       it('A', 'Alpha'); mv('A', 9); it('B', 'Bravo', { price: null }); mv('B', 1); it('C', 'Charlie', { relCheck: true, rel: '2024' }); mv('C', 5); it('D', 'Delta'); dirty();
