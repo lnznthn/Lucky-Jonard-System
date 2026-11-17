@@ -258,7 +258,8 @@ function fmtDay(iso) {
   const y = new Date(); y.setDate(y.getDate() - 1); if (iso === new Date(y.getTime() - y.getTimezoneOffset() * 60000).toISOString().slice(0, 10)) return 'Yesterday';
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: iso.slice(0, 4) === t.slice(0, 4) ? undefined : 'numeric' });
 }
-const money = n => prefs.cur + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const fmtNum = n => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const money = n => prefs.cur + fmtNum(n);
 const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
 const r2 = n => Math.round(n * 100) / 100;
 const getPath = p => p.split('.').reduce((o, k) => (o == null ? o : o[k]), ui);
@@ -404,11 +405,12 @@ function fifo(list) {
 }
 const onHand = sku => live().fifo.get(sku) || { units: [], deficit: 0, stock: 0 };
 const catOf = i => i.cat || 'General';
+const itemName = sku => (live().map.get(sku) || { name: sku }).name;
 const stockOf = sku => onHand(sku).stock;
 /** Cost of the units on hand: the sum of the known costs, and how many have none. */
 const stockCost = sku => { const u = onHand(sku).units; return { value: r2(u.reduce((s, x) => s + (x.cost || 0), 0)), none: u.filter(x => x.cost == null).length }; };
 /** A list of unit costs as one value when they agree, "1,200 to 1,500" when they differ, '' when none is known. */
-const costsText = list => { const k = list.filter(x => x != null && x !== ''), n = x => Number(x).toLocaleString(undefined, { maximumFractionDigits: 2 }); if (!k.length) return ''; const lo = Math.min(...k), hi = Math.max(...k); return lo === hi ? n(lo) : n(lo) + ' to ' + n(hi); };
+const costsText = list => { const k = list.filter(x => x != null); if (!k.length) return ''; const lo = Math.min(...k), hi = Math.max(...k); return lo === hi ? fmtNum(lo) : fmtNum(lo) + ' to ' + fmtNum(hi); };
 /** What selling qty now costs each: the oldest units on hand, per unit. Null when one has no cost or stock would go below zero. */
 function costOut(sku, qty) { const u = onHand(sku).units.slice(0, qty); return u.length < qty || u.some(x => x.cost == null) ? null : r2(u.reduce((s, x) => s + x.cost, 0) / qty); }
 /** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
@@ -458,31 +460,35 @@ function readyPres() {
 }
 
 /* ---------- queue ---------- */
+const queued = status => queue.filter(q => q.status === status).length;
 const qAdd = (kind, payload) => queue.push(Object.assign({ id: 'q' + uid(), kind, status: 'pending' }, payload));
 const qItem = (item, auto) => qAdd('item', { item, auto: !!auto });
 const qEdit = (sku, patch) => qAdd('edit', { sku, patch });
 const qMove = move => qAdd('move', { move });
+/** Queues an entry in place of a pending one of the same kind for the same record (named by key k), so the last change wins. */
+const qLast = (kind, k, payload) => { queue = queue.filter(q => !(q.kind === kind && q[k] === payload[k] && q.status === 'pending')); qAdd(kind, payload); };
 /** An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with that unit's cost, as Code.gs writes receipts and returns. */
 const perUnit = (move, costs) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost }));
 const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
-const entrySkus = q => q.kind === 'move' ? [q.move.sku] : q.kind === 'edit' ? [q.sku] : q.kind === 'item' ? [q.item.sku] : q.kind === 'order' ? [q.order.sku] : q.kind === 'pre' ? [q.pre.sku] : q.kind === 'invoice' ? q.invoice.lines.map(l => l.sku) : q.kind === 'ret' ? [q.ret.sku] : [];
+/** The records in an entry that carry a SKU. */
+const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? [q.order] : q.kind === 'pre' ? [q.pre] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
+const entrySkus = q => skuRecs(q).map(o => o.sku);
 function describe(q) {
-  const nm = s => (live().map.get(s) || { name: s }).name;
   switch (q.kind) {
     case 'item': return `New item “${q.item.name}” (${q.item.sku})`;
     case 'edit': return `Edit of ${q.sku}`;
     case 'cust': return `Customer “${q.cust.name}”`;
-    case 'order': return `Supplier order for ${nm(q.order.sku)}`;
+    case 'order': return `Supplier order for ${itemName(q.order.sku)}`;
     case 'receive': return 'Receiving a supplier order';
     case 'orderCancel': return 'Cancelling a supplier order';
-    case 'pre': return `Pre-order for ${nm(q.pre.sku)}`;
+    case 'pre': return `Pre-order for ${itemName(q.pre.sku)}`;
     case 'prePay': return 'Payment on a pre-order';
     case 'preCancel': return 'Cancelling a pre-order';
     case 'invoice': return `Invoice no. ${q.invoice.no}`;
     case 'ship': return 'Shipping status';
-    case 'ret': return `Return of ${nm(q.ret.sku)}`;
+    case 'ret': return `Return of ${itemName(q.ret.sku)}`;
     case 'inboxDone': return 'Clearing rows from Claude';
-    case 'cost': { const m = live().all.find(x => x.id === q.moveId); return 'Cost of a unit' + (m ? ' of ' + nm(m.sku) : ''); }
+    case 'cost': { const m = live().all.find(x => x.id === q.moveId); return 'Cost of a unit' + (m ? ' of ' + itemName(m.sku) : ''); }
     default: return 'Entry';
   }
 }
@@ -549,16 +555,13 @@ async function syncNow(manual) {
 /** The sheet renumbered an app-made SKU (two phones picked the same one); follow it in what is still queued. */
 function renumber(from, to) {
   const sw = o => { if (o && o.sku === from) o.sku = to; };
-  queue.forEach(q => {
-    if (q.kind === 'edit') sw(q); else if (q.kind === 'move') sw(q.move); else if (q.kind === 'order') sw(q.order); else if (q.kind === 'pre') sw(q.pre); else if (q.kind === 'ret') sw(q.ret);
-    else if (q.kind === 'invoice') q.invoice.lines.forEach(sw);
-  });
+  queue.forEach(q => { if (q.kind !== 'item') skuRecs(q).forEach(sw); });
   sw(ui.mv); sw(ui.f); ui.inv.lines.forEach(sw);
   if (ui.aSku === from) ui.aSku = to;
 }
 function renderSync() {
   const b = $('#syncBtn'), t = $('#syncTxt');
-  const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
+  const pend = queued('pending'), failed = queued('failed');
   let cls = 'sync', txt;   // plain text: attention colour while entries wait, danger when refused or failed
   if (!cfg.url) { txt = pend ? pend + ' saved here' : 'Local only'; if (failed) cls += ' err'; }
   else if (ui.busy) { cls += ' busy'; txt = 'Syncing'; }
@@ -654,12 +657,14 @@ const relCell = x => esc(x.rel) + (x.rel && x.relCheck ? '<span class="tag warn"
 
 /* Home: the month's numbers, the two ways in, then one list of what needs doing */
 const STOCK_FILTERS = { short: 'Promised beyond supply', noprice: 'No price yet', nocost: 'No cost yet', verify: 'Release date to verify' };
+// What each Stock filter keeps; Home counts its rows with the same tests.
+const STOCK_TEST = { out: i => status(i) !== 'ok', short: i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; }, noprice: i => i.price == null, nocost: i => stockCost(i.sku).none > 0, verify: i => i.relCheck };
 /** The rows of "Needs you", in their fixed order. Each is a job phrased as an action. */
 function needsRows() {
   const L = live(), today = todayISO(), act = L.list.filter(i => i.active), out = [];
-  const failed = queue.filter(q => q.status === 'failed').length;
+  const failed = queued('failed');
   const ready = readyPres(), owing = L.pres.filter(p => p.status === PRE_OPEN && p.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
-  const short = act.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; }), verify = act.filter(i => i.relCheck), noprice = act.filter(i => i.price == null);
+  const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
   if (ready.length >= 4) out.push(row(`Ship ${ready.length} pre-orders now in stock`, 'The items have arrived', 'data-act="homeGo" data-to="pre"'));
@@ -722,11 +727,7 @@ function renderStockList() {
   const scope = rows;
   if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
   if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
-  if (ui.filter === 'out') rows = rows.filter(i => ['out', 'neg'].includes(status(i)));
-  if (ui.filter === 'short') rows = rows.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; });
-  if (ui.filter === 'noprice') rows = rows.filter(i => i.price == null);
-  if (ui.filter === 'nocost') rows = rows.filter(i => stockCost(i.sku).none > 0);
-  if (ui.filter === 'verify') rows = rows.filter(i => i.relCheck);
+  if (STOCK_TEST[ui.filter]) rows = rows.filter(STOCK_TEST[ui.filter]);
   const box = $('#stockList'); if (!box) return;
   // The table keeps its filter row when nothing matches, so a filter can be undone.
   if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
@@ -739,7 +740,7 @@ function renderStockList() {
 }
 /** Stock on desktop: every field of an item, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
 function stockTable(list, scope) {
-  const rows = list.map(i => ({ i, n: nums(i.sku), u: onHand(i.sku).units })), cost = r => r.u.map(x => x.cost).filter(x => x != null);
+  const rows = list.map(i => ({ i, n: nums(i.sku), c: onHand(i.sku).units.map(x => x.cost).filter(x => x != null), v: stockCost(i.sku).value }));
   const pick = (k, get, label) => { const v = k === 'cat' ? (ui.cat === 'All' ? '' : ui.cat) : ui.tf[k] || '';
     return `<th><select data-tf="${k}" aria-label="${label}"><option value="">Any</option>${[...new Set(scope.map(get).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></th>`; };
   const rel = (k, ph) => `<input data-tf="${k}" value="${esc(ui.tf[k] || '')}" placeholder="${ph}" aria-label="Release date ${ph.toLowerCase()}" autocomplete="off">`;
@@ -748,8 +749,8 @@ function stockTable(list, scope) {
     ['Release date', r => r.i.rel, r => relCell(r.i)], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'n'],
     ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'n'], ['Incoming', r => r.n.inc, null, 'n'], ['Owed', r => r.n.owed, null, 'n'],
     [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'n'],
-    ['Unit cost', r => cost(r).length ? Math.min(...cost(r)) : null, r => cost(r).length ? esc(prefs.cur + costsText(cost(r))) : '–', 'n'],
-    ['Stock cost', r => cost(r).length ? stockCost(r.i.sku).value : null, r => cost(r).length ? money(stockCost(r.i.sku).value) : '–', 'n']],
+    ['Unit cost', r => r.c.length ? Math.min(...r.c) : null, r => r.c.length ? esc(prefs.cur + costsText(r.c)) : '–', 'n'],
+    ['Stock cost', r => r.c.length ? r.v : null, r => r.c.length ? money(r.v) : '–', 'n']],
     rows, r => `data-act="item" data-sku="${esc(r.i.sku)}"`, filt, 400);
 }
 function openItem(sku) {
@@ -804,8 +805,7 @@ function setUnitCost(moveId, val) {
   const cost = val.trim() === '' ? null : Number(val), m = live().all.find(x => x.id === moveId);
   if (cost != null && (isNaN(cost) || cost < 0)) { toast('Cost must be zero or more.'); return rerender(); }
   if (!m || m.cost === cost) return;
-  queue = queue.filter(q => !(q.kind === 'cost' && q.moveId === moveId && q.status === 'pending'));
-  qAdd('cost', { moveId, cost }); commit(); toast('Saved');
+  qLast('cost', 'moveId', { moveId, cost }); commit(); toast('Saved');
 }
 
 /* Item editor */
@@ -904,17 +904,16 @@ function saveMove() {
 const cmpMove = (a, b) => (a.date === b.date ? b._i - a._i : a.date < b.date ? 1 : -1);
 const moveTag = m => m.q ? (m.q.status === 'failed' ? '<span class="tag bad">refused</span>' : '<span class="tag warn">waiting</span>') : '';
 function moveRow(m, withName = true) {
-  const it = live().map.get(m.sku);
-  return row(`${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${moveTag(m)}`, `${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.reason === 'Sale' && m.ref ? ' · invoice ' + esc(m.ref) : ''}${m.note ? ' · ' + esc(m.note) : ''}`, `data-act="move" data-id="${esc(m.id)}"`, `<span class="delta">${signed(m.dir, m.qty)}</span>`);
+  return row(`${withName ? esc(itemName(m.sku)) : esc(m.reason)}${moveTag(m)}`, `${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.reason === 'Sale' && m.ref ? ' · invoice ' + esc(m.ref) : ''}${m.note ? ' · ' + esc(m.note) : ''}`, `data-act="move" data-id="${esc(m.id)}"`, `<span class="delta">${signed(m.dir, m.qty)}</span>`);
 }
 function renderActivity() {
-  const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
+  const pend = queued('pending'), failed = queued('failed');
   view().innerHTML = `
     ${failed ? `<div class="banner bad"><span>${plural(failed, 'entry was', 'entries were')} refused by the sheet. Tap a row marked refused to see why.</span><button class="tbtn" data-act="retryAll">Retry</button></div>` : ''}
     ${queue.filter(q => q.status === 'failed' && q.kind !== 'move').map(q => `<div class="banner bad"><span>${esc(describe(q))} was refused: ${esc(q.error || 'unknown reason')}.${q.kind === 'item' ? ' Deleting it also deletes stock entries waiting on it.' : ''}</span><button class="tbtn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button></div>`).join('')}
     ${pend && !failed ? `<div class="banner warn"><span>${pend} waiting to reach the sheet.</span><button class="tbtn" data-act="sync">Sync</button></div>` : ''}
     <div><label for="aq">Filter</label><input id="aq" type="search" placeholder="Name, reason, note or date" value="${esc(ui.aq)}" autocomplete="off"></div>
-    ${ui.aSku ? `<div class="links"><p class="hint" style="flex:1">Showing only: ${esc((live().map.get(ui.aSku) || { name: ui.aSku }).name)}</p><button class="tbtn" data-act="clearSku">Show all</button></div>` : ''}
+    ${ui.aSku ? `<div class="links"><p class="hint" style="flex:1">Showing only: ${esc(itemName(ui.aSku))}</p><button class="tbtn" data-act="clearSku">Show all</button></div>` : ''}
     <div id="actList" class="${wide() ? '' : 'cols'}"></div>`;
   renderActList();
 }
@@ -923,12 +922,11 @@ function renderActList() {
   const L = live(), q = norm(ui.aq);
   let rows = L.all.slice();
   if (ui.aSku) rows = rows.filter(m => m.sku === ui.aSku);
-  if (q) rows = rows.filter(m => norm([m.date, m.sku, (L.map.get(m.sku) || {}).name, m.reason, m.note].join(' ')).includes(q));
+  if (q) rows = rows.filter(m => norm([m.date, m.sku, itemName(m.sku), m.reason, m.note].join(' ')).includes(q));
   rows.sort(cmpMove);
   if (!rows.length) { box.innerHTML = `<p class="empty">No movements yet.</p>`; return; }
   const older = rows.length > ui.aN ? `<button class="btn" data-act="more">Show ${rows.length - ui.aN} older</button>` : '';
-  const nm = m => (L.map.get(m.sku) || { name: m.sku }).name;
-  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date))], ['Item', nm, m => esc(nm(m)) + moveTag(m), 'w'],
+  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date))], ['Item', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'w'],
     ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'n'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'n'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'w']],
     rows, m => `data-act="move" data-id="${esc(m.id)}"`, '', ui.aN) + older; return; }
   const shown = rows.slice(0, ui.aN); let out = '', day = '';
@@ -937,10 +935,10 @@ function renderActList() {
 }
 function openMove(id) {
   const m = live().all.find(x => x.id === id); if (!m) return;
-  const it = live().map.get(m.sku), q = m.q, own = q && q.kind === 'move';
+  const q = m.q, own = q && q.kind === 'move';
   const reversed = live().all.some(x => x.ref === m.id && x.reason === 'Correction');
   openSheet(`
-    <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(it ? it.name : m.sku)}</h2>${closeBtn}</div>
+    <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(itemName(m.sku))}</h2>${closeBtn}</div>
     <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd><dt>SKU</dt><dd>${esc(m.sku)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
     ${own
       ? `${q.status === 'failed' ? `<button class="btn primary big" data-act="retryOne" data-qid="${esc(q.id)}">Retry</button>` : ''}<button class="tbtn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button>`
@@ -957,7 +955,7 @@ function reverseMove(id) {
 
 /* ---------- Sales: one New sale form for sales and pre-orders, and the invoice list ---------- */
 function linePrice(l) { const it = l.sku && live().map.get(l.sku); return l.price === '' ? (it && it.price != null ? it.price : null) : Number(l.price); }
-function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + (parseInt(l.qty, 10) || 0) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
+function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + lineQty(l) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
 const lineQty = l => parseInt(l.qty, 10) || 0;
 const lineAmt = l => { const p = linePrice(l); return p == null || isNaN(p) ? '–' : money(r2(lineQty(l) * p)); };
 /**
@@ -1068,7 +1066,7 @@ function issueInvoice() {
   const pre = f.preId && L.pres.find(p => p.id === f.preId && p.status === PRE_OPEN);
   const custId = custFor(name, f.contact), id = 'v' + uid(), no = nextNo();
   // Payment comes before the invoice, so issuing one for a pre-order settles whatever balance it still showed.
-  if (pre && pre.balance > 0) { queue = queue.filter(q => !(q.kind === 'prePay' && q.preId === pre.id && q.status === 'pending')); qAdd('prePay', { preId: pre.id, paid: r2(pre.qty * pre.price) }); }
+  if (pre && pre.balance > 0) qLast('prePay', 'preId', { preId: pre.id, paid: r2(pre.qty * pre.price) });
   qAdd('invoice', { invoice: { id, no, date, custId, lines, preId: pre ? pre.id : '' } });
   ui.inv = newInv(); ui.sellSeg = 'list'; commit(); openInv(id); toast(`Invoice no. ${no} issued. Stock updated.`);
 }
@@ -1101,7 +1099,7 @@ function renderInvList() {
   const items = v => (v.lines[0] ? v.lines[0].name : '') + (v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''), sale = v => v.type === SALE;
   if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'n'], ['Date', v => v.date, v => esc(fmtDay(v.date))], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v)], ['Items', items, null, 'w'],
     ['Total', v => v.total, v => money(v.total), 'n'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'n'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, '', 300); return; }
-  box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => row(`No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag">delivered</span>' : ''}${waitTag(v)}`, `${esc(fmtDay(v.date))} · ${esc(v.lines[0] ? v.lines[0].name : '')}${v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''}`, `data-act="inv" data-id="${esc(v.id)}"`, `<span class="amt">${money(v.total)}</span>`)).join('')}</div>`;
+  box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => row(`No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag">delivered</span>' : ''}${waitTag(v)}`, `${esc(fmtDay(v.date))} · ${esc(items(v))}`, `data-act="inv" data-id="${esc(v.id)}"`, `<span class="amt">${money(v.total)}</span>`)).join('')}</div>`;
 }
 function openInv(id) {
   const L = live(), v = L.invs.find(x => x.id === id); if (!v) return closeSheet();
@@ -1237,7 +1235,7 @@ function receiveOrd() {
   closeSheet(); commit();
   const waiting = readyPres().filter(p => p.sku === o.sku).length;
   toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
-  if (waiting) { prefs.tab = 'orders'; ui.ordSeg = 'pre'; savePrefs(); render(); }
+  if (waiting) { ui.ordSeg = 'pre'; go('orders'); }
 }
 
 /* ---------- Invoice image: the invoice or receipt drawn on a canvas and saved as PNG ---------- */
@@ -1471,8 +1469,8 @@ function parseMoves(text) {
     if (!r.reason) return fail(`Unknown reason “${want}”.`);
     if (!reasonOK(r.dir, r.reason)) return fail(`${r.reason} cannot be recorded as ${r.dir}.`);
     if (r.dir === 'In') r.cost = parsePrice(cost);
-    const dup = seenKey.has([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
-    seenKey.add([r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'));
+    const k = [r.date, r.item.sku, r.dir, r.qty, r.reason].join('|'), dup = seenKey.has(k);
+    seenKey.add(k);
     const bal = (run.has(r.item.sku) ? run.get(r.item.sku) : stockOf(r.item.sku)) + (r.dir === 'In' ? r.qty : -r.qty);
     run.set(r.item.sku, bal);
     if (dup) { r.status = 'dup'; r.msg = 'Same date, item, direction, quantity and reason already exist. Tick to add anyway.'; }
@@ -1681,7 +1679,7 @@ function saveFix(i, simSku) {
 /** The result of Apply. It stays until closed and follows the sync. */
 function openImpResult() {
   const x = ui.impResult; if (!x) return;
-  const pend = queue.filter(q => q.status === 'pending').length;
+  const pend = queued('pending');
   const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
   openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
     <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new item')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'item')} with new details`}.</p>
@@ -1740,6 +1738,8 @@ function applyMoves(rows) {
   });
   return n;
 }
+/** Reads the pasted block into the preview. */
+function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }
 function buildPrompt() {
   const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${catOf(i)} | ${stockOf(i.sku)}`).join('\n') || '(empty: no items yet)';
   const details = `- Manufacturer, Brand, Product line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
@@ -1779,7 +1779,7 @@ ${cat}`;
 
 /* ---------- settings ---------- */
 function openSettings() {
-  const failed = queue.filter(q => q.status === 'failed').length, pend = queue.filter(q => q.status === 'pending').length, sh = prefs.shop;
+  const failed = queued('failed'), pend = queued('pending'), sh = prefs.shop;
   openSheet(`
     <div class="top"><h2>Settings</h2>${closeBtn}</div>
     ${sec('Connection', `<div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
@@ -1814,15 +1814,17 @@ function parseCode(s) {
 const tsv = rows => rows.map(r => r.map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
 
 /* ---------- events ---------- */
+/** Opens a page: kept as the current tab on this device, with any sheet closed and the page at the top. */
+function go(t) { prefs.tab = t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); }
 document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
     case 'tab':
-      prefs.tab = d.t; if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
+      if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
       if (d.t === 'home') ui.homeMore = false;
       if (d.t === 'sell') ui.sellSeg = draft() ? 'new' : 'list';   // a draft in progress reopens; otherwise the invoice list
-      savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
+      go(d.t); break;
     case 'back':
       if (prefs.tab === 'sell') { ui.inv = newInv(); ui.sellSeg = 'list'; }
       else { if (prefs.tab === 'move') ui.mv = null; prefs.tab = ui.from || 'home'; savePrefs(); }
@@ -1839,8 +1841,8 @@ document.addEventListener('click', async ev => {
     case 'editItem': openItemEditor(d.sku); break;
     case 'saveItem': saveItem(d.sku || null); break;
     case 'archive': { const i = live().map.get(d.sku); if (i && (!i.active || confirm(`Archive “${i.name}”? It leaves the lists and pickers; its history stays.`))) { qEdit(d.sku, { active: !i.active }); closeSheet(); commit(); toast(i.active ? 'Archived' : 'Restored'); } break; }
-    case 'moveFor': ui.mv = newMv(d.sku, d.dir); prefs.tab = 'move'; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
-    case 'seeAll': ui.aSku = d.sku; ui.aq = ''; prefs.tab = 'activity'; savePrefs(); closeSheet(); render(); break;
+    case 'moveFor': ui.mv = newMv(d.sku, d.dir); go('move'); break;
+    case 'seeAll': ui.aSku = d.sku; ui.aq = ''; go('activity'); break;
     case 'clearSku': ui.aSku = ''; renderActivity(); break;
     case 'more': ui.aN += 150; renderActList(); break;
     case 'dir': ui.mv.dir = d.d; if (!FORM_REASONS[d.d].includes(ui.mv.reason)) ui.mv.reason = defaultReason(d.d); renderMove(); break;
@@ -1872,21 +1874,20 @@ document.addEventListener('click', async ev => {
     // sell
     case 'toyGo': {
       const it = live().map.get(d.sku), price = it && it.price != null ? it.price : ''; if (!it) break;
-      closeSheet();
       if (d.to === 'sell') {
         const l = ui.inv.lines; if (!l[0].sku) l[0] = { sku: it.sku, qty: 1, price }; else if (!l.some(x => x.sku === it.sku)) l.push({ sku: it.sku, qty: 1, price });
-        ui.inv.force = ''; ui.sellSeg = 'new'; prefs.tab = 'sell'; savePrefs(); render(); window.scrollTo(0, 0);
+        ui.inv.force = ''; ui.sellSeg = 'new'; go('sell');
       } else {
-        prefs.tab = 'orders'; ui.ordSeg = 'sup'; savePrefs(); render();
+        ui.ordSeg = 'sup'; go('orders');
         ui.f = { type: 'ord', sku: it.sku, qty: 1, expected: '', date: todayISO(), note: '' }; openOrdForm();
       }
       break;
     }
     case 'homeGo': {
-      if (d.to === 'sale' || d.to === 'invs') { prefs.tab = 'sell'; ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; }
-      else if (d.to === 'pre' || d.to === 'sup') { prefs.tab = 'orders'; ui.ordSeg = d.to; }
-      else { prefs.tab = 'stock'; ui.filter = d.to; ui.cat = 'All'; ui.q = ''; ui.tf = {}; }
-      savePrefs(); render(); window.scrollTo(0, 0); break;
+      if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
+      else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
+      else { ui.filter = d.to; ui.cat = 'All'; ui.q = ''; ui.tf = {}; go('stock'); }
+      break;
     }
     case 'sellNew': ui.sellSeg = 'new'; render(); window.scrollTo(0, 0); break;
     case 'invForce': ui.inv.force = d.v; renderSell(); break;
@@ -1899,9 +1900,7 @@ document.addEventListener('click', async ev => {
     case 'imgCopy': copyImg(d.id); break;
     case 'ship': {
       const v = live().invs.find(x => x.id === d.id); if (!v || v.ship === d.s) break;
-      queue = queue.filter(q => !(q.kind === 'ship' && q.invId === d.id && q.status === 'pending'));   // the last tap wins
-      qAdd('ship', { invId: d.id, ship: d.s });
-      commit(); break;
+      qLast('ship', 'invId', { invId: d.id, ship: d.s }); commit(); break;
     }
     case 'retOpen': { const v = live().invs.find(x => x.id === d.id); const l = v && v.lines.find(l => returnable(v, l.sku) > 0); if (l) { ui.sub = { id: d.id, mode: 'ret', sku: l.sku, qty: 1, outcome: 'Restock', refund: '', note: '' }; rerender(); } break; }
     case 'retSave': saveReturn(); break;
@@ -1912,7 +1911,7 @@ document.addEventListener('click', async ev => {
     case 'fulfil': {
       const p = live().pres.find(x => x.id === d.id); if (!p) break;
       ui.inv = Object.assign(newInv(), { cust: p.cust, contact: contactOf(p), lines: [{ sku: p.sku, qty: p.qty, price: p.price }], preId: p.id });
-      ui.sellSeg = 'new'; prefs.tab = 'sell'; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); break;
+      ui.sellSeg = 'new'; go('sell'); break;
     }
     case 'prePaySave': {
       const s = ui.sub, p = s && live().pres.find(x => x.id === s.id); if (!p) break;
@@ -1920,8 +1919,7 @@ document.addEventListener('click', async ev => {
       if (isNaN(got) || got <= 0) { toast('Type the amount received.'); break; }
       if (got > p.balance) { toast(`That is more than the balance of ${money(p.balance)}.`); break; }
       const paid = r2(p.paid + got);
-      queue = queue.filter(q => !(q.kind === 'prePay' && q.preId === p.id && q.status === 'pending'));
-      qAdd('prePay', { preId: p.id, paid }); ui.sub = null; commit(); toast('Payment saved'); break;
+      qLast('prePay', 'preId', { preId: p.id, paid }); ui.sub = null; commit(); toast('Payment saved'); break;
     }
     case 'preCancelSave': {
       const s = ui.sub, p = s && live().pres.find(x => x.id === s.id); if (!p) break;
@@ -1939,7 +1937,7 @@ document.addEventListener('click', async ev => {
     // import
     case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
     case 'copyPrompt': await copyText(buildPrompt()); toast('Copied. Paste it in Claude together with the photo.'); break;
-    case 'impParse': { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); break; }
+    case 'impParse': impParse(); break;
     case 'inboxDismiss': if (ui.imp && ui.imp.src === 'inbox') { qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Dismissed' }); ui.imp = null; commit(); toast('Dismissed'); } break;
     case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
     case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; if (r.src) r.src.user = el.checked; renderImpOut(); break; }
@@ -2020,9 +2018,9 @@ document.addEventListener('change', ev => {
   // A known customer's name brings their contact with it.
   if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
 });
-// Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
 document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; if (ev.target.dataset && ev.target.dataset.grp && ui.imp) ui.imp.open[ev.target.dataset.grp] = ev.target.open; }, true);
-document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(() => { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }, 0); });
+// Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
+document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(impParse, 0); });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
 window.addEventListener('online', () => scheduleSync());
