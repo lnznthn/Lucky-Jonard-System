@@ -95,7 +95,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--text);outline-of
 input[type=checkbox]{accent-color:var(--accent);width:22px;height:22px;min-height:0;margin:0}
 label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.row2:empty{display:none}
-.units input{width:136px;flex:none}
+/* A unit on the product sheet: its SKU and date over its cost and condition on a phone, all in one row on a desktop. */
+.units .item{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:8px 12px}.units .main{grid-column:1/-1}
+.row2[data-costbox]{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}   /* a condition such as "Loose complete" needs the wider share */
 .step{display:flex;gap:8px}.step .btn{min-width:52px;min-height:48px;padding:0}
 .step input{text-align:center}
 .sug{display:flex;flex-direction:column;border:1px solid var(--line);border-top:0;background:var(--field)}
@@ -195,6 +197,8 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl td .tbtn{min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-weight:400}
   .tbl td input[type=checkbox]{width:16px;height:16px;vertical-align:middle}
   .tbl td input[data-rcost],.tbl td input[data-rprice]{min-height:0;height:24px;margin:-3px 0;padding:0 6px;font-size:13px;text-align:right}
+  .tbl td select[data-rcond]{min-height:0;height:24px;margin:-3px 0;padding:0 2px;font-size:13px}
+  .units .item{grid-template-columns:minmax(0,1fr) 112px 172px}.units .main{grid-column:auto}
   .tbl tr.off td{color:var(--muted)}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
@@ -323,6 +327,12 @@ const DELIVERED = 'Delivered', FOLLOW = 'To follow', CANCELLED = 'Cancelled';
 // What a return does to stock, per outcome. Same table as RETURN_STOCK_ in Code.gs: change both together.
 const RETURN_STOCK = { 'Restock': 'In', 'Write-off': null };
 const RETURN_HINT = { 'Restock': 'Goes back into stock.', 'Write-off': 'Does not go back into stock.' };
+// The condition of each unit and what it means. Same list and order as CONDITIONS_ in Code.gs: change both together.
+// '' is a unit with none recorded (every unit from before 2.6); a new unit starts as MIB in every form.
+const CONDITIONS = { 'MISB': 'Mint in sealed box: factory sealed', 'MIB': 'Mint in box: opened, unit mint, box included', 'MOC': 'Mint on card: still on its blister card',
+  'CIB': 'Complete in box: opened or displayed, all parts and the box', 'Box damage': 'Unit fine, box dented, torn or faded', 'Loose complete': 'No box, all parts', 'Loose': 'No box, may be missing parts' };
+const NEW_COND = 'MIB';
+const oneCond = c => Object.hasOwn(CONDITIONS, c || '') ? c : '';   // a single condition as it is; a combined one ('MIB / Loose') or none gives ''
 
 /* ---------- state ---------- */
 let cfg = store.get('cfg', { url: '', key: '' });
@@ -357,7 +367,7 @@ function live() {
   const custs = new Map(docs.custs.map(c => [c.id, { ...c }])), sups = new Map(docs.sups.map(s => [s.id, { ...s }]));
   const orders = docs.orders.map(o => ({ ...o })), invs = docs.invs.map(v => ({ ...v, lines: v.lines.map(l => ({ ...l })) })), rets = docs.rets.map(r => ({ ...r }));
   const all = moves.map((m, i) => ({ ...m, _i: i }));
-  const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, q) => perUnit(m, costs).forEach(x => push(x, q));
+  const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, conds, q) => perUnit(m, costs, conds).forEach(x => push(x, q));
   const find = (list, id) => list.find(x => x.id === id);
   // A line of an invoice, and the Sale movement that takes it out of stock: <invId>-<line>, Ref = invoice number.
   const lineOf = q => { const v = find(invs, q.invId), l = v && v.lines.find(x => x.line === q.line); return l && l.status === FOLLOW ? [v, l] : []; };
@@ -373,16 +383,17 @@ function live() {
       case 'supplier': sups.set(q.supplier.id, { ...q.supplier }); break;
       // A supplier order is one row per line; a line ID already there is skipped.
       case 'order': { const o = q.order; o.lines.forEach(l => { if (!find(orders, l.id)) orders.push({ id: l.id, orderId: o.id, date: o.date, supId: o.supId, sup: '', sku: l.sku, name: nameOf(l.sku), qty: l.qty, cost: l.cost, expected: o.expected, recQty: 0, status: 'Ordered', note: o.note, q }); }); break; }
-      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost typed for it, skipping IDs already written.
+      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost and condition picked for it, skipping IDs already written.
       case 'receive': {
         const o = find(orders, q.lineId); if (!o || o.status === 'Cancelled') break;
-        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost }, q); });
+        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost, cond: (q.conds || [])[k] || '' }, q); });
         o.recQty = Math.max(o.recQty || 0, q.from + q.costs.length); if (o.recQty >= o.qty) o.status = 'Received'; o.w = q; break;
       }
       case 'orderCancel': { const o = find(orders, q.lineId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
       case 'inboxDone': q.rows.forEach(x => handled.add(x.row)); break;
-      // A cost typed for a unit shows at once: it changes its movement (queued or synced before it) ahead of the replay.
+      // A cost typed or a condition picked for a unit shows at once: it changes its movement (queued or synced before it) ahead of the replay.
       case 'cost': all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); break;
+      case 'cond': all.forEach(m => { if (m.id === q.moveId) m.cond = q.cond; }); break;
       case 'invoice': {
         // To-follow lines leave no stock and have no cost yet; paid blank means paid in full.
         const v = q.invoice, c = custs.get(v.custId) || {}, total = r2(v.lines.reduce((s, l) => s + l.qty * l.price, 0)), paid = blank(v.paid) ? total : v.paid;
@@ -402,9 +413,9 @@ function live() {
       case 'ret': {
         const r = q.ret, v = find(invs, r.invId);
         rets.push({ ...r, refund: r.refund || 0, invNo: v ? v.no : null, cust: v ? v.cust : '', name: nameOf(r.sku), q });
-        // A restocked unit comes back at the cost of the first delivered line of that item on the invoice, as Code.gs writes it.
+        // A restocked unit comes back at the cost of the first delivered line of that item on the invoice, and its condition when it is a single one, as Code.gs writes it.
         const l = v && v.lines.find(l => l.sku === r.sku && l.status === DELIVERED);
-        if (RETURN_STOCK[r.outcome] === 'In') units({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '' }, Array(r.qty).fill(l ? l.cost : null), q);
+        if (RETURN_STOCK[r.outcome] === 'In') units({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '' }, Array(r.qty).fill(l ? l.cost : null), Array(r.qty).fill(l ? oneCond(l.cond) : ''), q);
         break;
       }
     }
@@ -428,7 +439,7 @@ function live() {
   return _live;
 }
 /**
- * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost, unit }, one per unit),
+ * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost, unit, cond }, one per unit),
  * the deficit an Out could not take, and stock (units less deficit; one of the two is always zero). An In covers the
  * deficit first. An Out takes from the front, but a Correction that reverses an In takes that In's units first.
  */
@@ -437,7 +448,7 @@ function fifo(list) {
   list.forEach(m => {
     const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
     let n = m.qty;
-    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit }); }
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit, cond: m.cond || '' }); }
     else {
       if (m.reason === 'Correction') s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
@@ -455,6 +466,13 @@ const stockCost = sku => { const u = onHand(sku).units; return { value: r2(u.red
 const costsText = list => { const k = list.filter(x => x != null); if (!k.length) return ''; const lo = Math.min(...k), hi = Math.max(...k); return lo === hi ? fmtNum(lo) : fmtNum(lo) + ' to ' + fmtNum(hi); };
 /** What selling qty now costs each: the oldest units on hand, per unit. Null when one has no cost or stock would go below zero. */
 function costOut(sku, qty) { const u = onHand(sku).units.slice(0, qty); return u.length < qty || u.some(x => x.cost == null) ? null : r2(u.reduce((s, x) => s + x.cost, 0) / qty); }
+/** Distinct conditions in the order given, joined with ' / ' (usually one, such as MIB); '' when none is recorded. */
+const condsText = list => [...new Set(list.filter(Boolean))].join(' / ');
+/** The condition of a sale line: that of the oldest qty units on hand, the ones the line takes. */
+const condOut = (sku, qty) => condsText(onHand(sku).units.slice(0, qty).map(u => u.cond));
+/** A condition dropdown, each option titled with its meaning. "—" leads only while a unit has none recorded (cur ''); a combined
+ *  value (a sale line whose units differ) shows a disabled "Mixed" until one condition is picked for them all. */
+const condSel = (attrs, cur) => `<select ${attrs}>${cur === '' ? '<option value="" selected>—</option>' : ''}${cur.includes(' / ') ? `<option value="" disabled selected title="${esc(cur)}">Mixed</option>` : ''}${Object.entries(CONDITIONS).map(([k, t]) => `<option value="${esc(k)}" title="${esc(t)}"${k === cur ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>`;
 /** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
 function nums(sku) { const L = live(), have = stockOf(sku), inc = L.incoming.get(sku) || 0, owed = L.owed.get(sku) || 0; return { have, inc, owed, ltp: have + inc - owed }; }
 const LTP_TEXT = 'Left to promise is on hand, plus incoming supplier orders, minus units owed on pre-order lines still to follow. A negative number means more has been promised than supply covers.';
@@ -514,9 +532,9 @@ const qEdit = (sku, patch) => qAdd('edit', { sku, patch });
 const qMove = move => qAdd('move', { move });
 /** Queues an entry in place of a pending one of the same kind for the same record (named by key k), so the last change wins. */
 const qLast = (kind, k, payload) => { queue = queue.filter(q => !(q.kind === kind && q[k] === payload[k] && q.status === 'pending')); qAdd(kind, payload); };
-/** An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with that unit's cost, as Code.gs writes receipts and returns. */
-const perUnit = (move, costs) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost }));
-const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
+/** An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with that unit's cost and condition (conds runs parallel to costs), as Code.gs writes receipts and returns. */
+const perUnit = (move, costs, conds) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost, cond: conds[k] || '' }));
+const qIns = (move, costs, conds) => perUnit(move, costs, conds).forEach(qMove);
 /** The records in an entry that carry a SKU. */
 const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? q.order.lines : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
@@ -538,7 +556,7 @@ function describe(q) {
     case 'ship': return 'Shipping status';
     case 'ret': return `Return of ${itemName(q.ret.sku)}`;
     case 'inboxDone': return 'Clearing rows from Claude';
-    case 'cost': { const m = live().all.find(x => x.id === q.moveId); return 'Cost of a unit' + (m ? ' of ' + itemName(m.sku) : ''); }
+    case 'cost': case 'cond': { const m = live().all.find(x => x.id === q.moveId); return (q.kind === 'cost' ? 'Cost' : 'Condition') + ' of a unit' + (m ? ' of ' + itemName(m.sku) : ''); }
     default: return 'Entry';
   }
 }
@@ -705,7 +723,7 @@ const TBL = {};
 const COL_W = { tick: 36, num: 80, money: 112, date: 128, txt: 128, name: 0 };
 const isNum = k => k === 'num' || k === 'money';
 const tableTag = kinds => `<table style="min-width:${kinds.reduce((s, k) => s + (COL_W[k] || 200), 0)}px"><colgroup>${kinds.map(k => `<col${COL_W[k] ? ` style="width:${COL_W[k]}px"` : ''}>`).join('')}</colgroup>`;
-const plain = h => String(h).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();   // a cell's text, still escaped, for its title
+const plain = h => String(h).replace(/<select[\s\S]*?<\/select>/g, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();   // a cell's text, still escaped, for its title (a dropdown's options are not)
 function table(id, cols, rows, attrs, max) {
   TBL[id] = { cols, rows, attrs, max };
   const s = ui.sort[id];
@@ -870,35 +888,40 @@ function openItem(sku) {
     <button class="tbtn" data-act="editItem" data-sku="${esc(sku)}">Edit details</button>
     ${det.length || i.rel ? `<dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}</dl>` : ''}
     ${sec('Units on hand', u.deficit ? `<p class="hint" style="padding:22px 14px 14px">Below zero by ${u.deficit}. Units that arrive next cover this first.</p>`
-      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${x.unit ? esc(x.unit) + ' · ' : ''}${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
+      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${x.unit ? esc(x.unit) + ' · ' : ''}${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost">${condSel(`data-ucond="${esc(x.id)}" aria-label="Unit ${k + 1} condition"`, x.cond)}</div>`).join('')}</div>`
       : '<p class="hint" style="padding:22px 14px 14px">None on hand.</p>')}
     ${u.units.length ? `<p class="hint">${[c.none < u.units.length ? 'Cost of stock on hand ' + money(c.value) + '.' : '', c.none ? (c.none === 1 ? '1 unit has' : c.none + ' units have') + ' no cost yet.' : ''].filter(Boolean).join(' ')}</p>` : ''}
     ${sec('Recent movements', recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div>` : '<p class="hint" style="padding:22px 14px 14px">None yet.</p>')}
     ${recent.length ? `<button class="tbtn" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : ''}`, 'item:' + sku, () => openItem(sku));
 }
 
-/* Cost fields: one per unit when stock comes in, on every screen that takes stock in */
-// State c = { v, open } at a ui path: v[k] is what was typed in field k (unset until typed in); open shows a field per unit past 12.
-const newCosts = () => ({ v: [], open: false });
-const costAt = (c, k) => String(c.v[k] != null ? c.v[k] : c.v[0] || '');   // a field not typed in shows what the first one holds
-/** The fields for n units, "Unit 1 cost" ...; more than 12 units get one "Cost each" field until "Different costs per unit" opens them. */
+/* Cost fields: one cost and one condition per unit when stock comes in, on every screen that takes stock in */
+// State c = { v, d, open } at a ui path: v[k] is what was typed in cost field k and d[k] the condition picked for unit k (unset until set);
+// open shows a pair per unit past 12. A unit not set yet takes what the first one holds; a condition starts as MIB.
+const newCosts = () => ({ v: [], d: [], open: false });
+const costAt = (c, k) => String(c.v[k] != null ? c.v[k] : c.v[0] || '');
+const condAt = (c, k) => c.d[k] || c.d[0] || NEW_COND;
+/** The fields for n units, "Unit 1 cost" and "Unit 1 condition" ...; more than 12 units get one "Cost each" and one "Condition" until "Different costs per unit" opens them. */
 function costFields(path, n) {
   const c = getPath(path); n = Math.max(parseInt(n, 10) || 0, 0);
-  const field = (k, label) => `<div><label for="${path}.${k}">${label}</label><input id="${path}.${k}" type="number" inputmode="decimal" min="0" step="any" data-cost="${path}" data-k="${k}" value="${esc(costAt(c, k))}" placeholder="Optional"></div>`;
-  return `<div class="row2" data-costbox="${path}">${n > 12 && !c.open ? field(0, 'Cost each') + `<div style="display:flex;align-items:flex-end"><button class="tbtn" data-act="costOpen" data-p="${path}" data-n="${n}">Different costs per unit</button></div>`
-    : Array.from({ length: n }, (_, k) => field(k, `Unit ${k + 1} cost`)).join('')}</div>`;
+  const field = (k, cl, dl) => `<div><label for="${path}.${k}">${cl}</label><input id="${path}.${k}" type="number" inputmode="decimal" min="0" step="any" data-cost="${path}" data-k="${k}" value="${esc(costAt(c, k))}" placeholder="Optional"></div>
+    <div><label for="${path}.d${k}">${dl}</label>${condSel(`id="${path}.d${k}" data-cond="${path}" data-k="${k}"`, condAt(c, k))}</div>`;
+  return `<div class="row2" data-costbox="${path}">${n > 12 && !c.open ? field(0, 'Cost each', 'Condition') + `<div><button class="tbtn" data-act="costOpen" data-p="${path}" data-n="${n}">Different costs per unit</button></div>`
+    : Array.from({ length: n }, (_, k) => field(k, `Unit ${k + 1} cost`, `Unit ${k + 1} condition`)).join('')}</div>`;
 }
 const redrawCosts = (path, n) => { const b = $(`[data-costbox="${path}"]`); if (b) b.outerHTML = costFields(path, n); };
-/** Typing in a cost field. Typing in the first one fills every field not typed in yet. */
+/** Typing a cost or picking a condition. The first unit's value fills every unit not set yet. */
 function costInput(t) {
-  const c = getPath(t.dataset.cost), k = +t.dataset.k; c.v[k] = t.value;
-  if (!k) document.querySelectorAll(`[data-cost="${t.dataset.cost}"]`).forEach(e => { if (+e.dataset.k && c.v[+e.dataset.k] == null) e.value = t.value; });
+  const kind = t.dataset.cost ? 'cost' : 'cond', path = t.dataset[kind], c = getPath(path), a = kind === 'cost' ? c.v : c.d, k = +t.dataset.k; a[k] = t.value;
+  if (!k) document.querySelectorAll(`[data-${kind}="${path}"]`).forEach(e => { if (+e.dataset.k && a[+e.dataset.k] == null) e.value = t.value; });
 }
 /** The n costs, a number each or null when blank; undefined when one is not a number of zero or more. */
 function readCosts(path, n) {
   const c = getPath(path), out = Array.from({ length: n }, (_, k) => costAt(c, k).trim() === '' ? null : Number(costAt(c, k)));
   return out.some(x => x != null && (isNaN(x) || x < 0)) ? undefined : out;
 }
+/** The n conditions, one per unit. */
+const readConds = (path, n) => Array.from({ length: n }, (_, k) => condAt(getPath(path), k));
 
 /** A cost changed on the product sheet: one cost entry for that unit's In movement, the last one typed winning. */
 function setUnitCost(moveId, val) {
@@ -906,6 +929,12 @@ function setUnitCost(moveId, val) {
   if (cost != null && (isNaN(cost) || cost < 0)) { toast('Cost must be zero or more.'); return rerender(); }
   if (!m || m.cost === cost) return;
   qLast('cost', 'moveId', { moveId, cost }); commit(); toast('Saved');
+}
+/** A condition picked on the product sheet or a sale line: one cond entry per unit's In movement, the last one picked winning. Returns how many it queued. */
+function setConds(moveIds, cond) {
+  const L = live(), ids = [...new Set(moveIds)].filter(id => { const m = L.all.find(x => x.id === id); return m && (m.cond || '') !== cond; });
+  ids.forEach(moveId => qLast('cond', 'moveId', { moveId, cond }));
+  return ids.length;
 }
 
 /* Product editor */
@@ -949,7 +978,7 @@ function saveItem(sku) {
     const costs = readCosts('f.c', start); if (!costs) return toast('Cost must be zero or more.');
     const nsku = nextSku();   // the Product ID is never shown; the sheet renumbers it if another phone took it
     qItem(Object.assign({ sku: nsku, name, price, active: true }, det), true);
-    qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs);
+    qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs, readConds('f.c', start));
     closeSheet(); commit(); toast(`${name} added`);
   }
 }
@@ -987,8 +1016,8 @@ function saveMove() {
   const costs = m.dir === 'In' ? readCosts('mv.c', qty) : []; if (!costs) return toast('Cost must be zero or more.');
   const have = stockOf(it.sku);
   if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
-  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost: null };
-  if (m.dir === 'In') qIns(mv, costs); else qMove(mv);
+  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost: null, cond: '' };
+  if (m.dir === 'In') qIns(mv, costs, readConds('mv.c', qty)); else qMove(mv);
   const after = have + (m.dir === 'In' ? qty : -qty);
   ui.mv = null; prefs.tab = 'stock'; savePrefs();
   commit(); toast(`${signed(m.dir, qty)} ${it.name} → ${after} in stock`);
@@ -1021,7 +1050,7 @@ function renderActList() {
   if (!rows.length) { box.innerHTML = `<p class="empty">No movements yet.</p>`; return; }
   const older = rows.length > ui.aN ? `<button class="btn" data-act="more">Show ${rows.length - ui.aN} older</button>` : '';
   if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date)), 'date'], ['Product', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'name'],
-    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'num'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'money'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'name']],
+    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'num'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'money'], ['Condition', m => m.cond], ['Ref', m => m.ref], ['Note', m => m.note, null, 'name']],
     rows, m => `data-act="move" data-id="${esc(m.id)}"`, ui.aN) + older; return; }
   const shown = rows.slice(0, ui.aN); let out = '', day = '';
   shown.forEach(m => { if (m.date !== day) { if (day) out += '</div></section>'; day = m.date; out += `<section class="sec"><h2>${esc(fmtDay(day))}</h2><div class="list">`; } out += moveRow(m); });
@@ -1033,7 +1062,7 @@ function openMove(id) {
   const reversed = live().all.some(x => x.ref === m.id && x.reason === 'Correction');
   openSheet(`
     <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(itemName(m.sku))}</h2>${closeBtn}</div>
-    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
+    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.cond ? `<dt>Condition</dt><dd>${esc(m.cond)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
     ${own
       ? `${q.status === 'failed' ? `<button class="btn primary big" data-act="retryOne" data-qid="${esc(q.id)}">Retry</button>` : ''}<button class="tbtn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button>`
       : q ? '' : `<button class="btn big" data-act="reverse" data-id="${esc(m.id)}" ${reversed ? 'disabled' : ''}>${reversed ? 'Already reversed' : 'Reverse this movement'}</button>`}
@@ -1041,9 +1070,9 @@ function openMove(id) {
 }
 function reverseMove(id) {
   const m = moves.find(x => x.id === id); if (!m) return;
-  // Reversing an Out brings its units back at the cost it left with; reversing an In takes that In's units out.
-  const r = { id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` };
-  if (m.dir === 'In') qMove(r); else qIns(r, Array(m.qty).fill(m.cost));
+  // Reversing an Out brings its units back at the cost it left with, and its condition when that is a single one; reversing an In takes that In's units out.
+  const r = { id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})`, cond: '' };
+  if (m.dir === 'In') qMove(r); else qIns(r, Array(m.qty).fill(m.cost), Array(m.qty).fill(oneCond(m.cond)));
   closeSheet(); commit(); toast('Reversal recorded');
 }
 
@@ -1310,8 +1339,8 @@ function linesHtml() {
   return add + (open.length ? sec('On the way', `<div class="list">${open.map(line).join('')}</div>`) : '<p class="empty">Nothing on the way.</p>')
     + (closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(line).join('')}</div></details>` : '');
 }
-// Receiving a line: the quantity starts at what is still due and each unit's cost field at the line's cost each.
-const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], open: false } });
+// Receiving a line: the quantity starts at what is still due, each unit's cost field at the line's cost each and its condition at MIB.
+const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], d: [], open: false } });
 /** One supplier order (id is its Order ID) with its lines: Receive and Cancel the rest per line, and Receive all. */
 function openOrd(id) {
   const L = live(), lines = L.orders.filter(o => o.orderId === id); if (!lines.length) return closeSheet();
@@ -1338,13 +1367,13 @@ function receiveLine() {
   const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   if (qty > dueOf(l)) return toast(`Only ${dueOf(l)} still due on this line.`);
   const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
-  qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs });
+  qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs, conds: readConds('sub.c', qty) });
   ui.sub = null; commit(); toast(`+${qty} ${l.name}`);
 }
-/** Receives everything still due on every open line of the order, each unit at its line's cost each. */
+/** Receives everything still due on every open line of the order, each unit at its line's cost each and in condition MIB. */
 function receiveAll(id) {
   const open = live().orders.filter(l => l.orderId === id && l.status === 'Ordered'), n = open.reduce((t, l) => t + dueOf(l), 0);
-  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost) }));
+  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost), conds: Array(dueOf(l)).fill(NEW_COND) }));
   ui.sub = null; commit(); toast(`+${plural(n, 'unit')} received`);
 }
 
@@ -1486,6 +1515,8 @@ const pasted = (text, head, row) => cleanLines(text).flatMap((line, idx) => { co
 function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[1] || '').trim()), countRow); settleCount(rows); return rows; }
 /** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
 const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
+/** The condition of each of the n units a row adds: as picked in Correct this row as far as that goes, then the one picked for the row in the review, else MIB. */
+const unitConds = (r, n) => { const f = (r.src && r.src.fix) || {}, t = f.conds || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => t[k] || f.cond || NEW_COND); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
 function settleCount(rows) {
   const used = new Set();
@@ -1497,12 +1528,12 @@ function settleCount(rows) {
     used.add(key);
     if (r.match) {
       const have = stockOf(r.match.sku), d = r.count - have;
-      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = unitCosts(r, d);   // one per unit the row adds
+      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = unitCosts(r, d); r.conds = unitConds(r, d);   // one per unit the row adds
       r.status = d !== 0 ? 'count' : r.adds ? 'details' : 'same';
       r.on = d !== 0 || !r.match.active || !!r.adds;
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
-      r.status = 'new'; r.on = !r.similar; r.costs = unitCosts(r, r.count);
+      r.status = 'new'; r.on = !r.similar; r.costs = unitCosts(r, r.count); r.conds = unitConds(r, r.count);
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
@@ -1527,7 +1558,7 @@ function settleReceive(rows, ordered) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty);   // one per unit the row adds
+    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty); r.conds = unitConds(r, r.qty);   // one per unit the row adds
     if (r.match) {
       r.status = ordered ? 'ord' : 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       if (!ordered) r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1722,6 +1753,9 @@ function impTable(imp, idx, k) {
   const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
     return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
       : `<input type="number" inputmode="decimal" min="0" step="any" data-rcost="${i}" value="${c[0] == null ? '' : c[0]}" aria-label="Cost each of ${esc(r.name)}">`; };
+  // One condition for every unit the row adds, picked in place (setRowCond()); units in different conditions show them and open Correct this row.
+  const cond = i => { const r = R(i), c = r.conds || []; if (!r.src || !c.length) return '';
+    return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(condsText(c))}</button>` : condSel(`data-rcond="${i}" aria-label="Condition of ${esc(r.name)}"`, c[0]); };
   // The selling price, typed in place (setRowPrice()); a product on file shows its price until one is typed.
   const price = i => { const r = R(i); if (!r.src) return r.price == null ? '' : money(r.price);
     return `<input type="number" inputmode="decimal" min="0" step="any" data-rprice="${i}" value="${r.price == null ? '' : r.price}" placeholder="${r.match && r.match.price != null ? r.match.price : ''}" aria-label="Price of ${esc(r.name)}">`; };
@@ -1730,7 +1764,7 @@ function impTable(imp, idx, k) {
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
       + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'], ['Condition', i => condsText(R(i).conds || []), cond],
     ['Price', i => R(i).price != null ? R(i).price : R(i).match ? R(i).match.price : null, price, 'money'],
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
@@ -1741,6 +1775,12 @@ function setRowCost(t) {
   if (t.value.trim() && parsePrice(t.value) == null) { t.value = r.costs[0] == null ? '' : r.costs[0]; return toast('Cost must be zero or more.'); }
   const fix = { ...r.src.fix, cost: t.value.trim() }; delete fix.costs;
   r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);   // the field already shows the value, so nothing is redrawn and a click elsewhere still lands
+}
+/** The condition picked in a review row: every unit the row adds takes it. It changes the review only, like Correct this row. */
+function setRowCond(t) {
+  const imp = ui.imp, i = +t.dataset.rcond, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  const fix = { ...r.src.fix, cond: t.value }; delete fix.conds;
+  r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);
 }
 /** The price typed in a review row overwrites the product's price on Apply, as in Correct this row; cleared, it leaves the product alone. */
 function setRowPrice(t) {
@@ -1782,8 +1822,8 @@ function openFix(i) {
   const imp = ui.imp, r = imp && (i < 0 ? impRow(imp.mode, { cols: [] }) : imp.rows[i]); if (!r || !r.src) return;
   const src = r.src, c = fixedCols(imp.mode, src), at = k => c[ROW_COLS[imp.mode].indexOf(k)] || '', sim = src.use ? live().map.get(src.use) : r.similar;
   // A count is absolute, so an item on file gets cost fields only for the units above its stock.
-  const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, t = (src.fix && src.fix.costs) || (r.cost != null ? [r.cost] : []);
-  ui.f = { c: { v: t.map(x => x == null ? '' : String(x)), open: new Set(t).size > 1 } };
+  const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, f = src.fix || {}, t = f.costs || (r.cost != null ? [r.cost] : []), d = f.conds || (f.cond ? [f.cond] : []);
+  ui.f = { c: { v: t.map(x => x == null ? '' : String(x)), d: d.slice(), open: new Set(t).size > 1 || new Set(d).size > 1 } };
   const fld = (k, label, more = '') => { const id = 'fx' + k[0].toUpperCase() + k.slice(1); return `<div><label for="${id}">${label}</label><input id="${id}" data-fx="${k}" value="${esc(at(k))}" autocomplete="off"${more}></div>`; };
   openSheet(`<div class="top"><h2>Correct this row</h2>${closeBtn}</div>
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
@@ -1809,9 +1849,11 @@ function saveFix(i, simSku) {
   if (v.price && parsePrice(v.price) == null) return toast('Price must be zero or more.');
   if (v.rel && !parseRel(v.rel)) return toast('Release date must look like 2024, 2024-07 or 2024-07-15.');
   if (v.cost && parsePrice(v.cost) == null) return toast('Cost must be zero or more.');
-  // An order line has one cost each; otherwise each unit the row adds has its own.
+  // An order line has one cost each; otherwise each unit the row adds has its own cost and condition.
+  const n = Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0);
   if (ordered(imp)) delete fix.costs;
-  else if (!(fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0)))) return toast('Cost must be zero or more.');
+  else if (!(fix.costs = readCosts('f.c', n))) return toast('Cost must be zero or more.');
+  else fix.conds = readConds('f.c', n);
   if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
   src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
   if (i < 0) imp.rows.push(impRow(imp.mode, src)); else imp.rows[i] = impRow(imp.mode, src);
@@ -1849,7 +1891,7 @@ function applyCount(rows) {
     if (d !== 0) {
       const m = { id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null };
       // Stock can move between the review and Apply (a sync); the typed costs are then used as far as they go.
-      if (d > 0) qIns(m, unitCosts(r, d)); else qMove(m);
+      if (d > 0) qIns(m, unitCosts(r, d), unitConds(r, d)); else qMove(m);
       out.nMove++; if (!fresh) out.nCount++;
     }
     dirty();
@@ -1865,8 +1907,8 @@ function applyReceive(rows) {
     else if (r.match && patchExisting(it, r)) out.nDetails++;
     // A row receives the oldest open order line of its product up to what is still due on it; units beyond that are a plain Restock.
     const n = r.order ? Math.min(r.qty, r.order.qty - (r.order.recQty || 0)) : 0;
-    if (n) qAdd('receive', { lineId: r.order.id, date, from: r.order.recQty || 0, costs: r.costs.slice(0, n) });
-    if (r.qty > n) qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs.slice(n));
+    if (n) qAdd('receive', { lineId: r.order.id, date, from: r.order.recQty || 0, costs: r.costs.slice(0, n), conds: r.conds.slice(0, n) });
+    if (r.qty > n) qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs.slice(n), r.conds.slice(n));
     out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
   return out;
@@ -1897,7 +1939,7 @@ function applyMoves(rows) {
   rows.forEach(r => {
     if (!r.on || !r.item) return;
     const m = { id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note, cost: r.cost };
-    if (r.dir === 'In') qIns(m, Array(r.qty).fill(r.cost)); else qMove(m);
+    if (r.dir === 'In') qIns(m, Array(r.qty).fill(r.cost), Array(r.qty).fill(NEW_COND)); else qMove(m);
     n++;
   });
   return n;
@@ -1981,8 +2023,8 @@ const tsv = rows => rows.map(r => r.map(cell).join('\t')).join('\n');
 function go(t) { prefs.tab = t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); }
 document.addEventListener('click', async ev => {
   if (!$('#pop').hidden && !ev.target.closest('#pop, [data-act="tfOpen"]')) closePop();
-  // A field inside a table row (a review row's cost) is typed in; it does not open the row.
-  const el = ev.target.closest('[data-act]'); if (!el || (el.tagName === 'TR' && ev.target.closest('input'))) return;
+  // A field inside a table row (a review row's cost or condition) is typed in; it does not open the row.
+  const el = ev.target.closest('[data-act]'); if (!el || (el.tagName === 'TR' && ev.target.closest('input, select'))) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
     case 'navMini': prefs.navMini = !prefs.navMini; savePrefs(); render(); break;
@@ -2135,8 +2177,8 @@ document.addEventListener('click', async ev => {
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost)).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
-    case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.unit])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost) + (x.cond ? ' ' + x.cond : '')).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.unit, m.cond])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
@@ -2169,8 +2211,11 @@ document.addEventListener('input', ev => {
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
+  if (t.dataset.cond) costInput(t);   // a unit's condition in the cost fields
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.dataset.ucond && setConds([t.dataset.ucond], t.value)) { commit(); toast('Saved'); }
   if (t.dataset.rcost) setRowCost(t);
+  if (t.dataset.rcond) setRowCond(t);
   if (t.dataset.rprice) setRowPrice(t);
   if (t.dataset.tfv) { ui.tf[t.dataset.tfv] = [...$('#pop').querySelectorAll('[data-tfv]:checked')].map(x => x.value); renderStockList(); }
   if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
