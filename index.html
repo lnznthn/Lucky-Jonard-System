@@ -104,7 +104,7 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .sug button[disabled]{color:var(--muted)}
 .picked{display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 14px;border:1px solid var(--line);background:var(--field)}
 .picked .name{font-size:15px;font-weight:500}
-.hint{color:var(--muted);font-size:13px}
+.hint,.prow .sub{color:var(--muted);font-size:13px}
 .hint b{color:var(--text);font-weight:500}
 .banner{border:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;column-gap:12px;flex-wrap:wrap;font-size:15px}
 .banner.bad{border-color:var(--danger)}.banner.warn{border-color:var(--attn)}.banner.danger{border-color:var(--danger);color:var(--danger)}
@@ -141,7 +141,6 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 /* Apply stays in reach on a phone: it sits just above the tab bar while the review scrolls. */
 .applybar{position:sticky;bottom:calc(61px + env(safe-area-inset-bottom));z-index:4;background:var(--bg);padding:12px 0 2px;display:flex;flex-direction:column;gap:6px}
 .prow.off .name{color:var(--muted)}
-.prow .sub{font-size:13px;color:var(--muted)}
 .cols,.cols>div{display:flex;flex-direction:column;gap:20px}
 .layer{position:fixed;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center}
 .layer[hidden]{display:none}
