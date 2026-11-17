@@ -91,9 +91,7 @@ function setup() {
     T_[k].text.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
   });
   ensureSheet_(ss, 'Inbox', INBOX_HEAD_).getRange('A:M').setNumberFormat('@');
-  // Formatted on every run, so a Browse tab made by an older release gets the text columns where they are now.
-  var br = browseSheet_(ss);
-  BROWSE_TEXT_.forEach(function (a1) { br.getRange(a1).setNumberFormat('@'); });
+  browseSheet_(ss);
   var ed = ensureSheet_(ss, 'Edits', EDIT_HEAD_);
   ed.getRange('A:E').setNumberFormat('@');
   ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
@@ -120,17 +118,19 @@ function showKey() {
 /**
  * Run by hand to start again from an empty sheet, after every phone has synced with nothing waiting.
  * Saves a copy of the whole spreadsheet named "Bodega backup <date>" first, then clears every row under the header on the
- * data tabs, Edits and Browse, and raises moveRev so each phone drops its movements at its next sync.
- * The key, the tabs, their formatting and the Inbox stay.
+ * data tabs and Edits, and raises moveRev so each phone drops its movements at its next sync.
+ * The key, those tabs, their formatting and the Inbox stay. Browse is deleted instead: the script owns it, and setup() or the
+ * next write makes it again with the current header and text columns and no filter left from an older layout.
  */
 function wipeAllData() {
   locked_(function () {
     var ss = SpreadsheetApp.getActiveSpreadsheet(), name = 'Bodega backup ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
     ss.copy(name);
-    ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }), ['Edits', 'Browse']).forEach(function (n) {
+    ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }), ['Edits']).forEach(function (n) {
       var sh = ss.getSheetByName(n);
       if (sh && sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent();
     });
+    if (ss.getSheetByName('Browse')) ss.deleteSheet(ss.getSheetByName('Browse'));
     raiseRev_();
     Logger.log('Wiped. Backup: ' + name);
   });

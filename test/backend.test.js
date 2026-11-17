@@ -520,24 +520,29 @@ K.b.ss.onSetValues = null;
 assert.ok(fired && res(r).ko4.ok); assert.equal(res(r).ko5.error, MSG('Movements', 'k1', 'not found'));
 assert.deepEqual(jK(), { k2: 20, k3: 33 }, 'the refused cost was written nowhere');
 
-// (p) wipeAllData(): a backup first, then every row under the header goes on the listed tabs; key, tabs, formatting and Inbox stay
+// (p) wipeAllData(): a backup first, then every row under the header goes on the listed tabs; key, tabs, formatting and Inbox stay;
+// Browse is deleted and the next sync makes it again with the current header, text columns and no filter
 const ibU = U.sheet('Inbox');
 [['Done', 'Done Row'], ['Dismissed', 'Dismissed Row'], ['Working', 'Working Row'], ['', 'Waiting Row'], ['Done', 'Done Too']].forEach(([st, name], i) =>
   ['2026-11-15', 'Count', name, '1', '', '', '', '', '', '', '', '', st].forEach((v, j) => { if (v) ibU.set(i + 2, j + 1, v); }));
 U.sheet('Edits').set(2, 1, 'U1'); U.sheet('Edits').set(2, 2, 'Price'); U.sheet('Edits').set(2, 3, '5'); U.sheet('Edits').set(2, 4, 'Done');
 U.add([{ id: 'up', kind: 'pre', pre: { id: 'upo', date: '2026-11-12', custId: 'cu', sku: 'U4', qty: 1, price: 100, paid: 0, note: '', invId: 'r-upo', no: 9 } }]);
-const wiped = ['Items', 'Movements', 'Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Edits', 'Browse'];
+const wiped = ['Items', 'Movements', 'Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Edits'];
 const heads = () => wiped.map(n => U.sheet(n).getRange(1, 1, 1, 19).getValues()[0]);
 const sW = U.full(), keyW = U.b.props.KEY, inboxW = ibU.rowsOf(), headsW = heads();
-assert.ok(wiped.every(n => U.sheet(n).getLastRow() > 1), 'every listed tab has rows before the wipe');
+assert.ok(wiped.concat('Browse').every(n => U.sheet(n).getLastRow() > 1), 'every listed tab has rows before the wipe');
+U.sheet('Browse').filter = { range: 'A1:R' };
 vm.runInContext('wipeAllData()', U.b);
 assert.deepEqual(U.b.copies.map(c => c.name), ['Bodega backup ' + new Date().toISOString().slice(0, 10)]);
 assert.ok(Object.values(U.b.copies[0].sheets.find(s => s.name === 'Movements').cells).includes('rcv-uo1-4'), 'the backup was made before the wipe');
 assert.deepEqual(wiped.map(n => U.sheet(n).getLastRow()), wiped.map(() => 1), 'nothing left under the headers'); assert.deepEqual(heads(), headsW, 'headers kept');
 assert.deepEqual(ibU.rowsOf(), inboxW, 'Inbox kept'); assert.equal(U.b.props.KEY, keyW, 'key kept');
 assert.ok(U.sheet('Movements').textCols.has(1) && U.sheet('Edits').validation && U.sheet('Items').getProtections().length === 1, 'formatting, the dropdown and the protection stay');
+assert.equal(U.sheet('Browse'), undefined, 'Browse is deleted');
 const sAfter = U.c('sync', { have: { rows: sW.rows, lastId: sW.lastId, moveRev: sW.moveRev } }).data;
 assert.deepEqual([sAfter.moveRev, sAfter.reset, sAfter.rows, sAfter.moves, sAfter.items, sAfter.invs], [sW.moveRev + 1, true, 0, [], [], []], 'a phone syncing after the wipe gets the empty sheet');
+const brW = U.sheet('Browse');
+assert.deepEqual([brW.getRange(1, 1, 1, 19).getValues()[0][18], brW.getLastRow(), brW.textCols.has(11), brW.filter], ['Release check', 1, true, null], 'Browse made again by the sync');
 r = U.add([item('W1', 'After Wipe'), { id: 'wk', kind: 'cust', cust: { id: 'cu', name: 'Cora', contact: '0917' } }, saleU('w1', 1, [{ sku: 'W1', qty: 1, price: 10 }])]);
 assert.deepEqual([r.results[2].ok, r.results[2].no, r.results[2].fromNo], [true, 1, undefined], 'invoice numbers start again at 1');
 
