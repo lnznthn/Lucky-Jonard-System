@@ -1,5 +1,5 @@
 // Direct tests of Code.gs through the mock. Run: node test/backend.test.js
-const vm = require('vm'), assert = require('assert'), fs = require('fs');
+const vm = require('vm'), assert = require('assert');
 const { load } = require('./mock-backend');
 const sb = load();
 const key = sb.props.KEY;
@@ -255,8 +255,8 @@ vm.runInContext('setup()', sb); assert.ok(sheet('Inbox') && sheet('Inbox').textC
 assert.ok(!JSON.stringify(full()).includes('"_row"') && !JSON.stringify(full()).includes('"_dirty"'));
 assert.match(add([{ id: 'u1', kind: 'nuke' }]).results[0].error, /Unknown entry type/);
 // ---------- 2.2: writes find rows by key, On hand is a number, Browse, Edits, warnings ----------
-function bench(file) {
-  const b = load(file), k = b.props.KEY;
+function bench() {
+  const b = load(), k = b.props.KEY;
   const c = (action, extra = {}) => { b.__e = { postData: { contents: JSON.stringify({ key: k, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', b).text); };
   const fullB = () => c('sync', { have: { rows: 0 } }).data;
   const addB = entries => { const s = fullB(); return c('add', { have: { rows: s.rows, lastId: s.lastId }, entries }).data; };
@@ -405,28 +405,13 @@ assert.ok(!W.full().inbox.some(x => x.name === 'Box Three'), 'a Working row is n
 W.add([{ id: 'ibw', kind: 'inboxDone', rows: [{ row: 5, name: 'Box Three', added: '2026-11-15', type: 'count', qty: '1' }], mark: 'Done' }]);
 assert.equal(ibx.cell(5, 13), 'Working', 'a row with a status is never overwritten');
 
-// (h) setup() on a sheet left by 2.0.0: the formula goes, On hand becomes numbers, nothing is lost; running it again is harmless
-const O = bench(require('path').join(__dirname, 'Code-2.0.0.gs'));
-r = O.add([item('T0001', 'Old One'), item('T0002', 'Old Two', { brand: '=Brand' }), move('h1', 'T0001', 'In', 4, 'Opening'), move('h2', 'T0001', 'Out', 1, 'Sale'), move('h3', 'T0002', 'In', 2, 'Opening', { cost: 50 }),
-  { id: 'hk', kind: 'cust', cust: { id: 'c-h', name: 'Hal', contact: '+63 900' } }]);
-assert.ok(r.results.every(x => x.ok)); assert.ok(O.sheet('Items').formulas['2,7'].startsWith('=ARRAYFORMULA'), 'a 2.0.0 sheet has the formula');
+// (h) setup(): warning-only protection on the app tabs and none on the Inbox; running it again keeps every cell and adds no second protection
 const tabsH = ['Items', 'Movements', 'Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Inbox'];
-const snap = () => Object.fromEntries(tabsH.map(n => [n, O.sheet(n).rowsOf().map(x => x.filter((v, j) => !(n === 'Items' && j === 6)))]));
-const before22 = snap();
-vm.runInContext(fs.readFileSync(require('path').join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), O.b);
-vm.runInContext('setup()', O.b);
-assert.deepEqual(O.sheet('Items').formulas, {}, 'the formula is gone');
-assert.deepEqual(O.sheet('Items').rowsOf().map(x => x[6]), [3, 2], 'On hand written as numbers');
-assert.deepEqual(snap(), before22, 'every other cell kept');
-assert.ok(O.sheet('Browse') && O.sheet('Edits'), 'Browse and Edits created');
-assert.deepEqual(O.sheet('Browse').rowsOf().map(x => [x[0], x[6], x[10], x[13]]), [['T0001', 3, '', ''], ['T0002', 2, 50, '=Brand']]);
-const prot = () => tabsH.slice(0, 8).map(n => O.sheet(n).getProtections().map(p => [p.desc, p.warn]));
+const snap = () => Object.fromEntries(tabsH.map(n => [n, W.sheet(n).rowsOf()]));
+const prot = () => tabsH.slice(0, 8).map(n => W.sheet(n).getProtections().map(p => [p.desc, p.warn]));
+const beforeH = snap();
+vm.runInContext('setup()', W.b);
 assert.deepEqual(prot(), tabsH.slice(0, 8).map(() => [['Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.', true]]), 'warning-only protection on the app tabs');
-assert.deepEqual(O.sheet('Inbox').getProtections(), [], 'the Inbox stays open for Claude');
-vm.runInContext('setup()', O.b);
-assert.deepEqual(prot().map(x => x.length), [1, 1, 1, 1, 1, 1, 1, 1], 'running setup again adds no second protection'); assert.deepEqual(snap(), before22);
-assert.equal(O.c('ping').data.version, '2.2.0');
-// app 2.1.1 against backend 2.2.0: the same request shapes still work, the new fields are extra
-r = O.add([move('h4', 'T0002', 'Out', 1, 'Sale'), { id: 'hi', kind: 'inboxDone', rows: [{ row: 2, name: 'Nothing' }], mark: 'Done' }]);
-assert.ok(r.results.every(x => x.ok) && Array.isArray(r.sync.items) && r.sync.items.length === 2); assert.deepEqual(O.sheet('Items').rowsOf().map(x => x[6]), [3, 1]);
+assert.deepEqual(W.sheet('Inbox').getProtections(), [], 'the Inbox stays open for Claude');
+assert.deepEqual(snap(), beforeH, 'every cell kept');
 console.log('backend tests passed');

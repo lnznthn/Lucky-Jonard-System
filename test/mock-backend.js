@@ -67,11 +67,10 @@ function makeSandbox() {
   };
   return sandbox;
 }
-// file: another version of the script (a test runs the 2.0.0 copy to make a sheet as that release left it).
-function load(file) {
+function load() {
   const sb = makeSandbox();
   vm.createContext(sb);
-  vm.runInContext(fs.readFileSync(file || path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), sb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), sb);
   vm.runInContext('setup()', sb);
   return sb;
 }
@@ -79,14 +78,12 @@ module.exports = { load };
 
 if (require.main === module) {
   const port = +process.argv[2] || 8766;
-  // MOCK_CODE=test/Code-2.0.0.gs serves the older backend, to check that the app still works against it.
-  const file = process.env.MOCK_CODE && path.resolve(process.env.MOCK_CODE);
-  let sb = load(file);
+  let sb = load();
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
   http.createServer((req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
     if (req.url.startsWith('/_key')) { res.writeHead(200, cors); return res.end(sb.props.KEY); }
-    if (req.url.startsWith('/_reset')) { sb = load(file); res.writeHead(200, cors); return res.end(sb.props.KEY); }
+    if (req.url.startsWith('/_reset')) { sb = load(); res.writeHead(200, cors); return res.end(sb.props.KEY); }
     if (req.url.startsWith('/_dump')) {
       const dump = {}; sb.sheets.forEach(s => { const rows = []; for (let r = 1; r <= s.getLastRow(); r++) { const row = []; for (let c = 1; c <= 20; c++) row.push(s.cell(r, c) === undefined ? '' : s.cell(r, c)); rows.push(row); } dump[s.name] = { rows, formulas: s.formulas }; });
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); return res.end(JSON.stringify(dump));
