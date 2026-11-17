@@ -262,9 +262,8 @@ function stockOf_(moves) {
       owe[k] = Math.max(d - n, 0);
       for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost });
     } else {
-      for (var i = u.length - 1; m.reason === 'Correction' && i >= 0 && n > 0; i--) if (u[i].id === m.ref) { u.splice(i, 1); n--; }
-      var took = Math.min(n, u.length);
-      u.splice(0, took); owe[k] = d + n - took;
+      if (m.reason === 'Correction') u = units[k] = u.filter(function (x) { return x.id === m.ref && n > 0 ? (n--, false) : true; });
+      owe[k] = d + n - u.splice(0, n).length;
     }
   });
   Object.keys(units).forEach(function (k) { stock[k] = units[k].length - (owe[k] || 0); });

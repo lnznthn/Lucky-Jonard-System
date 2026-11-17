@@ -396,7 +396,7 @@ function fifo(list) {
     let n = m.qty;
     if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost }); }
     else {
-      if (m.reason === 'Correction' && m.ref) s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
+      if (m.reason === 'Correction') s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
     }
     s.stock = s.units.length - s.deficit;
