@@ -171,7 +171,6 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   nav.tabs button{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;min-height:44px;padding:0 14px;border-top:0;margin:0;font-size:15px}
   nav.tabs button.on{font-weight:600}
   .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
-  .cols.sell{grid-template-columns:minmax(0,460px) minmax(0,1fr)}
   /* Tables: hairline rows like the lists; the header stays in view, and a wide table scrolls sideways inside its own box. */
   .tbl{overflow:auto;max-height:calc(100dvh - 92px);border:1px solid var(--line)}
   .sec>.tbl{border:0;margin-top:10px}
@@ -191,6 +190,17 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl .filt th{padding:0 6px 8px}
   .tbl .filt select,.tbl .filt input{min-height:40px;padding:0 8px}
   .tbl .rng{display:flex;gap:6px}.tbl .rng input{width:6.5em}
+  /* New sale: the customer in one row, the lines as a table, the total and the button at the right. */
+  .frow{display:flex;gap:12px}.frow>div{flex:1;min-width:0}.frow>div:nth-child(3){flex:.8}.frow>div:nth-child(4){flex:1.5}
+  .tbl.lines{max-height:none;container-type:inline-size}
+  .lines th,.lines td{padding:8px;vertical-align:middle}
+  .lines td:first-child{width:40%;min-width:260px}
+  .lines .picked{min-height:48px;padding:0 14px}.lines .picked .hint{display:none}
+  .lines input[type=number]{width:120px;text-align:right}
+  .lines tr:has(+ .note) td{border-bottom:0}
+  .lines .note td{padding:0 8px 12px}
+  .lines .note td>*{position:sticky;left:8px;max-width:calc(100cqw - 16px)}   /* a notice stays in view while the lines scroll sideways */
+  .send{align-self:flex-end;width:min(100%,400px);display:flex;flex-direction:column;gap:20px}
   .layer{align-items:center}
   .sheet{max-width:560px;max-height:88dvh;border-bottom:1px solid var(--line);padding:20px 24px 24px}
   .toast{left:calc(50% + 114px);bottom:28px}
@@ -957,6 +967,7 @@ function reverseMove(id) {
 function linePrice(l) { const it = l.sku && live().map.get(l.sku); return l.price === '' ? (it && it.price != null ? it.price : null) : Number(l.price); }
 function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + (parseInt(l.qty, 10) || 0) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
 const lineQty = l => parseInt(l.qty, 10) || 0;
+const lineAmt = l => { const p = linePrice(l); return p == null || isNaN(p) ? '–' : money(r2(lineQty(l) * p)); };
 /**
  * The form is a sale unless a picked line asks for more than is free to sell, in which case it saves a pre-order.
  * Opening it from a pre-order (preId) or tapping "It is here, sell it now" (force) keeps it a sale.
@@ -978,8 +989,8 @@ function invHint() {
   return `Takes ${ls.length === 1 ? units + ' ' + L.map.get(ls[0].sku).name : plural(units, 'unit') + ' of ' + ls.length + ' items'} out of stock and opens the invoice.`;
 }
 function renderSell() {
-  if (wide()) {   // New sale and the invoice list side by side
-    view().innerHTML = `<div class="cols sell"><div><section class="sec pad"><h2>New sale</h2><div id="sellBody" class="stack" style="gap:20px"></div></section></div><div><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div></div></div>`;
+  if (wide()) {   // New sale across the page, the invoice list under it
+    view().innerHTML = `<section class="sec pad"><h2>New sale</h2><div id="sellBody" class="stack" style="gap:20px"></div></section><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
     renderInvForm(); renderInvList(); return;
   }
   if (ui.sellSeg === 'new') { view().innerHTML = `<div id="sellBody" class="stack" style="gap:20px"></div>`; renderInvForm(); return; }
@@ -1010,22 +1021,42 @@ function renderInvForm() {
   const box = $('#sellBody'); if (!box) return;
   // Nothing to sell yet: say so and offer the one step that fixes it.
   if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No items to sell yet</h3><p>Add an item with its price, or send Claude photos and review them under Update stock.</p><div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`; return; }
+  const banner = pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : '';
+  const notes = l => `${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}`;
+  const add = pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another item</button>';
+  const cust = `<div><label for="iCust">Customer</label><input id="iCust" data-b="inv.cust" data-cust="inv" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div>
+      <div><label for="iContact">Phone or Messenger</label><input id="iContact" data-b="inv.contact" value="${esc(f.contact)}" placeholder="${pm ? 'Required for a pre-order' : 'Optional'}" autocomplete="off"></div>`;
+  const paid = pm ? `<div><label for="iPaid">Paid now (${esc(prefs.cur)})</label><input id="iPaid" type="number" inputmode="decimal" min="0" step="any" data-b="inv.paid" value="${esc(f.paid)}" placeholder="Leave blank when paid in full"></div>` : '';
+  // On a phone the date sits behind "Dated today", whose wording follows the date; on desktop it is a field in the top row.
+  const date = `<div><label for="iDate">Date</label><input id="iDate" type="date" data-b="inv.date" ${wide() ? '' : 'data-redraw="1"'} value="${esc(f.date)}"></div>`;
+  const note = pm ? `<div><label for="iNote">Note</label><input id="iNote" data-b="inv.note" value="${esc(f.note)}" placeholder="Optional" autocomplete="off"></div>` : '';
+  const end = `<div class="tot">${pm ? `<div><span>Total</span><b id="invTotal">${money(invTotal())}</b></div><div class="big"><span>Balance when it arrives</span><b id="invBal">${money(invBalance())}</b></div>` : `<div class="big"><span>Total</span><b id="invTotal">${money(invTotal())}</b></div>`}</div>
+    <div class="stack">${pm ? `<button class="btn primary big" data-act="invIssue">Save pre-order · receipt no. ${nextNo()}</button>`
+      : `<button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p>`}</div>`;
+  if (wide()) {   // the customer in one row, the lines as table rows with any notice under its line, the total and button at the right
+    box.innerHTML = `${banner}<div class="frow">${cust}${date}${paid}${note}</div>
+    <div class="tbl lines"><table><thead><tr><th>Item</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
+      <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
+        <td class="n"><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}" aria-label="Quantity"></td>
+        <td class="n"><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}" aria-label="Price each"></td>
+        <td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
+      ${notes(l) ? `<tr class="note"><td colspan="6">${notes(l)}</td></tr>` : ''}`).join('')}</tbody></table></div>
+    ${add}<div class="send">${end}</div>`;
+    return;
+  }
   box.innerHTML = `
-    ${pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : ''}
+    ${banner}
     <div class="stack">${f.lines.map((l, i) => `
       <div class="lbl" style="margin:0">Item${several ? ' ' + (i + 1) : ''}</div>${pickerHtml('inv.lines.' + i, l.sku)}
-      ${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}
+      ${notes(l)}
       <div class="row2"><div><label for="q${i}">Quantity</label><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}"></div>
         <div><label for="p${i}">Price each (${esc(prefs.cur)})</label><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}"></div></div>
       ${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove this item</button>` : ''}`).join('')}
-      ${pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another item</button>'}</div>
-    <div class="stack"><div class="row2"><div><label for="iCust">Customer</label><input id="iCust" data-b="inv.cust" data-cust="inv" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div>
-      <div><label for="iContact">Phone or Messenger</label><input id="iContact" data-b="inv.contact" value="${esc(f.contact)}" placeholder="${pm ? 'Required for a pre-order' : 'Optional'}" autocomplete="off"></div></div>
-      ${pm ? `<div><label for="iPaid">Paid now (${esc(prefs.cur)})</label><input id="iPaid" type="number" inputmode="decimal" min="0" step="any" data-b="inv.paid" value="${esc(f.paid)}" placeholder="Leave blank when paid in full"></div>` : ''}
-      <details class="mini" ${f.date !== todayISO() || (pm && f.note) ? 'open' : ''}>${summary('Dated ' + esc(fmtDay(f.date).toLowerCase()))}<div class="stack"><div><label for="iDate">Date</label><input id="iDate" type="date" data-b="inv.date" data-redraw="1" value="${esc(f.date)}"></div>${pm ? `<div><label for="iNote">Note</label><input id="iNote" data-b="inv.note" value="${esc(f.note)}" placeholder="Optional" autocomplete="off"></div>` : ''}</div></details></div>
-    <div class="tot">${pm ? `<div><span>Total</span><b id="invTotal">${money(invTotal())}</b></div><div class="big"><span>Balance when it arrives</span><b id="invBal">${money(invBalance())}</b></div>` : `<div class="big"><span>Total</span><b id="invTotal">${money(invTotal())}</b></div>`}</div>
-    <div class="stack">${pm ? `<button class="btn primary big" data-act="invIssue">Save pre-order · receipt no. ${nextNo()}</button>`
-      : `<button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p>`}</div>`;
+      ${add}</div>
+    <div class="stack"><div class="row2">${cust}</div>
+      ${paid}
+      <details class="mini" ${f.date !== todayISO() || (pm && f.note) ? 'open' : ''}>${summary('Dated ' + esc(fmtDay(f.date).toLowerCase()))}<div class="stack">${date}${note}</div></details></div>
+    ${end}`;
 }
 function issueInvoice() {
   if (invInfo().mode === 'pre') return savePreOrder();
@@ -1067,18 +1098,22 @@ function savePreOrder() {
   ui.inv = newInv(); ui.sellSeg = 'list'; commit(); openInv(invId); toast(`Pre-order saved. Receipt no. ${no} is ready to send.`);
 }
 const docTitle = v => (v.type === SALE ? 'Invoice' : 'Pre-order receipt') + ' no. ' + v.no;
+/** A sale's margin in whole pesos; null for a receipt, or when a line has no cost. */
+const marginOf = v => v.type === SALE && v.lines.every(l => l.cost != null) ? Math.round(v.total - v.lines.reduce((s, l) => s + l.qty * l.cost, 0)) : null;
 function renderInvList() {
   const box = $('#invList'); if (!box) return;
   const q = norm(ui.iq);
   let rows = live().invs.slice().sort((a, b) => b.no - a.no);
   if (q) rows = rows.filter(v => norm([v.no, v.cust, v.date, v.type, ...v.lines.map(l => l.name)].join(' ')).includes(q));
   if (!rows.length) { box.innerHTML = `<p class="empty">${q ? 'Nothing matches.' : 'No invoices yet.'}</p>`; return; }
+  const items = v => (v.lines[0] ? v.lines[0].name : '') + (v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''), sale = v => v.type === SALE;
+  if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'n'], ['Date', v => v.date, v => esc(fmtDay(v.date))], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v)], ['Items', items, null, 'w'],
+    ['Total', v => v.total, v => money(v.total), 'n'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'n'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, '', 300); return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => row(`No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag">delivered</span>' : ''}${waitTag(v)}`, `${esc(fmtDay(v.date))} · ${esc(v.lines[0] ? v.lines[0].name : '')}${v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''}`, `data-act="inv" data-id="${esc(v.id)}"`, `<span class="amt">${money(v.total)}</span>`)).join('')}</div>`;
 }
 function openInv(id) {
   const L = live(), v = L.invs.find(x => x.id === id); if (!v) return closeSheet();
-  const sale = v.type === SALE, pre = v.preId && L.pres.find(p => p.id === v.preId), contact = contactOf(v);
-  const cost = v.lines.reduce((s, l) => s + l.qty * (l.cost || 0), 0), costKnown = v.lines.every(l => l.cost != null);
+  const sale = v.type === SALE, pre = v.preId && L.pres.find(p => p.id === v.preId), contact = contactOf(v), margin = marginOf(v);
   const myRets = L.rets.filter(r => r.invId === v.id), canReturn = sale && v.lines.some(l => returnable(v, l.sku) > 0);
   const s = ui.sub && ui.sub.id === id ? ui.sub : null;
   let retForm = '';
@@ -1097,7 +1132,7 @@ function openInv(id) {
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
-    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
+    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${margin != null ? 'Margin ' + money(margin) : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
     <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg ? `<button class="btn" id="imgCopy" data-act="imgCopy" data-id="${esc(id)}" hidden>Copy image</button>` : ''}</div>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
@@ -1910,7 +1945,7 @@ document.addEventListener('click', async ev => {
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
-function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); }
+function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); ui.inv.lines.forEach((l, i) => { if ((e = $('#amt' + i))) e.textContent = lineAmt(l); }); }
 document.addEventListener('input', ev => {
   const t = ev.target;
   if (t.dataset.cost) { costInput(t); return; }
