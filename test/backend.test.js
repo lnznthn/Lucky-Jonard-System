@@ -203,7 +203,7 @@ let z17 = res(r);
 assert.ok(z17.rrt1.ok && z17.rrt3.ok && z17.rrt9.ok);
 assert.match(z17.rrt2.error, /Only 1 of/); assert.match(z17.rrt4.error, /is not on invoice 2/); assert.match(z17.rrt5.error, /Outcome/); assert.match(z17.rrt6.error, /Outcome must be Restock or Write-off/, 'Exchange is no longer an outcome'); assert.match(z17.rrt7.error, /sale invoice/);
 let back = full().moves.filter(m => m.reason === 'Return');
-assert.deepEqual(back.map(m => [m.id, m.sku, m.dir, m.qty, m.ref]), [['ret-rt1', 'T0002', 'In', 1, 'rt1'], ['ret-rt9', 'T0100', 'In', 1, 'rt9']], 'restock comes back in, write-off does not');
+assert.deepEqual(back.map(m => [m.id, m.sku, m.dir, m.qty, m.ref, m.cost]), [['ret-rt1-1', 'T0002', 'In', 1, 'rt1', null], ['ret-rt9-1', 'T0100', 'In', 1, 'rt9', 1255.56]], 'restock comes back in at the line cost, write-off does not');
 assert.equal(full().rows, rowsBefore + 2);
 assert.deepEqual(r.sync.rets.map(x => [x.id, x.invNo, x.cust, x.outcome, x.refund]), [['rt1', 2, 'Ben Cruz', 'Restock', 100], ['rt3', 2, 'Ben Cruz', 'Write-off', 0], ['rt9', 2, 'Ben Cruz', 'Restock', 100]]);
 r = add([ret('rt1', 'T0002', 1, 'Restock'), ret('rt8', 'T0002', 1, 'Restock')]);
@@ -454,4 +454,12 @@ assert.ok(r.results.every(x => x.ok));
 assert.deepEqual(U.sheet('Invoice lines').rowsOf().map(x => [x[0], x[7]]), [[1, 100], [2, 150]], 'the line cost is written as the app sent it');
 assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[6] === 'Sale' && x[2] === 'U1').map(x => [x[0], x[9]]), [['us1-1', 100], ['us2-1', 150]], 'and the same on the Sale movement');
 assert.deepEqual([onHandU('U1'), brU('U1')], [2, [2, 0, 0, 2, '300, 400', 700, 0]], 'the two oldest units left');
+
+// (l) a Restock return writes one row per unit at the cost of the first line of that item on the invoice, at the back of the queue
+r = U.add([move('t1', 'U3', 'In', 1, 'Opening', { cost: 80 }), move('t2', 'U3', 'In', 1, 'Opening', { cost: 90 }), move('t3', 'U3', 'In', 1, 'Opening', { cost: 95 }),
+  saleU('us3', 3, [{ sku: 'U3', qty: 1, price: 200, cost: 80 }, { sku: 'U3', qty: 1, price: 200, cost: 90 }])]);
+r = U.add([{ id: 'ut', kind: 'ret', ret: { id: 'urt', date: '2026-11-17', invId: 'us3', sku: 'U3', qty: 2, outcome: 'Restock', refund: 0, note: '' } }]);
+assert.ok(r.results[0].ok);
+assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'urt').map(x => x.slice(0, 10)), [1, 2].map(k => ['ret-urt-' + k, '2026-11-17', 'U3', 'Unit Three', 'In', 1, 'Return', 'urt', 'Invoice 3', 80]));
+assert.deepEqual(brU('U3'), [3, 0, 0, 3, '95, 80, 80', 255, 0]);
 console.log('backend tests passed');

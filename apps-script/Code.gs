@@ -22,7 +22,7 @@ var EITHER_ = ['Count', 'Correction', 'Other'];
 var SHIP_ = ['', 'Delivered'];
 var PRE_OPEN_ = 'Open', PRE_DONE_ = 'Fulfilled', PRE_CANCEL_ = 'Cancelled';
 var TYPE_SALE_ = 'Sale', TYPE_RECEIPT_ = 'Pre-order receipt';
-// What a return does to stock, per outcome: 'In' writes a Return movement, null writes none.
+// What a return does to stock, per outcome: 'In' writes a Return movement per unit, null writes none.
 // Change it here and in index.html together.
 var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // Rows Claude writes after reading photos. The app shows the rows whose Status is blank and marks them Done or Dismissed.
@@ -417,7 +417,8 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * preCancel   preId, kept                                              pre-order Cancelled; kept = deposit kept, 0 = full refund; no movement
  * invoice     invoice { id, no, date, custId, lines, preId }           sale invoice + Out/Sale movement per line, Ref = invoice no
  * ship        invId, ship ('Delivered' or '')                          delivered mark on a sale invoice
- * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return against an invoice + movement per RETURN_STOCK_
+ * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return against an invoice + movements per RETURN_STOCK_: for Restock one
+ *                                                                      In/Return per unit, ret-<id>-1 ..., at the cost of the invoice line
  * inboxDone   rows [{ row, name, added?, type?, qty? }], mark          Inbox rows handled ('Done' or 'Dismissed')
  *
  * Two phones can each invent the same next SKU while offline. An item sent with auto: true that meets a
@@ -798,15 +799,16 @@ function plan_(entries, skip) {
           if (ri.type !== TYPE_SALE_) throw new Error('Only a sale invoice can take a return');
           var rit = toy_(r.sku), rqty = qty_(r.qty), outcome = s_(r.outcome);
           if (!RETURN_STOCK_.hasOwnProperty(outcome)) throw new Error('Outcome must be Restock or Write-off');
-          var sold = 0, back = 0;
-          lines.forEach(function (l) { if (l.invId === ri.id && l.sku === rit.sku) sold += l.qty; });
+          // A restocked unit comes back at the Unit cost of the first line of that item on the invoice.
+          var sold = 0, back = 0, rcost;
+          lines.forEach(function (l) { if (l.invId === ri.id && l.sku === rit.sku) { if (rcost === undefined) rcost = l.cost; sold += l.qty; } });
           rets.forEach(function (x) { if (x.invId === ri.id && x.sku === rit.sku) back += x.qty; });
           if (!sold) throw new Error(rit.name + ' is not on invoice ' + ri.no);
           if (rqty > sold - back) throw new Error('Only ' + (sold - back) + ' of ' + rit.name + ' can still be returned on invoice ' + ri.no);
           var rdate = date_(r.date);
           var ret = { id: retId, date: rdate, invNo: ri.no, invId: ri.id, cust: ri.cust, sku: rit.sku, name: rit.name, qty: rqty, outcome: outcome, refund: money_(r.refund == null || r.refund === '' ? 0 : r.refund, 'Refund'), note: text_(r.note, 300) };
           rets.push(made_(ret)); retById[retId] = ret;
-          if (RETURN_STOCK_[outcome] === 'In') pushMove_('ret-' + retId, rdate, rit, 'In', rqty, 'Return', retId, 'Invoice ' + ri.no, null);
+          if (RETURN_STOCK_[outcome] === 'In') for (var k = 1; k <= rqty; k++) pushMove_('ret-' + retId + '-' + k, rdate, rit, 'In', 1, 'Return', retId, 'Invoice ' + ri.no, rcost);
         }
 
       } else if (e.kind === 'inboxDone') {
