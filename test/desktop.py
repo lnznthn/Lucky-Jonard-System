@@ -1,4 +1,4 @@
-# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Add inventory) with
+# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Suppliers, Activity, Add inventory) with
 # their sort and filters in the header cells, the cost typed in a review row, and no page that scrolls sideways.
 # python3 test/desktop.py  (needs static server on 8765, mock backend on 8766, Chrome)
 import os, re
@@ -21,7 +21,7 @@ with sync_playwright() as pw:
     side = p.eval_on_selector('nav.tabs', 'e => { const r = e.getBoundingClientRect(); return [r.left, r.width, r.height, innerHeight]; }')
     check(side[0] == 0 and 200 < side[1] < 260 and side[2] == side[3], f'navigation is a full-height side bar: {side}')
     labels = [x.inner_text().strip() for x in p.query_selector_all('#tabs button')]
-    check(labels == ['Home', 'Inventory · 3', 'Sales', 'Orders', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Inventory with the waiting count, Sales, Orders, Activity: {labels}")
+    check(labels == ['Home', 'Inventory · 3', 'Sales', 'Suppliers', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Inventory with the waiting count, Sales, Suppliers, Activity: {labels}")
     check(p.eval_on_selector('#tabs button.on', 'e => getComputedStyle(e).color') == p.evaluate("getComputedStyle(document.body).color"), 'the current page in the side bar is in the text colour')
     # Side bar collapses to icons (kept on the device); the phone layout is untouched.
     full = p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width')
@@ -31,7 +31,7 @@ with sync_playwright() as pw:
     check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == mini, 'the collapsed side bar survives a reload')
     p.click('#navTog'); check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == full and 'Inventory · 3' in p.inner_text('#tabs'), 'the toggle expands the side bar again')
     p.click('#navTog'); p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
-    check(p.is_hidden('#navTog') and p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left') == 0 and p.inner_text('#tabs').split() == ['Home', 'Inventory', 'Sales', 'Orders'], 'a collapsed side bar leaves the phone layout unchanged')
+    check(p.is_hidden('#navTog') and p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left') == 0 and p.inner_text('#tabs').split() == ['Home', 'Inventory', 'Sales', 'Suppliers'], 'a collapsed side bar leaves the phone layout unchanged')
     p.set_viewport_size({'width': 1280, 'height': 800}); p.click('#navTog'); p.wait_for_timeout(200)
     # Add inventory, the last status tab of Inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
     tab(p, 'Inventory'); p.click('#view [data-f="add"]:has-text("Add inventory · 3")')   # no products yet: the button under "No products yet"
@@ -53,7 +53,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#sellBody button:has-text("Issue invoice")') and p.is_visible('#invList') and not p.is_visible('[data-act="sellNew"]') and p.inner_text('header.top h1') == 'Sales', 'Sales shows the New sale form and the invoice list together')
     tops = lambda sel: p.eval_on_selector_all(sel, 'els => els.map(e => Math.round(e.getBoundingClientRect().top))')
     t = tops('#iCust, #iContact, #iDate'); check(len(t) == 3 and len(set(t)) == 1, f'Customer, Phone or Messenger and Date sit in one row: {t}')
-    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Quantity', f'Price each (₱)', 'Cost each', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
+    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Pre-order', 'Quantity', f'Price each (₱)', 'Cost each', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
     pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.lines.0.qty"]', '2')
     check(p.inner_text('#amt0') == '₱3,600' and '3 in stock' in p.inner_text('#sellBody tbody tr:first-child'), f"a line shows its stock hint and its amount: {p.inner_text('#amt0')}")
     p.click('button:has-text("Add another product")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another product adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
@@ -67,25 +67,23 @@ with sync_playwright() as pw:
     check(inv and row1[0] == '1' and row1[2] == 'Ben Cruz' and row1[3] == 'Grandista Son Goku' and row1[4] == '₱1,800' and row1[6] == 'No', f'the invoice list is a table under the form: {row1}')
     p.click('[data-tbl="invs"] tbody tr:first-child'); check(p.inner_text('#sheet h2') == 'Invoice no. 1', 'clicking an invoice row opens the invoice'); p.click('#sheet button[aria-label="Close"]')
     p.screenshot(path=f'{SHOTS}/sell.png')
-    # A pre-order that stays waiting, then one whose item arrives: ready rows list first.
+    # A line beyond stock is to follow: Paid now joins the top row and the expected arrival spans the full width under the line.
     pick(p, 'inv.lines.0', 'zoro'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '700'); p.fill('[data-b="inv.cust"]', 'Cy Lim'); p.fill('[data-b="inv.contact"]', 'cy.lim')
-    t = tops('#iCust, #iContact, #iDate, #iPaid, #iNote'); check(len(t) == 5 and len(set(t)) == 1, f'in pre-order mode Paid now and Note join the top row: {t}')
-    check(p.eval_on_selector('#invNotice', 'e => e.closest("td").colSpan') == 7, 'the pre-order notice spans the full width under its line')
-    p.click('button:has-text("Save pre-order")'); p.click('button[aria-label="Close"]')
-    pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.fill('[data-b="inv.contact"]', '+63 917 000 0000'); p.fill('[data-b="inv.paid"]', '500')
-    check(p.is_visible('#invNotice'), 'an item not in stock turns the form into a pre-order')
-    p.click('button:has-text("Save pre-order")'); p.click('button[aria-label="Close"]')
-    tab(p, 'Orders')
-    check(p.is_visible('button:has-text("New supplier order")') and 'To take a pre-order, start a New sale' in p.inner_text('#view') and not p.is_visible('button:has-text("New pre-order")') and fits(), 'Orders shows pre-orders and supplier orders together')
-    p.click('button:has-text("New supplier order")'); pick(p, 'f', 'luffy'); p.fill('[data-b="f.qty"]', '4'); p.click('button:has-text("Save order")'); synced(p)
-    check(heads('pres') == ['Date', 'Customer', 'Contact', 'Product', 'Qty', 'Price', 'Paid', 'Balance', 'Status'] and heads('ords') == ['Date', 'Product', 'Qty', 'Expected', 'Status'], f"Orders shows a pre-order table and a supplier order table: {heads('pres')} {heads('ords')}")
-    v = p.inner_text('#view'); check('Ana Reyes' in v and 'Maximatic Monkey D. Luffy' in v and 'ON THE WAY' in v.upper(), 'both tables fill in')
-    p.click('[data-tbl="ords"] tbody tr:has-text("Luffy")'); check(p.is_visible('#sheet button:has-text("Received · add to stock")'), 'clicking a supplier order row opens its sheet')
-    p.click('#sheet button:has-text("Received · add to stock")'); synced(p)
-    pres = [[c.inner_text().strip() for c in r.query_selector_all('td')] for r in p.query_selector_all('[data-tbl="pres"] tbody tr')]
-    check([r[1] for r in pres] == ['Ana Reyes', 'Cy Lim'] and pres[0][8] == 'Ready to ship' and pres[1][8] == 'Waiting for stock' and pres[0][7] == '₱1,000', f'ready-to-ship pre-orders come first: {pres}')
-    p.click('[data-tbl="pres"] tbody tr:has-text("Cy Lim")'); check(p.inner_text('#sheet h2') == 'Pre-order · Cy Lim', 'clicking a pre-order row opens it'); p.click('#sheet button[aria-label="Close"]')
-    p.click('button:has-text("New supplier order")'); pick(p, 'f', 'zoro'); p.fill('[data-b="f.qty"]', '3'); p.click('button:has-text("Save order")'); synced(p)
+    t = tops('#iCust, #iContact, #iDate, #iPaid'); check(len(t) == 4 and len(set(t)) == 1 and p.is_checked('[data-act="invFollow"][data-i="0"]'), f'a to-follow line ticks Pre-order and Paid now joins the top row: {t}')
+    check(p.eval_on_selector('#e0', 'e => e.closest("td").colSpan') == 8 and p.inner_text('#cost0') == '', 'its expected arrival spans the full width under its line, and it has no cost yet')
+    p.click('button:has-text("Issue invoice no. 2")'); p.click('button[aria-label="Close"]'); synced(p)
+    row2 = [c.inner_text().strip() for c in p.query_selector_all('[data-tbl="invs"] tbody tr:first-child td')]
+    check(row2[2] == 'Cy Limto follow' and row2[5] == '–' and p.get_attribute('#invSeg button[data-f="follow"]', 'class') == '' and p.inner_text('#invSeg button[data-f="follow"]') == 'To follow · 1', f'the invoice list tags it to follow and counts it on its filter: {row2}')
+    # Suppliers: the supplier list and the order lines are tables; an order line opens its order. Order stock fills Add inventory set to Ordered.
+    for nm, q in [('Maximatic', '4'), ('Gigo', '3')]:
+        tab(p, 'Inventory'); p.click(f'#stockList tbody tr:has-text("{nm}")'); p.click('#sheet button:has-text("Order stock")')
+        p.click('[data-tbl="imp.ready"] tbody tr td:nth-child(2)'); p.fill('#fxCount', q); p.click('#sheet button:has-text("Save")'); p.fill('#oSup', 'Kanto Hobby'); apply(p, 'Apply 1 change')
+    synced(p); tab(p, 'Suppliers')
+    check(heads('sups') == ['Name', 'Contact', 'Open lines', 'Units incoming', 'Note'] and 'Kanto Hobby' in p.inner_text('[data-tbl="sups"]') and fits(), f"Suppliers lists the suppliers as a table: {heads('sups')}")
+    p.click('#view button[data-s="orders"]')
+    check(heads('olines') == ['Date', 'Supplier', 'Product', 'Qty', 'Received', 'Cost each', 'Expected', 'Status', 'Waiting'] and fits(), f"Orders lists the order lines as a table: {heads('olines')}")
+    p.click('[data-tbl="olines"] tbody tr:has-text("Luffy")'); check(p.is_visible('#sheet button:has-text("Received · add to stock")'), 'clicking an order line opens its order')
+    p.click('#sheet button:has-text("Received · add to stock")'); p.click('#sheet button[aria-label="Close"]'); synced(p)
     p.screenshot(path=f'{SHOTS}/orders.png')
     # More items for the stock table: blanks, a lower-case name, release dates of every precision, a unit cost range.
     post_inbox([{'type': 'Count', 'name': 'alpha Plush', 'qty': 2, 'mfr': 'Bandai', 'rel': '2024'},
@@ -177,7 +175,7 @@ with sync_playwright() as pw:
     nrows = p.eval_on_selector_all('.cols > div:nth-child(2) .list > *', 'els => els.length'); badge = p.inner_text('.cols > div:nth-child(2)')
     check(nrows >= 3 and 'See ' not in badge and p.query_selector('[data-act="homeMore"]') is None and all(p.is_visible(f'.cols > div:nth-child(2) .list > *:nth-child({i + 1})') for i in range(nrows)), f'Home on a 1280px window shows all {nrows} Needs-you rows with no See more')
     no_toy(p, 'desktop Home')
-    tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); add_inventory(p); no_toy(p, 'Add inventory')
+    tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Suppliers'); no_toy(p, 'Suppliers'); tab(p, 'Sales'); no_toy(p, 'Sales'); add_inventory(p); no_toy(p, 'Add inventory')
     tab(p, 'Activity'); no_toy(p, 'Activity'); check(p.inner_text('header.top h1') == 'Activity' and 'Sale' in p.inner_text('#actList') and fits(), 'Activity opens from the side bar')
     check(heads('moves') == ['Date', 'Product', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
     p.click('[data-tbl="moves"] tbody tr:has-text("Sale")'); check('Grandista Son Goku' in p.inner_text('#sheet h2') and p.is_visible('#sheet button:has-text("Reverse this movement")'), 'clicking a movement row opens the movement'); p.click('#sheet button[aria-label="Close"]')
@@ -185,11 +183,11 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/activity.png')
     for w in (1280, 900):
         p.set_viewport_size({'width': w, 'height': 800}); p.wait_for_timeout(200); bad = []
-        for pg in ['Home', 'Inventory', 'Sales', 'Orders', 'Add inventory', 'Activity']:
+        for pg in ['Home', 'Inventory', 'Sales', 'Suppliers', 'Add inventory', 'Activity']:
             add_inventory(p) if pg == 'Add inventory' else tab(p, pg); bad += [] if fits() else [pg]
         check(not bad, f'no page scrolls sideways at {w} px wide, only the tables in their own boxes: {bad}')
     p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
-    check(p.inner_text('header.top h1') == 'Activity' and [x.inner_text().strip() for x in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Orders'] and p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().top') > 600, 'narrowing the window returns to the phone layout with four tabs')
+    check(p.inner_text('header.top h1') == 'Activity' and [x.inner_text().strip() for x in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Suppliers'] and p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().top') > 600, 'narrowing the window returns to the phone layout with four tabs')
     tab(p, 'Sales'); check(p.is_visible('[data-act="sellNew"]'), 'on a phone Sales opens the invoice list with a New sale button')
     check(not errors, f'no page errors: {errors}')
     b.close()

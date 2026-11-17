@@ -97,7 +97,7 @@ if (require.main === module) {
       // Test-only: appends rows to the Inbox tab the way the assistant does through a Sheets connector.
       // Body: a JSON array of rows, each an array in INBOX_HEAD_ order or an object with the keys below.
       if (req.url.startsWith('/_inbox')) {
-        const keys = ['added', 'type', 'name', 'qty', 'cost', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'status'];
+        const keys = ['added', 'type', 'name', 'qty', 'cost', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'status', 'supplier', 'expected'];
         const sh = sb.sheets.find(s => s.name === 'Inbox'); let row = sh.getLastRow();
         JSON.parse(body || '[]').forEach(r => { row++; (Array.isArray(r) ? r : keys.map(k => r[k] == null ? '' : r[k])).forEach((v, j) => sh.set(row, j + 1, String(v))); });
         res.writeHead(200, cors); return res.end(String(row));

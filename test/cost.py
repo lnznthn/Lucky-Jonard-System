@@ -43,7 +43,7 @@ with sync_playwright() as pw:
     # ---- four units in at four costs: one field per unit, the first fills the ones not typed in
     add_item(p, 'Cost Alpha', price=1000)
     open_item(p, 'Cost Alpha'); sheet = p.inner_text('#sheet')
-    check('Left to promise is on hand, plus incoming supplier orders, minus units owed to open pre-orders.' in sheet and 'None on hand.' in sheet, 'the item sheet explains Left to promise and has no units on hand yet')
+    check('Left to promise is on hand, plus incoming supplier orders, minus units owed on pre-order lines still to follow.' in sheet and 'None on hand.' in sheet, 'the item sheet explains Left to promise and has no units on hand yet')
     p.click('#sheet button:has-text("Stock in")'); p.fill('#mvQty', '4')
     check([e.inner_text() for e in p.query_selector_all('[data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'Stock in shows one cost field per unit')
     p.fill('[data-cost="mv.c"][data-k="0"]', '100'); check(cost_fields(p, 'mv.c') == ['100'] * 4, 'typing in the first field fills the others')
@@ -63,7 +63,7 @@ with sync_playwright() as pw:
     check('Margin ₱900' in issue(p), 'the first sale takes the ₱100 unit: Margin ₱900')
     sell(p, 'cost alpha', 1000, 'Ben Cruz'); check('Margin ₱800' in issue(p), 'the second sale takes the ₱200 unit: Margin ₱800')
     synced(p)
-    check([r[7] for r in rows('Invoice lines') if r[3] == 'Cost Alpha'] == [100, 200] and [r[9] for r in rows('Movements') if r[3] == 'Cost Alpha' and r[6] == 'Sale'] == [100, 200], 'invoice lines and Sale movements carry the oldest units’ costs')
+    check([r[8] for r in rows('Invoice lines') if r[4] == 'Cost Alpha'] == [100, 200] and [r[9] for r in rows('Movements') if r[3] == 'Cost Alpha' and r[6] == 'Sale'] == [100, 200], 'invoice lines and Sale movements carry the oldest units’ costs')
     open_item(p, 'Cost Alpha'); check(units(p) == ['300', '400'] and 'Cost of stock on hand ₱700.' in p.inner_text('#sheet'), f'the item sheet lists the two units that remain: {units(p)}'); close(p)
     check('Margin\n₱1,700' in home(p), 'Home adds the margin of both sales')
 
@@ -89,7 +89,7 @@ with sync_playwright() as pw:
     tab(p2, 'Home'); p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/04-refused.png')
     check('That unit has already left stock, so its cost can no longer be changed.' in p2.inner_text('#view'), 'the change is refused with the reason')
     p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
-    check([r[7] for r in rows('Invoice lines') if r[3] == 'Cost Alpha'] == [100, 200, 350] and [r[9] for r in rows('Movements') if r[3] == 'Cost Alpha' and r[4] == 'In'] == [100, 200, 350, 400], 'issued invoices and the unit’s row are unchanged')
+    check([r[8] for r in rows('Invoice lines') if r[4] == 'Cost Alpha'] == [100, 200, 350] and [r[9] for r in rows('Movements') if r[3] == 'Cost Alpha' and r[4] == 'In'] == [100, 200, 350, 400], 'issued invoices and the unit’s row are unchanged')
     open_item(p2, 'Cost Alpha'); check(units(p2) == ['400'], f'device 2 now lists the one unit left: {units(p2)}'); close(p2)
 
     # ---- a sale of a unit with no cost: the form says so, and the margin stays unknown after the cost is typed later
@@ -104,17 +104,17 @@ with sync_playwright() as pw:
     open_item(p, 'Cost Bravo'); unit_cost(p, 0, '300'); check(units(p) == ['300'], 'the cost of the unit left is typed'); close(p)
     tab(p, 'Sales'); p.click('#invList .item:has-text("Di Cruz")')
     check('Margin unknown: a product has no cost' in p.inner_text('#sheet'), 'the margin of the sale stays unknown'); close(p); synced(p)
-    check([r[7] for r in rows('Invoice lines') if r[3] == 'Cost Bravo'] == [''], 'its invoice line has no cost in the sheet')
+    check([r[8] for r in rows('Invoice lines') if r[4] == 'Cost Bravo'] == [''], 'its invoice line has no cost in the sheet')
 
     # ---- a sale below zero, then a receipt: the first unit in covers the deficit
     add_item(p, 'Cost Charlie', price=800)
-    sell(p, 'cost charlie', 800, 'Ed Cruz'); p.click('button:has-text("It is here, sell it now")')
+    sell(p, 'cost charlie', 800, 'Ed Cruz'); p.click('[data-act="invFollow"][data-i="0"]')   # Pre-order off: sell it now
     check('no cost yet' not in p.inner_text('#sellBody'), 'a sale below zero has no no-cost line')
     check('Margin unknown' in issue(p), 'a line that takes stock below zero has no cost')
     open_item(p, 'Cost Charlie'); check('Below zero by 1. Units that arrive next cover this first.' in p.inner_text('#sheet') and not units(p), 'the item sheet says what is owed to the next units'); close(p)
     stock_in(p, 'Cost Charlie', [700, 750]); synced(p)
     open_item(p, 'Cost Charlie'); check(units(p) == ['750'] and p.inner_text('#sheet .onhand') == '1', f'the ₱700 unit covered the deficit; one unit at ₱750 is on hand: {units(p)}'); close(p)
-    check(stock_map(p)['Cost Charlie'] == 1 and [r[4] for r in rows('Products') if r[1] == 'Cost Charlie'] == [1] and [r[7] for r in rows('Invoice lines') if r[3] == 'Cost Charlie'] == [''], 'stock is 1 here and in the sheet; the sale line stays without a cost')
+    check(stock_map(p)['Cost Charlie'] == 1 and [r[4] for r in rows('Products') if r[1] == 'Cost Charlie'] == [1] and [r[8] for r in rows('Invoice lines') if r[4] == 'Cost Charlie'] == [''], 'stock is 1 here and in the sheet; the sale line stays without a cost')
 
     # ---- a Restock return comes back at the invoice line's cost, at the back of the queue
     ctx.set_offline(True)
