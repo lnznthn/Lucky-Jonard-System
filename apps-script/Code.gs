@@ -7,15 +7,16 @@
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
  * The app is the writer of the data tabs. Movements, invoice lines and returns are append-only, except that a cost entry
- * rewrites the Unit cost of an In movement while one of its units is on hand. Items, customers,
+ * rewrites the Unit cost of an In movement while one of its units is on hand. Products, customers,
  * supplier orders, pre-orders and invoices are one row each; only their status-type fields change later.
+ * A product is keyed by its Product ID (called sku inside this script and in the JSON); each unit it receives gets a SKU, see unit_().
  * Units leave stock first in, first out, in the order of the Movements tab; see stockOf_().
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
- * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes item changes typed in the sheet.
+ * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
  */
 var VERSION_ = '2.3.0';
-var ITEM_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
-var MOVE_HEAD_ = ['ID', 'Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'];
+var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
+var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
 var OUT_ONLY_ = ['Sale', 'Damaged', 'Lost'];
 var EITHER_ = ['Count', 'Correction', 'Other'];
@@ -29,13 +30,13 @@ var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // An intake run may set Status to Working while it still researches a row; any non-blank Status keeps a row out of the app.
 // Nothing in this tab counts as stock until the app applies it.
 var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status'];
-// Browse: one row per item with the computed numbers, rewritten in full at the end of every sync and add.
-// Unit costs lists the cost of each unit on hand, oldest first, with ? for a unit without one.
-var BROWSE_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
-var BROWSE_TEXT_ = ['A:C', 'F:F', 'K:K', 'N:S'];
-// Edits: item changes typed in the sheet, applied as edit entries at the start of every sync and add.
-var EDIT_HEAD_ = ['SKU', 'Field', 'New value', 'Status', 'Note'];
-var EDIT_FIELDS_ = { 'Name': 'name', 'Category': 'cat', 'Price': 'price', 'Reorder at': 'min', 'Active': 'active', 'Manufacturer': 'mfr', 'Brand': 'brand',
+// Browse: one row per product with the computed numbers, rewritten in full at the end of every sync and add.
+// Units on hand lists each unit on hand, oldest first, as its SKU and cost, with ? for a unit without a cost.
+var BROWSE_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
+var BROWSE_TEXT_ = ['A:B', 'D:D', 'I:I', 'L:Q'];
+// Edits: product changes typed in the sheet, applied as edit entries at the start of every sync and add.
+var EDIT_HEAD_ = ['Product ID', 'Field', 'New value', 'Status', 'Note'];
+var EDIT_FIELDS_ = { 'Name': 'name', 'Price': 'price', 'Active': 'active', 'Manufacturer': 'mfr', 'Brand': 'brand',
   'Product line': 'line', 'Character': 'chr', 'Release date': 'rel', 'Release check': 'relCheck' };
 var PROTECT_NOTE_ = 'Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.';
 
@@ -53,34 +54,43 @@ var T_ = {
   cust: { name: 'Customers', col: 1, head: ['ID', 'Name', 'Contact'], text: ['A:C'],
     from: function (v) { return { id: s_(v[0]), name: s_(v[1]), contact: s_(v[2]) }; },
     to: function (o) { return [o.id, o.name, o.contact]; } },
-  order: { name: 'Supplier orders', col: 1, head: ['ID', 'Date', 'SKU', 'Item', 'Qty', 'Expected', 'Status', 'Received qty', 'Received on', 'Note'], text: ['A:D', 'F:G', 'I:J'],
+  order: { name: 'Supplier orders', col: 1, head: ['ID', 'Date', 'Product ID', 'Product', 'Qty', 'Expected', 'Status', 'Received qty', 'Received on', 'Note'], text: ['A:D', 'F:G', 'I:J'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), name: s_(v[3]), qty: Number(v[4]), expected: dateStr_(v[5]), status: s_(v[6]), recQty: num_(v[7]), recDate: dateStr_(v[8]), note: String(v[9]) }; },
     to: function (o) { return [o.id, o.date, o.sku, o.name, o.qty, o.expected, o.status, blank_(o.recQty), o.recDate, o.note]; } },
-  pre: { name: 'Pre-orders', col: 1, head: ['ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'SKU', 'Item', 'Qty', 'Price', 'Paid', 'Balance', 'Status', 'Kept', 'Receipt no', 'Invoice no', 'Note'], text: ['A:G', 'L:L', 'P:P'],
+  pre: { name: 'Pre-orders', col: 1, head: ['ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Product ID', 'Product', 'Qty', 'Price', 'Paid', 'Balance', 'Status', 'Kept', 'Receipt no', 'Invoice no', 'Note'], text: ['A:G', 'L:L', 'P:P'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), custId: s_(v[2]), cust: s_(v[3]), contact: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), price: Number(v[8]), paid: Number(v[9]), balance: Number(v[10]), status: s_(v[11]), kept: num_(v[12]), recNo: num_(v[13]), invNo: num_(v[14]), note: String(v[15]) }; },
     to: function (o) { return [o.id, o.date, o.custId, o.cust, o.contact, o.sku, o.name, o.qty, o.price, o.paid, o.balance, o.status, blank_(o.kept), blank_(o.recNo), blank_(o.invNo), o.note]; } },
   inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Type', 'Customer ID', 'Customer', 'Contact', 'Total', 'Shipping', 'Pre-order ID'], text: ['B:G', 'I:J'],
     from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), type: s_(v[3]), custId: s_(v[4]), cust: s_(v[5]), contact: s_(v[6]), total: Number(v[7]), ship: s_(v[8]), preId: s_(v[9]) }; },
     to: function (o) { return [o.no, o.id, o.date, o.type, o.custId, o.cust, o.contact, o.total, o.ship, o.preId]; } },
   // Invoice lines and returns are only ever appended.
-  line: { name: 'Invoice lines', col: 1, head: ['Invoice no', 'Invoice ID', 'SKU', 'Item', 'Qty', 'Listed price', 'Charged price', 'Unit cost'], text: ['B:D'],
+  line: { name: 'Invoice lines', col: 1, head: ['Invoice no', 'Invoice ID', 'Product ID', 'Product', 'Qty', 'Listed price', 'Charged price', 'Unit cost'], text: ['B:D'],
     from: function (v) { return { invNo: Number(v[0]), invId: s_(v[1]), sku: s_(v[2]), name: s_(v[3]), qty: Number(v[4]), list: num_(v[5]), price: Number(v[6]), cost: num_(v[7]) }; },
     to: function (o) { return [o.invNo, o.invId, o.sku, o.name, o.qty, blank_(o.list), o.price, blank_(o.cost)]; } },
-  ret: { name: 'Returns', col: 1, head: ['ID', 'Date', 'Invoice no', 'Invoice ID', 'Customer', 'SKU', 'Item', 'Qty', 'Outcome', 'Refund', 'Note'], text: ['A:B', 'D:G', 'I:I', 'K:K'],
+  ret: { name: 'Returns', col: 1, head: ['ID', 'Date', 'Invoice no', 'Invoice ID', 'Customer', 'Product ID', 'Product', 'Qty', 'Outcome', 'Refund', 'Note'], text: ['A:B', 'D:G', 'I:I', 'K:K'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), invNo: Number(v[2]), invId: s_(v[3]), cust: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), outcome: s_(v[8]), refund: Number(v[9]), note: String(v[10]) }; },
     to: function (o) { return [o.id, o.date, o.invNo, o.invId, o.cust, o.sku, o.name, o.qty, o.outcome, o.refund, o.note]; } }
 };
 // The tabs only the app writes: protected by setup(), cleared by wipeAllData().
-var APP_TABS_ = ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }));
+var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }));
 
-/** Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data. */
+/**
+ * Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data.
+ * It also brings a 2.3 sheet to 2.4: Items becomes Products without Category and Reorder at, In rows get their unit SKU,
+ * and Browse is made again when its header is not the current one.
+ */
 function setup() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  asText_(ensureSheet_(ss, 'Items', ITEM_HEAD_), ['A:C', 'F:F', 'H:M']).getRange('D:D').setNumberFormat('#,##0.00');
-  asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I']).getRange('J:J').setNumberFormat('#,##0.00');
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
+  if (old && !pr) pr = old.setName('Products');
+  if (pr) ['Category', 'Reorder at'].forEach(function (h) { var c = pr.getRange(1, 1, 1, pr.getMaxColumns()).getValues()[0].indexOf(h); if (c >= 0) pr.deleteColumn(c + 1); });
+  asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
+  asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:K']).getRange('J:J').setNumberFormat('#,##0.00');
   Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
   asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:M']);
+  var br = ss.getSheetByName('Browse');
+  if (br && br.getRange(1, 1, 1, BROWSE_HEAD_.length).getValues()[0].join('|') !== BROWSE_HEAD_.join('|')) ss.deleteSheet(br);
   browseSheet_(ss);
+  locked_(fillUnits_);
   var ed = asText_(ensureSheet_(ss, 'Edits', EDIT_HEAD_), ['A:E']);
   ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
   // A warning, not a lock: the owner can still edit, but is asked first.
@@ -175,7 +185,7 @@ function ensureSheet_(ss, name, head) {
   sh.setFrozenRows(1);
   return sh;
 }
-// Text columns stay text, so a SKU like 0012 or a note starting with "=" is never reinterpreted.
+// Text columns stay text, so a Product ID like 0012 or a note starting with "=" is never reinterpreted.
 function asText_(sh, cols) { cols.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); }); return sh; }
 function sheet_(name) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
@@ -200,9 +210,9 @@ function dateStr_(v) {
   return String(v).trim();
 }
 
-/** Items, first row per SKU. warn, when given, collects a sentence for each SKU found on more than one row. */
+/** Products, first row per Product ID. warn, when given, collects a sentence for each Product ID found on more than one row. */
 function readItems_(warn) {
-  var sh = sheet_('Items');
+  var sh = sheet_('Products');
   var last = lastRowOf_(sh);
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, ITEM_HEAD_.length).getValues();
@@ -212,18 +222,18 @@ function readItems_(warn) {
     if (!k) continue;
     if (seen[k]) { twice[k] = twice[k] || { sku: s_(v[0]), n: 1 }; twice[k].n++; continue; }
     seen[k] = true;
-    out.push({ _row: i + 2, sku: s_(v[0]), name: s_(v[1]), cat: s_(v[2]), price: num_(v[3]), min: num_(v[4]), active: s_(v[5]).toLowerCase() !== 'no',
-      mfr: s_(v[7]), brand: s_(v[8]), line: s_(v[9]), chr: s_(v[10]), rel: dateStr_(v[11]), relCheck: s_(v[12]).toLowerCase() === 'verify' });
+    out.push({ _row: i + 2, sku: s_(v[0]), name: s_(v[1]), price: num_(v[2]), active: s_(v[3]).toLowerCase() !== 'no',
+      mfr: s_(v[5]), brand: s_(v[6]), line: s_(v[7]), chr: s_(v[8]), rel: dateStr_(v[9]), relCheck: s_(v[10]).toLowerCase() === 'verify' });
   }
-  if (warn) Object.keys(twice).forEach(function (k) { warn.push('Items: SKU ' + twice[k].sku + ' appears on ' + twice[k].n + ' rows. The first is used.'); });
+  if (warn) Object.keys(twice).forEach(function (k) { warn.push('Products: Product ID ' + twice[k].sku + ' appears on ' + twice[k].n + ' rows. The first is used.'); });
   return out;
 }
-// One 13-column Items row; On hand is the number the script last worked out.
+// One 11-column Products row; On hand is the number the script last worked out.
 function itemRow_(it, have) {
-  return [it.sku, it.name, it.cat, blank_(it.price), blank_(it.min), it.active ? 'Yes' : 'No', have || 0,
+  return [it.sku, it.name, blank_(it.price), it.active ? 'Yes' : 'No', have || 0,
     it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
 }
-function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) }; }
+function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]), unit: s_(v[10]) }; }
 // The rows of a tab that have something in column A, as objects that remember their sheet row.
 function readRows_(name, head, from) {
   var sh = sheet_(name), last = lastRowOf_(sh), out = [];
@@ -234,7 +244,7 @@ function readRows_(name, head, from) {
 function readMoves_() { return readRows_('Movements', MOVE_HEAD_, moveOf_); }
 /**
  * Stock per lower-case SKU, replayed first in, first out in sheet order, the same way as live() in the app; dates are not used.
- * Each SKU has a queue of units on hand, oldest first ({ id, cost } per unit: an In of Qty 3 is three units at its cost), and a deficit.
+ * Each SKU has a queue of units on hand, oldest first ({ id, cost, unit } per unit: an In of Qty 3 is three units at its cost), and a deficit.
  * An In covers the deficit first and queues the rest. An Out takes units from the front, except that a Correction whose Ref is an In
  * takes that In's own units first; what the queue cannot give is added to the deficit.
  * Returns { stock, units }: stock is units on hand minus the deficit (one of the two is always zero).
@@ -245,7 +255,7 @@ function stockOf_(moves) {
     var k = m.sku.toLowerCase(), u = units[k] = units[k] || [], n = m.qty, d = owe[k] || 0;
     if (m.dir === 'In') {
       owe[k] = Math.max(d - n, 0);
-      for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost });
+      for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost, unit: m.unit });
     } else {
       if (m.reason === 'Correction') u = units[k] = u.filter(function (x) { return x.id === m.ref && n > 0 ? (n--, false) : true; });
       owe[k] = d + n - u.splice(0, n).length;
@@ -254,13 +264,36 @@ function stockOf_(moves) {
   Object.keys(units).forEach(function (k) { stock[k] = units[k].length - (owe[k] || 0); });
   return { stock: stock, units: units };
 }
-/** Writes On hand (column G) for every item in one call, aligned by the SKU in each row now. */
+/**
+ * Unit SKUs are <Product ID>-<n>, n counting the units of that product ever received, in sheet order, from 1 and never reused.
+ * Steps the counters n (per lower-case Product ID) past movement m and returns the SKU m carries: its own, a new one for an In
+ * of Qty 1 without one, or '' (an Out; an In of Qty above 1 typed by hand, whose units count but get none). index.html does the same in live().
+ */
+function unit_(n, m) {
+  if (m.dir !== 'In') return '';
+  var k = m.sku.toLowerCase(), had = /-(\d+)$/.exec(m.unit || '');
+  if (had) { n[k] = Math.max(n[k] || 0, Number(had[1])); return m.unit; }
+  n[k] = (n[k] || 0) + m.qty;
+  return m.qty === 1 ? m.sku + '-' + n[k] : '';
+}
+/** Fills SKU (column K) on In rows that have none, in one write; when it filled any, raises moveRev so every phone downloads them. */
+function fillUnits_() {
+  var sh = sheet_('Movements'), last = lastRowOf_(sh), n = {}, any = false;
+  if (last < 2) return;
+  var col = sh.getRange(2, 1, last - 1, MOVE_HEAD_.length).getValues().map(function (v) {
+    var u = s_(v[0]) ? unit_(n, moveOf_(v)) : '';
+    if (u && !s_(v[10])) { any = true; return [u]; }
+    return [v[10]];
+  });
+  if (any) { sh.getRange(2, 11, last - 1, 1).setValues(col); raiseRev_(); }
+}
+/** Writes On hand (column E) for every product in one call, aligned by the Product ID in each row now. */
 function writeOnHand_() {
-  var sh = sheet_('Items'), last = lastRowOf_(sh);
+  var sh = sheet_('Products'), last = lastRowOf_(sh);
   if (last < 2) return;
   var stock = stockOf_(readMoves_()).stock;
   var skus = sh.getRange(2, 1, last - 1, 1).getValues();
-  sh.getRange(2, 7, last - 1, 1).setValues(skus.map(function (v) { var k = s_(v[0]).toLowerCase(); return [k ? stock[k] || 0 : '']; }));
+  sh.getRange(2, 5, last - 1, 1).setValues(skus.map(function (v) { var k = s_(v[0]).toLowerCase(); return [k ? stock[k] || 0 : '']; }));
 }
 function browseSheet_(ss) {
   return ss.getSheetByName('Browse') || asText_(ensureSheet_(ss, 'Browse', BROWSE_HEAD_), BROWSE_TEXT_);
@@ -274,9 +307,9 @@ function writeBrowse_() {
   var rows = readItems_().map(function (it) {
     var k = it.sku.toLowerCase(), have = m.stock[k] || 0, u = m.units[k] || [], i = inc[k] || 0, o = owed[k] || 0, val = 0, none = 0;
     u.forEach(function (x) { if (x.cost == null) none++; else val += x.cost; });
-    // Unit costs, stock value and units without cost are blank when no unit is on hand.
-    return [it.sku, it.name, it.cat, blank_(it.price), blank_(it.min), it.active ? 'Yes' : 'No', have, i, o, have + i - o,
-      u.map(function (x) { return x.cost == null ? '?' : x.cost; }).join(', '), u.length ? r2_(val) : '', u.length ? none : '', it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
+    // Units on hand, stock value and units without cost are blank when no unit is on hand.
+    return [it.sku, it.name, blank_(it.price), it.active ? 'Yes' : 'No', have, i, o, have + i - o,
+      u.map(function (x) { return (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost); }).join(', '), u.length ? r2_(val) : '', u.length ? none : '', it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
   });
   if (sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, BROWSE_HEAD_.length).clearContent();
   ensureRows_(sh, rows.length + 1);
@@ -365,17 +398,15 @@ function release_(v) {
 }
 
 function cleanItem_(x) {
-  if (!x) throw new Error('Missing item');
+  if (!x) throw new Error('Missing product');
   var sku = String(x.sku || '').trim();
-  if (!/^[A-Za-z0-9._-]{1,32}$/.test(sku)) throw new Error('SKU must be 1 to 32 letters, digits, dots, dashes or underscores');
+  if (!/^[A-Za-z0-9._-]{1,32}$/.test(sku)) throw new Error('Product ID must be 1 to 32 letters, digits, dots, dashes or underscores');
   var name = String(x.name || '').trim();
   if (!name) throw new Error('Name is required');
   if (name.length > 120) throw new Error('Name is too long');
   var price = x.price == null || x.price === '' ? null : Number(x.price);
   if (price != null && (isNaN(price) || price < 0)) throw new Error('Price must be a number, zero or more');
-  var min = x.min == null || x.min === '' ? null : Number(x.min);
-  if (min != null && (isNaN(min) || min < 0 || Math.floor(min) !== min)) throw new Error('Reorder level must be a whole number');
-  return { sku: sku, name: name, cat: text_(x.cat, 60), price: price, min: min, active: x.active !== false,
+  return { sku: sku, name: name, price: price, active: x.active !== false,
     mfr: text_(x.mfr, 80), brand: text_(x.brand, 80), line: text_(x.line, 80), chr: text_(x.chr, 80), rel: release_(x.rel), relCheck: x.relCheck === true };
 }
 
@@ -468,7 +499,7 @@ function moved_(tab, key, n) {
 }
 function itemKey_(o) { return o.sku.toLowerCase(); }
 function idKey_(o) { return s_(o.id); }
-// Row numbers per key in a tab's key column, as the tab is now. Items match SKUs without regard to case.
+// Row numbers per key in a tab's key column, as the tab is now. Products match Product IDs without regard to case.
 function keyRows_(sh, col, lower) {
   var last = lastRowOf_(sh, col), map = {};
   if (last < 2) return map;
@@ -481,7 +512,7 @@ function keyRows_(sh, col, lower) {
 // The tabs whose rows change in place: [sheet name, key column, key of a record, records, record -> row, width, first column (default 1)].
 // On Movements only the Unit cost (column J) is ever written in place, by a cost entry.
 function tabsOf_(p) {
-  var out = [['Items', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
+  var out = [['Products', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
   ['cust', 'order', 'pre', 'inv'].forEach(function (k) { out.push([T_[k].name, T_[k].col, idKey_, p.tabs[k], T_[k].to, T_[k].head.length]); });
   out.push(['Movements', 1, idKey_, p.moves, function (m) { return [blank_(m.cost)]; }, 1, 10]);
   return out;
@@ -492,10 +523,10 @@ function check_(p) {
   tabsOf_(p).forEach(function (t) {
     var dirty = t[3].filter(function (o) { return o._row && o._dirty; });
     if (!dirty.length) return;
-    var map = keyRows_(sheet_(t[0]), t[1], t[0] === 'Items');
+    var map = keyRows_(sheet_(t[0]), t[1], t[0] === 'Products');
     dirty.forEach(function (o) {
       var n = (map[t[2](o)] || []).length;
-      if (n !== 1) o._by.forEach(function (id) { bad[id] = bad[id] || moved_(t[0], t[0] === 'Items' ? o.sku : o.id, n); });
+      if (n !== 1) o._by.forEach(function (id) { bad[id] = bad[id] || moved_(t[0], t[0] === 'Products' ? o.sku : o.id, n); });
     });
   });
   return bad;
@@ -512,7 +543,7 @@ function write_(p, skip) {
   tabsOf_(p).forEach(function (t) {
     var dirty = t[3].filter(function (o) { return o._row && o._dirty; });
     if (!dirty.length) return;
-    var sh = sheet_(t[0]), lower = t[0] === 'Items', map = keyRows_(sh, t[1], lower), width = t[5];
+    var sh = sheet_(t[0]), lower = t[0] === 'Products', map = keyRows_(sh, t[1], lower), width = t[5];
     dirty.forEach(function (o) {
       var key = t[2](o), shown = lower ? o.sku : o.id, gone = o._by.filter(function (id) { return skip[id]; })[0];
       if (gone) { o._by.forEach(function (id) { skip[id] = skip[id] || skip[gone]; }); return; }
@@ -526,7 +557,7 @@ function write_(p, skip) {
   });
   var keep = function (o) { return !skip[o._by[0]]; };
   var items = p.newItems.filter(keep), moves = p.newMoves.filter(function (m) { return !skip[m.by]; });
-  append_(sheet_('Items'), 1, items.map(function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }));
+  append_(sheet_('Products'), 1, items.map(function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }));
   append_(sheet_('Movements'), 1, moves.map(function (m) { return m.v; }));
   Object.keys(T_).forEach(function (k) { append_(sheet_(T_[k].name), T_[k].col, p.tabs[k].filter(function (o) { return !o._row && keep(o); }).map(T_[k].to)); });
   if (changed || items.length || moves.length) writeOnHand_();
@@ -563,7 +594,7 @@ function markInbox_(marks) {
   });
 }
 
-/** Pending rows of the Edits tab: a SKU or field filled and no Status. Each becomes an edit entry, or carries the reason it cannot. */
+/** Pending rows of the Edits tab: a Product ID or field filled and no Status. Each becomes an edit entry, or carries the reason it cannot. */
 function editRows_() {
   var sh = sheet_('Edits'), last = sh.getLastRow(), out = [];
   if (last < 2) return out;
@@ -571,7 +602,7 @@ function editRows_() {
     if (s_(v[3]) || (!s_(v[0]) && !s_(v[1]) && !s_(v[2]))) return;
     var x = { row: i + 2, sku: s_(v[0]), field: s_(v[1]), value: v[2] };
     try {
-      if (!x.sku) throw new Error('SKU is required');
+      if (!x.sku) throw new Error('Product ID is required');
       x.entry = { id: 'Edits!' + x.row, kind: 'edit', sku: x.sku, patch: editPatch_(x.field, x.value) };
     } catch (err) { x.error = String(err.message || err); }
     out.push(x);
@@ -589,10 +620,10 @@ function editPatch_(field, v) {
   } else if (f === 'relCheck') {
     if (!/^(verify)?$/i.test(t)) throw new Error('Release check must be Verify or blank');
     p.relCheck = t !== '';
-  } else p[f] = t === '' && (f === 'price' || f === 'min') ? null : t;
+  } else p[f] = t === '' && f === 'price' ? null : t;
   return p;
 }
-/** Writes Done or Refused and the reason on each Edits row, found again by its row, SKU, field and value. */
+/** Writes Done or Refused and the reason on each Edits row, found again by its row, Product ID, field and value. */
 function finishEdits_(eds, results) {
   if (!eds.length) return;
   var sh = sheet_('Edits'), last = sh.getLastRow();
@@ -614,9 +645,9 @@ function finishEdits_(eds, results) {
 /** Works out every entry in memory. Nothing is written here. skip: { entryId: message } for entries refused in an earlier round. */
 function plan_(entries, skip) {
   var items = readItems_(), moveList = readMoves_();
-  var bySku = {}, byName = {}, existingIds = {};
+  var bySku = {}, byName = {}, existingIds = {}, unitNo = {};
   items.forEach(function (it) { bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; });
-  moveList.forEach(function (m) { existingIds[m.id] = true; });
+  moveList.forEach(function (m) { existingIds[m.id] = true; unit_(unitNo, m); });
   var custs = readTab_('cust'), orders = readTab_('order'), pres = readTab_('pre'), invs = readTab_('inv'), lines = readTab_('line'), rets = readTab_('ret');
   var custById = index_(custs, 'id'), orderById = index_(orders, 'id'), preById = index_(pres, 'id'), invById = index_(invs, 'id'), invByNo = index_(invs, 'no'), retById = index_(rets, 'id');
   var newItems = [], newMoves = [], results = [], remap = {}, refused = {}, marks = [], who = null;
@@ -624,20 +655,21 @@ function plan_(entries, skip) {
   function touch_(o) { o._dirty = true; o._by = o._by || []; if (o._by.indexOf(who) < 0) o._by.push(who); }
   function made_(o) { o._by = [who]; return o; }
   function skuOf_(sku) { var k = String(sku || '').toLowerCase(); return remap[k] || String(sku || ''); }
-  function guard_(sku) { if (refused[String(sku || '').toLowerCase()]) throw new Error('Skipped because its item was refused'); }
+  function guard_(sku) { if (refused[String(sku || '').toLowerCase()]) throw new Error('Skipped because its product was refused'); }
   function toy_(sku) {
     var real = skuOf_(sku);
     guard_(real);
     var it = bySku[real.toLowerCase()];
-    if (!it) throw new Error('Unknown item ' + sku);
+    if (!it) throw new Error('Unknown product ' + sku);
     return it;
   }
   function cust_(id) { var c = custById[s_(id)]; if (!c) throw new Error('Unknown customer'); return c; }
   function allMoves_() { return moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); })); }
+  // Every In row gets the next unit SKU of its product.
   function pushMove_(id, date, it, dir, qty, reason, ref, note, cost) {
     if (existingIds[id]) return;
     existingIds[id] = true;
-    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, blank_(cost)], by: who });
+    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, blank_(cost), unit_(unitNo, { sku: it.sku, dir: dir, qty: qty })], by: who });
   }
   // The number the phone picked, or the next free one when a different document already holds it.
   function docNo_(asked) {
@@ -662,14 +694,14 @@ function plan_(entries, skip) {
         var asked = it.sku;
         var cur = bySku[it.sku.toLowerCase()];
         if (cur && norm_(cur.name) !== norm_(it.name)) {
-          if (!e.auto) throw new Error('SKU ' + it.sku + ' already belongs to "' + cur.name + '"');
+          if (!e.auto) throw new Error('Product ID ' + it.sku + ' already belongs to "' + cur.name + '"');
           // Same name under another SKU: this is a retry of an item that was already renumbered, so reuse it.
           var same = byName[norm_(it.name)];
           if (same) { remap[asked.toLowerCase()] = same.sku; results.push({ id: e.id, ok: true, sku: same.sku, from: asked }); return; }
           it.sku = freeSku_(bySku); remap[asked.toLowerCase()] = it.sku; cur = null;
         }
         if (!cur) {
-          if (byName[norm_(it.name)]) throw new Error('An item named "' + byName[norm_(it.name)].name + '" already exists');
+          if (byName[norm_(it.name)]) throw new Error('A product named "' + byName[norm_(it.name)].name + '" already exists');
           bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; newItems.push(made_(it));
         }
         if (it.sku !== asked) { results.push({ id: e.id, ok: true, sku: it.sku, from: asked }); return; }
@@ -677,10 +709,10 @@ function plan_(entries, skip) {
       } else if (e.kind === 'edit') {
         var target = toy_(e.sku), p = e.patch || {};
         var merged = { sku: target.sku };
-        ['name', 'cat', 'price', 'min', 'active', 'mfr', 'brand', 'line', 'chr', 'rel', 'relCheck'].forEach(function (f) { merged[f] = p[f] !== undefined ? p[f] : target[f]; });
+        ['name', 'price', 'active', 'mfr', 'brand', 'line', 'chr', 'rel', 'relCheck'].forEach(function (f) { merged[f] = p[f] !== undefined ? p[f] : target[f]; });
         merged = cleanItem_(merged);
         var clash = byName[norm_(merged.name)];
-        if (clash && clash.sku !== target.sku) throw new Error('An item named "' + clash.name + '" already exists');
+        if (clash && clash.sku !== target.sku) throw new Error('A product named "' + clash.name + '" already exists');
         delete byName[norm_(target.name)];
         Object.keys(merged).forEach(function (f) { target[f] = merged[f]; });
         byName[norm_(target.name)] = target;
@@ -761,7 +793,7 @@ function plan_(entries, skip) {
         var v = e.invoice || {}, vid = id_(v.id, 'Invoice');
         if (invById[vid]) { results.push(numbered_(e, invById[vid], v.no)); return; }
         var vc = cust_(v.custId), vdate = date_(v.date);
-        if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one item');
+        if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one product');
         if (v.lines.length > 50) throw new Error('An invoice can hold 50 lines at most');
         var vlines = v.lines.map(function (l) {
           var lit = toy_(l.sku);

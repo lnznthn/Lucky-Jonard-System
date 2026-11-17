@@ -21,6 +21,12 @@ class Sheet {
   getMaxRows() { return this.max; }
   getMaxColumns() { return 26; }
   insertRowsAfter(after, n) { this.max += n; }
+  setName(n) { this.name = n; return this; }
+  // The columns right of c move one to the left, with their text format.
+  deleteColumn(c) {
+    const cells = {}; for (const k of Object.keys(this.cells)) { const [r, cc] = k.split(',').map(Number); if (cc !== c) cells[r + ',' + (cc > c ? cc - 1 : cc)] = this.cells[k]; }
+    this.cells = cells; this.textCols = new Set([...this.textCols].filter(x => x !== c).map(x => (x > c ? x - 1 : x)));
+  }
   setFrozenRows(n) { this.frozen = n; }
   protect() { const p = { desc: '', warn: false, setDescription(d) { this.desc = d; return this; }, getDescription() { return this.desc; }, setWarningOnly(w) { this.warn = w; return this; } }; this.protections.push(p); return p; }
   getProtections() { return this.protections; }
