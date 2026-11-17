@@ -165,35 +165,45 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   nav.tabs button{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;min-height:44px;padding:0 14px;border-top:0;margin:0;font-size:15px}
   nav.tabs button.on{font-weight:600}
   .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
-  /* Tables: hairline rows like the lists; the header stays in view, and a wide table scrolls sideways inside its own box. */
+  /* Tables: one style for every table. 13 px text, rows about 30 px, a fixed width per column kind (tableTag()), long text cut with an ellipsis;
+     the header stays in view, and a wide table scrolls sideways inside its own box. */
   .tbl{overflow:auto;max-height:calc(100dvh - 92px);border:1px solid var(--line)}
-  .sec>.tbl{border:0;margin-top:10px}
-  .tbl table{width:100%;border-collapse:separate;border-spacing:0}
+  .sec .tbl{border:0}.sec>.tbl{margin-top:10px}
+  .tbl table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px;line-height:18px}
   .tbl thead{position:sticky;top:0;z-index:1}
-  .tbl th,.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
-  .tbl th{background:var(--bg);font-size:13px;font-weight:500;color:var(--muted)}
+  .tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tbl th{background:var(--bg);font-weight:500;color:var(--muted);white-space:normal;line-height:16px;padding-top:8px;padding-bottom:8px}
   .tbl th[aria-sort]{color:var(--text)}
-  .tbl th button{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0;border:0;background:none;color:inherit;font:inherit}
-  .tbl th svg.up{transform:rotate(180deg)}
+  .tbl .th{display:flex;align-items:center;gap:2px}
+  .tbl th button{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit}
+  .tbl .sb{flex:1;min-width:0}
+  .tbl .sb svg{display:inline-block;vertical-align:-3px}   /* after a space, so it moves under a label that fills the column */
+  .tbl th:not([aria-sort]) .sb svg{display:none}
+  .tbl th[aria-sort="ascending"] .sb svg{transform:rotate(180deg)}
+  .tbl .tf{display:flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;color:var(--muted)}
+  .tbl .tf.on{color:var(--on-accent);background:var(--accent)}
   .tbl .n{text-align:right;font-variant-numeric:tabular-nums}
-  .tbl .w{white-space:normal;min-width:14em}
-  .tbl .st .tag{margin-left:0}
+  .tbl td .hint,.tbl td .tbtn,.tbl td.empty{font-size:13px}
+  .tbl td .tbtn{min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-weight:400}
+  .tbl td input[type=checkbox]{width:16px;height:16px;vertical-align:middle}
   .tbl tr.off td{color:var(--muted)}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
   .tbl tr:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
-  .tbl .filt th{padding:0 6px 8px}
-  .tbl .filt select,.tbl .filt input{min-height:40px;padding:0 8px}
-  .tbl .rng{display:flex;gap:6px}.tbl .rng input{width:6.5em}
+  /* A column filter: tick boxes, or a from and to date, under the header button that opened it. */
+  .pop{position:fixed;z-index:15;width:240px;max-height:min(440px,calc(100dvh - 140px));overflow:auto;padding:6px 12px 10px;background:var(--raise);border:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+  .pop[hidden]{display:none}
+  .pop .links{column-gap:16px}.pop .tbtn{min-height:32px;font-size:13px}
+  .pop .check{min-height:30px;gap:8px;font-size:13px;margin:0}.pop .check input{width:16px;height:16px}
+  .pop label{margin:6px 0 4px}.pop input:not([type=checkbox]){min-height:36px;font-size:13px}
   /* New sale: the customer in one row, the lines as a table, the total and the button at the right. */
   .frow{display:flex;gap:12px}.frow>div{flex:1;min-width:0}.frow>div:nth-child(3){flex:.8}.frow>div:nth-child(4){flex:1.5}
   .tbl.lines{max-height:none;container-type:inline-size}
-  .lines th,.lines td{padding:8px;vertical-align:middle}
-  .lines td:first-child{width:40%;min-width:260px}
-  .lines .picked{min-height:48px;padding:0 14px}.lines .picked .hint{display:none}
-  .lines input[type=number]{width:120px;text-align:right}
+  .lines td:first-child{white-space:normal}
+  .lines .picked{min-height:36px;padding:0 10px}.lines .picked .name{font-size:13px}.lines .picked .hint{display:none}
+  .lines input{min-height:36px;font-size:13px;padding:0 8px}.lines input[type=number]{text-align:right}
   .lines tr:has(+ .note) td{border-bottom:0}
-  .lines .note td{padding:0 8px 12px}
+  .lines .note td{padding:0 8px 12px;white-space:normal;overflow:visible}
   .lines .note td>*{position:sticky;left:8px;max-width:calc(100cqw - 16px)}   /* a notice stays in view while the lines scroll sideways */
   .send{align-self:flex-end;width:min(100%,400px);display:flex;flex-direction:column;gap:20px}
   .layer{align-items:center}
@@ -217,6 +227,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 <nav class="tabs" aria-label="Main"><div class="in" id="tabs"></div></nav>
 <div class="layer" id="layer" hidden><div class="scrim" data-act="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast" role="status"></div>
+<div class="pop" id="pop" role="dialog" hidden></div>
 
 <script>
 'use strict';
@@ -276,6 +287,7 @@ const ICON = {
   activity: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><path d="M13 4v6h4V4zM7 14v6h4v-6z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
+  filter: '<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   minus: '<path d="M5 12h14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -635,24 +647,48 @@ function render() {
 }
 const view = () => $('#view');
 const mqWide = matchMedia('(min-width: 900px)'), wide = () => mqWide.matches;
-mqWide.addEventListener('change', () => render());
+mqWide.addEventListener('change', () => { closePop(); render(); });
 /** A list row: title, one muted line, and on the right a chevron or the one number that matters. */
 const row = (title, sub, attrs, right) => `<button class="item" ${attrs}><div class="main"><div class="name">${title}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${right == null ? CHEV : right}</button>`;
 const sec = (title, inner, extra, cls) => `<section class="sec ${cls || ''}"><h2>${title}${extra || ''}</h2>${inner}</section>`;
 const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
 /**
- * A desktop table. cols are [header, sort value, cell html (default: the value as text), class ('n' numbers, 'w' wraps)];
- * a column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
+ * A desktop table. cols are [header, sort value, cell html (default: the value as text), kind, filter]. The kind ('tick', 'num', 'money',
+ * 'date', 'txt' (the default) or 'name') fixes the column's width (COL_W), numbers and money align right, and text cut short carries its
+ * full value as a title. A column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
  * text ignores case, numbers sort as numbers, ISO dates as text (2024, then 2024-07, then 2024-07-15), blanks last either way.
- * attrs(row) gives a row its data-act, so a click opens its sheet (only those rows take focus); head adds rows under the header; max caps the rows shown.
+ * filter names the column's filter in ui.tf; its header button opens openTf(). attrs(row) gives a row its data-act, so a click opens its sheet
+ * (only those rows take focus); max caps the rows shown. TBL keeps what each table was drawn from, so a sort or a filter redraws only its body.
  */
-function table(id, cols, rows, attrs, head, max) {
+const TBL = {};
+// Width in px per column kind; a 'name' column takes the room left (at least 200 px). No width depends on the rows shown.
+const COL_W = { tick: 36, num: 80, money: 112, date: 128, txt: 128, name: 0 };
+const isNum = k => k === 'num' || k === 'money';
+const tableTag = kinds => `<table style="min-width:${kinds.reduce((s, k) => s + (COL_W[k] || 200), 0)}px"><colgroup>${kinds.map(k => `<col${COL_W[k] ? ` style="width:${COL_W[k]}px"` : ''}>`).join('')}</colgroup>`;
+const plain = h => String(h).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();   // a cell's text, still escaped, for its title
+function table(id, cols, rows, attrs, max) {
+  TBL[id] = { cols, rows, attrs, max };
   const s = ui.sort[id];
-  if (s) { const v = cols[s.k][1]; rows = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
-  return `<div class="tbl" data-tbl="${id}"><table><thead><tr>${cols.map(([h, v, , c], k) => `<th class="${c || ''}" ${s && s.k === k ? `aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}>${v ? `<button data-act="sort" data-t="${id}" data-k="${k}">${h}${s && s.k === k ? icon('chev', 14, s.d > 0 ? 'up' : '') : ''}</button>` : h}</th>`).join('')}</tr>${head || ''}</thead>
-    <tbody>${rows.length ? rows.slice(0, max).map(r => { const a = attrs(r); return `<tr ${/data-act/.test(a) ? 'tabindex="0" ' : ''}${a}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
+  return `<div class="tbl" data-tbl="${id}">${tableTag(cols.map(c => c[3] || 'txt'))}<thead><tr>${cols.map(([h, v, , k, f], j) => `<th${isNum(k) ? ' class="n"' : ''}${s && s.k === j ? ` aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}><div class="th">${v ? `<button class="sb" data-act="sort" data-t="${id}" data-k="${j}">${h} ${icon('chev', 14)}</button>` : h}${f ? `<button class="tf${tfOn(f) ? ' on' : ''}" data-act="tfOpen" data-k="${f}" aria-label="Filter ${h}">${icon('filter', 14)}</button>` : ''}</div></th>`).join('')}</tr></thead>
+    <tbody>${tableBody(id)}</tbody></table></div>`;
 }
-/** Rebuilds part of the page while every table keeps its scroll position (a sort, a filter or a sync must not jump it back). */
+function tableBody(id) {
+  const { cols, rows, attrs, max } = TBL[id], s = ui.sort[id];
+  let list = rows;
+  if (s) { const v = cols[s.k][1]; list = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
+  if (!list.length) return `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`;
+  return list.slice(0, max).map(r => { const a = attrs(r); return `<tr ${/data-act/.test(a) ? 'tabindex="0" ' : ''}${a}>${cols.map(([, v, html, k]) => {
+    const h = html ? html(r) : esc(v(r)), t = isNum(k) || k === 'tick' ? '' : plain(h);
+    return `<td${isNum(k) ? ' class="n"' : ''}${t ? ` title="${t}"` : ''}>${h}</td>`; }).join('')}</tr>`; }).join('');
+}
+/** Draws a table's body again after a sort or a filter and marks the sorted header; the header, the widths and an open filter stay as they are. */
+function redrawTable(id) {
+  const e = $(`[data-tbl="${id}"]`), s = ui.sort[id]; if (!e || !TBL[id]) return;
+  e.querySelector('tbody').innerHTML = tableBody(id);
+  e.querySelectorAll('thead th').forEach((th, k) => { if (s && s.k === k) th.setAttribute('aria-sort', s.d > 0 ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort'); });
+  e.querySelectorAll('.tf').forEach(b => b.classList.toggle('on', tfOn(b.dataset.k)));
+}
+/** Rebuilds part of the page while every table keeps its scroll position (a sync must not jump it back). */
 function keepScroll(fn) { const at = [...document.querySelectorAll('[data-tbl]')].map(e => [e.dataset.tbl, e.scrollLeft, e.scrollTop]); fn(); at.forEach(([id, l, t]) => { const e = $(`[data-tbl="${id}"]`); if (e) { e.scrollLeft = l; e.scrollTop = t; } }); }
 const relCell = x => esc(x.rel) + (x.rel && x.relCheck ? '<span class="tag warn">to verify</span>' : '');
 
@@ -722,39 +758,58 @@ function renderStock() {
     <div id="stockList"></div></div>`;
   renderStockList();
 }
+const stockScope = () => live().list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
 function renderStockList() {
-  const L = live(), q = norm(ui.q), w = wide();
-  let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
-  const scope = rows;
+  const q = norm(ui.q), w = wide();
+  let rows = stockScope();
   if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
   if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (STOCK_TEST[ui.filter]) rows = rows.filter(STOCK_TEST[ui.filter]);
   const box = $('#stockList'); if (!box) return;
-  if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
+  if (w) {
+    const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to);
+    rows = rows.filter(i => TF_KEYS.every(k => !tfOn(k) || ui.tf[k].includes(i[k] || '')) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t)));
+    // A search or a column filter redraws only the rows: the header, the widths and an open filter stay put.
+    if (box.querySelector('[data-tbl="stock"]')) { TBL.stock.rows = rows.map(stockRow); redrawTable('stock'); }
+    else box.innerHTML = stockTable(rows) + '<p class="hint" id="stockMore"></p>';
+    $('#stockMore').textContent = rows.length > 400 ? 'Showing the first 400. Search to narrow down.' : '';
+    return;
+  }
   const more = rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : '';
-  // The table keeps its filter row when nothing matches, so a filter can be undone.
-  if (w) return keepScroll(() => { box.innerHTML = stockTable(rows, scope) + more; });
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
     const s = status(i), n = nums(i.sku);
     return row(esc(i.name), `${esc(catOf(i))} · ${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
   }).join('')}</div>${more}`;
 }
-/** Stock on desktop: every field of an item, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
-function stockTable(list, scope) {
-  const rows = list.map(i => ({ i, n: nums(i.sku), c: onHand(i.sku).units.map(x => x.cost).filter(x => x != null), v: stockCost(i.sku).value }));
-  const pick = (k, get, label) => { const v = k === 'cat' ? (ui.cat === 'All' ? '' : ui.cat) : ui.tf[k] || '';
-    return `<th><select data-tf="${k}" aria-label="${label}"><option value="">Any</option>${[...new Set(scope.map(get).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></th>`; };
-  const rel = (k, ph) => `<input data-tf="${k}" value="${esc(ui.tf[k] || '')}" placeholder="${ph}" aria-label="Release date ${ph.toLowerCase()}" autocomplete="off">`;
-  const filt = `<tr class="filt"><th></th><th></th>${pick('cat', catOf, 'Category')}${[['mfr', 'Manufacturer'], ['brand', 'Brand'], ['line', 'Product line'], ['chr', 'Character']].map(([k, l]) => pick(k, i => i[k], l)).join('')}<th><div class="rng">${rel('from', 'From')}${rel('to', 'To')}</div></th>${'<th></th>'.repeat(7)}</tr>`;
-  return table('stock', [['Name', r => r.i.name, null, 'w'], ['SKU', r => r.i.sku], ['Category', r => catOf(r.i)], ['Manufacturer', r => r.i.mfr], ['Brand', r => r.i.brand], ['Product line', r => r.i.line], ['Character', r => r.i.chr],
-    ['Release date', r => r.i.rel, r => relCell(r.i)], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'n'],
-    ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'n'], ['Incoming', r => r.n.inc, null, 'n'], ['Owed', r => r.n.owed, null, 'n'],
-    [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'n'],
-    ['Unit cost', r => r.c.length ? Math.min(...r.c) : null, r => r.c.length ? esc(prefs.cur + costsText(r.c)) : '–', 'n'],
-    ['Stock cost', r => r.c.length ? r.v : null, r => r.c.length ? money(r.v) : '–', 'n']],
-    rows, r => `data-act="item" data-sku="${esc(r.i.sku)}"`, filt, 400);
+const stockRow = i => ({ i, n: nums(i.sku), c: onHand(i.sku).units.map(x => x.cost).filter(x => x != null), v: stockCost(i.sku).value });
+/** Inventory on desktop: every field of a product, sortable, for reading only. Manufacturer, Brand, Product line, Character and Release date filter from their headers. */
+function stockTable(list) {
+  return table('stock', [['Name', r => r.i.name, null, 'name'], ['Manufacturer', r => r.i.mfr, null, 'txt', 'mfr'], ['Brand', r => r.i.brand, null, 'txt', 'brand'], ['Product line', r => r.i.line, null, 'txt', 'line'], ['Character', r => r.i.chr, null, 'txt', 'chr'],
+    ['Release date', r => r.i.rel, r => relCell(r.i), 'date', 'rel'], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'money'],
+    ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'num'], ['Incoming', r => r.n.inc, null, 'num'], ['Owed', r => r.n.owed, null, 'num'],
+    [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'num'],
+    ['Unit cost', r => r.c.length ? Math.min(...r.c) : null, r => r.c.length ? esc(prefs.cur + costsText(r.c)) : '–', 'money'],
+    ['Stock cost', r => r.c.length ? r.v : null, r => r.c.length ? money(r.v) : '–', 'money']],
+    list.map(stockRow), r => `data-act="item" data-sku="${esc(r.i.sku)}"`, 400);
 }
+/* The Inventory column filters (desktop): ui.tf.mfr, brand, line and chr hold the ticked values, and none ticked means no filter; ui.tf.from and to bound the release date. */
+const TF_KEYS = ['mfr', 'brand', 'line', 'chr'];
+const tfOn = k => k === 'rel' ? !!(ui.tf.from || ui.tf.to) : !!(ui.tf[k] && ui.tf[k].length);
+const tfValues = k => [...new Set(stockScope().map(i => i[k] || ''))].sort((a, b) => !a - !b || a.localeCompare(b, undefined, { sensitivity: 'base' }));   // blank last
+/** Opens a column's filter under its header button. It stays open while ticking and closes on a click elsewhere or Escape; each change redraws only the rows. */
+function openTf(btn) {
+  const pop = $('#pop'), k = btn.dataset.k, on = ui.tf[k] || [];
+  if (!pop.hidden && pop.dataset.k === k) return closePop();
+  pop.innerHTML = k === 'rel'
+    ? `<div><label for="tfFrom">From</label><input id="tfFrom" data-tf="from" value="${esc(ui.tf.from || '')}" placeholder="2024, 2024-07 or 2024-07-15" autocomplete="off"></div><div><label for="tfTo">To</label><input id="tfTo" data-tf="to" value="${esc(ui.tf.to || '')}" placeholder="2024, 2024-07 or 2024-07-15" autocomplete="off"></div>`
+    : `<div class="links"><button class="tbtn" data-act="tfAll" data-k="${k}">All</button><button class="tbtn" data-act="tfAll" data-k="${k}" data-none="1">None</button></div>
+      ${tfValues(k).map(v => `<label class="check"><input type="checkbox" data-tfv="${k}" value="${esc(v)}" ${on.includes(v) ? 'checked' : ''}>${v ? esc(v) : '<span class="hint">Blank</span>'}</label>`).join('')}`;
+  const r = btn.getBoundingClientRect();
+  Object.assign(pop.style, { left: Math.min(r.left, innerWidth - 256) + 'px', top: r.bottom + 4 + 'px' });
+  pop.setAttribute('aria-label', btn.getAttribute('aria-label')); pop.dataset.k = k; pop.hidden = false;
+}
+const closePop = () => { $('#pop').hidden = true; };
 function openItem(sku) {
   const L = live(), i = L.map.get(sku); if (!i) return;
   const n = nums(sku), s = status(i), u = onHand(sku), c = stockCost(sku);
@@ -928,9 +983,9 @@ function renderActList() {
   rows.sort(cmpMove);
   if (!rows.length) { box.innerHTML = `<p class="empty">No movements yet.</p>`; return; }
   const older = rows.length > ui.aN ? `<button class="btn" data-act="more">Show ${rows.length - ui.aN} older</button>` : '';
-  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date))], ['Item', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'w'],
-    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'n'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'n'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'w']],
-    rows, m => `data-act="move" data-id="${esc(m.id)}"`, '', ui.aN) + older; return; }
+  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date)), 'date'], ['Product', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'name'],
+    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'num'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'money'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'name']],
+    rows, m => `data-act="move" data-id="${esc(m.id)}"`, ui.aN) + older; return; }
   const shown = rows.slice(0, ui.aN); let out = '', day = '';
   shown.forEach(m => { if (m.date !== day) { if (day) out += '</div></section>'; day = m.date; out += `<section class="sec"><h2>${esc(fmtDay(day))}</h2><div class="list">`; } out += moveRow(m); });
   box.innerHTML = out + '</div></section>' + older;
@@ -1024,8 +1079,8 @@ function renderInvForm() {
       : `<button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p>`}</div>`;
   if (wide()) {   // the customer in one row, the lines as table rows with any notice under its line, the total and button at the right
     box.innerHTML = `${banner}<div class="frow">${cust}${date}${paid}${note}</div>
-    <div class="tbl lines"><table><thead><tr><th>Item</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
-      <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
+    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'money', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
+      <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td title="${l.sku ? esc(pickSub(l.sku)) : ''}"><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
         <td class="n"><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}" aria-label="Quantity"></td>
         <td class="n"><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}" aria-label="Price each"></td>
         <td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
@@ -1096,8 +1151,8 @@ function renderInvList() {
   if (q) rows = rows.filter(v => norm([v.no, v.cust, v.date, v.type, ...v.lines.map(l => l.name)].join(' ')).includes(q));
   if (!rows.length) { box.innerHTML = `<p class="empty">${q ? 'Nothing matches.' : 'No invoices yet.'}</p>`; return; }
   const items = v => (v.lines[0] ? v.lines[0].name : '') + (v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''), sale = v => v.type === SALE;
-  if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'n'], ['Date', v => v.date, v => esc(fmtDay(v.date))], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v)], ['Items', items, null, 'w'],
-    ['Total', v => v.total, v => money(v.total), 'n'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'n'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, '', 300); return; }
+  if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'num'], ['Date', v => v.date, v => esc(fmtDay(v.date)), 'date'], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v), 'name'], ['Products', items, null, 'name'],
+    ['Total', v => v.total, v => money(v.total), 'money'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'money'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, 300); return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => row(`No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag">delivered</span>' : ''}${waitTag(v)}`, `${esc(fmtDay(v.date))} · ${esc(items(v))}`, `data-act="inv" data-id="${esc(v.id)}"`, `<span class="amt">${money(v.total)}</span>`)).join('')}</div>`;
 }
 function openInv(id) {
@@ -1156,8 +1211,8 @@ function preListHtml() {
   const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
   const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>';
   if (wide()) return `${how}
-    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date))], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p)], ['Contact', contactOf], ['Item', p => p.name, null, 'w'], ['Qty', p => p.qty, null, 'n'],
-      ['Price', p => p.price, p => money(p.price), 'n'], ['Paid', p => p.paid, p => money(p.paid), 'n'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'n'], ['Status', rank, p => said[rank(p)]]],
+    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date)), 'date'], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p), 'name'], ['Contact', contactOf], ['Product', p => p.name, null, 'name'], ['Qty', p => p.qty, null, 'num'],
+      ['Price', p => p.price, p => money(p.price), 'money'], ['Paid', p => p.paid, p => money(p.paid), 'money'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'money'], ['Status', rank, p => said[rank(p)]]],
       [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
   return `${how}
     ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
@@ -1188,8 +1243,8 @@ function ordListHtml() {
   const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
   const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), none = 'No supplier orders yet. Add one when stock is ordered and paid for.';
   if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
-    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date))], ['Item', o => o.name, o => esc(o.name) + waitTag(o), 'w'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'n'],
-      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : ''], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
+    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'num'],
+      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
       [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">${none}</p>`}`;
   return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
     ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
@@ -1575,12 +1630,13 @@ function renderImpOut() {
 function impTable(imp, idx, k) {
   const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
   const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
-  return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`],
-    ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? `<div class="hint">Recorded as “${esc(r.match.name)}”</div>` : '') + (r.similar && !r.match ? `<div><button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button></div>` : ''); }, 'w'],
-    ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? `<div class="hint">${esc(why(r))}</div>` : ''}`; }, 'w st'],
-    [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'n'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => { const c = costNote(R(i)).replace(/^ (at|·) /, ''); return has(i).length ? esc(c) : `<span class="hint">${c}</span>`; }, 'n'],   // the phone row's wording
-    ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i))], ['Note', i => R(i).note, null, 'w']],
+  return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`, 'tick'],
+    ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? ` <span class="hint">recorded as “${esc(r.match.name)}”</span>` : ''); }, 'name'],
+    ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
+      + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
+    [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => { const c = costNote(R(i)).replace(/^ (at|·) /, ''); return has(i).length ? esc(c) : `<span class="hint">${c}</span>`; }, 'money'],   // the phone row's wording
+    ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
 }
 /** What a folded Ready group holds, for example "172 new items, 3 count changes, 11 with new details". */
@@ -1789,6 +1845,7 @@ const tsv = rows => rows.map(r => r.map(cell).join('\t')).join('\n');
 /** Opens a page: kept as the current tab on this device, with any sheet closed and the page at the top. */
 function go(t) { prefs.tab = t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); }
 document.addEventListener('click', async ev => {
+  if (!$('#pop').hidden && !ev.target.closest('#pop, [data-act="tfOpen"]')) closePop();
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
@@ -1805,7 +1862,9 @@ document.addEventListener('click', async ev => {
     case 'sync': syncNow(true); break;
     case 'settings': openSettings(); break;
     case 'close': closeSheet(); break;
-    case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; render(); break; }
+    case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; redrawTable(d.t); break; }
+    case 'tfOpen': openTf(el); break;
+    case 'tfAll': ui.tf[d.k] = d.none ? [] : tfValues(d.k); $('#pop').querySelectorAll('[data-tfv]').forEach(x => { x.checked = !d.none; }); renderStockList(); break;
     case 'cat': ui.cat = d.c; renderStock(); break;
     case 'filter': ui.filter = d.f; renderStock(); break;
     case 'newItem': openItemEditor(null); break;
@@ -1967,8 +2026,7 @@ document.addEventListener('input', ev => {
     return;
   }
   if (t.dataset.pk) { renderPk(t.dataset.pk, t.value); return; }
-  // The Stock filter row redraws the table under the field being used; Category is the same filter as the phone's tabs.
-  if (t.dataset.tf) { const k = t.dataset.tf; if (k === 'cat') ui.cat = t.value || 'All'; else ui.tf[k] = t.value; renderStockList(); const n = $(`[data-tf="${k}"]`); n.focus(); if (n.tagName === 'INPUT') n.setSelectionRange(n.value.length, n.value.length); return; }
+  if (t.dataset.tf) { ui.tf[t.dataset.tf] = t.value; renderStockList(); return; }   // the release date range in its filter
   switch (t.id) {
     case 'q': ui.q = t.value; renderStockList(); break;
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
@@ -1984,6 +2042,7 @@ document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.dataset.tfv) { ui.tf[t.dataset.tfv] = [...$('#pop').querySelectorAll('[data-tfv]:checked')].map(x => x.value); renderStockList(); }
   if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
   // A known customer's name brings their contact with it.
@@ -1992,7 +2051,7 @@ document.addEventListener('change', ev => {
 document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; if (ev.target.dataset && ev.target.dataset.grp && ui.imp) ui.imp.open[ev.target.dataset.grp] = ev.target.open; }, true);
 // Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
 document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(impParse, 0); });
-document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closePop(); if (!$('#layer').hidden) closeSheet(); } if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
 window.addEventListener('online', () => scheduleSync());
 

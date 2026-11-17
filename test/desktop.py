@@ -1,5 +1,5 @@
-# Desktop layout check: side navigation, sheets as dialogs, the tables (Stock, Sales, Orders, Activity, Update stock) with
-# their sort and the Stock filter row, and no page that scrolls sideways.
+# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Update stock) with
+# their sort and filters in the header cells, and no page that scrolls sideways.
 # python3 test/desktop.py  (needs static server on 8765, mock backend on 8766, Chrome)
 import os, re
 from playwright.sync_api import sync_playwright
@@ -41,7 +41,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#sellBody button:has-text("Issue invoice")') and p.is_visible('#invList') and not p.is_visible('[data-act="sellNew"]') and p.inner_text('header.top h1') == 'Sales', 'Sales shows the New sale form and the invoice list together')
     tops = lambda sel: p.eval_on_selector_all(sel, 'els => els.map(e => Math.round(e.getBoundingClientRect().top))')
     t = tops('#iCust, #iContact, #iDate'); check(len(t) == 3 and len(set(t)) == 1, f'Customer, Phone or Messenger and Date sit in one row: {t}')
-    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Item', '', 'Quantity', f'Price each (₱)', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
+    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Quantity', f'Price each (₱)', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
     pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.lines.0.qty"]', '2')
     check(p.inner_text('#amt0') == '₱3,600' and '3 in stock' in p.inner_text('#sellBody tbody tr:first-child'), f"a line shows its stock hint and its amount: {p.inner_text('#amt0')}")
     p.click('button:has-text("Add another item")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another item adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
@@ -49,7 +49,7 @@ with sync_playwright() as pw:
     form, btn = [p.eval_on_selector(sel, 'e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }') for sel in ['#sellBody', '#sellBody [data-act="invIssue"]']]
     check(abs(btn[1] - form[1]) < 2 and btn[0] > (form[0] + form[1]) / 2, f'the total and the issue button sit at the right under the lines: {btn} in {form}')
     p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.click('button:has-text("Issue invoice no. 1")'); p.screenshot(path=f'{SHOTS}/invoice-dialog.png'); p.click('button[aria-label="Close"]'); synced(p)
-    check(heads('invs') == ['No', 'Date', 'Customer', 'Items', 'Total', 'Margin', 'Delivered'] and p.is_visible('button:has-text("Issue invoice no. 2")') and fits(), f"the new invoice appears in the invoice table under a fresh form: {heads('invs')}")
+    check(heads('invs') == ['No', 'Date', 'Customer', 'Products', 'Total', 'Margin', 'Delivered'] and p.is_visible('button:has-text("Issue invoice no. 2")') and fits(), f"the new invoice appears in the invoice table under a fresh form: {heads('invs')}")
     inv = p.eval_on_selector('#invList', 'e => e.getBoundingClientRect().top') > p.eval_on_selector('#sellBody', 'e => e.getBoundingClientRect().bottom')
     row1 = [c.inner_text().strip() for c in p.query_selector_all('[data-tbl="invs"] tbody tr:first-child td')]
     check(inv and row1[0] == '1' and row1[2] == 'Ben Cruz' and row1[3] == 'Grandista Son Goku' and row1[4] == '₱1,800' and row1[6] == 'No', f'the invoice list is a table under the form: {row1}')
@@ -66,7 +66,7 @@ with sync_playwright() as pw:
     tab(p, 'Orders')
     check(p.is_visible('button:has-text("New supplier order")') and 'To take a pre-order, start a New sale' in p.inner_text('#view') and not p.is_visible('button:has-text("New pre-order")') and fits(), 'Orders shows pre-orders and supplier orders together')
     p.click('button:has-text("New supplier order")'); pick(p, 'f', 'luffy'); p.fill('[data-b="f.qty"]', '4'); p.click('button:has-text("Save order")'); synced(p)
-    check(heads('pres') == ['Date', 'Customer', 'Contact', 'Item', 'Qty', 'Price', 'Paid', 'Balance', 'Status'] and heads('ords') == ['Date', 'Item', 'Qty', 'Expected', 'Status'], f"Orders shows a pre-order table and a supplier order table: {heads('pres')} {heads('ords')}")
+    check(heads('pres') == ['Date', 'Customer', 'Contact', 'Product', 'Qty', 'Price', 'Paid', 'Balance', 'Status'] and heads('ords') == ['Date', 'Product', 'Qty', 'Expected', 'Status'], f"Orders shows a pre-order table and a supplier order table: {heads('pres')} {heads('ords')}")
     v = p.inner_text('#view'); check('Ana Reyes' in v and 'Maximatic Monkey D. Luffy' in v and 'ON THE WAY' in v.upper(), 'both tables fill in')
     p.click('[data-tbl="ords"] tbody tr:has-text("Luffy")'); check(p.is_visible('#sheet button:has-text("Received · add to stock")'), 'clicking a supplier order row opens its sheet')
     p.click('#sheet button:has-text("Received · add to stock")'); synced(p)
@@ -81,9 +81,8 @@ with sync_playwright() as pw:
                 {'type': 'Count', 'name': 'Delta Bust', 'qty': 3, 'cost': 250, 'mfr': 'Bandai', 'chr': 'Son Goku', 'rel': '2024-07-15'},
                 {'type': 'Count', 'name': 'Epsilon Statue', 'qty': 1, 'cost': 100, 'rel': '2023-12-31'}])
     p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update stock · 4')"); tab(p, 'Update stock'); apply(p, 'Apply 4 changes'); synced(p)
-    p.click('#stockList tbody tr:has-text("alpha Plush")'); p.click('button:has-text("Edit details")'); p.fill('#fCat', 'Plush'); p.click('#sheet button.primary:has-text("Save")')
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
-    # Stock: a read-only table of every field; a header sorts and a second click reverses; a filter row under the header.
+    # Inventory: a read-only table of every field; a header sorts and a second click reverses; filters open from the headers.
     tab(p, 'Stock'); T = '[data-tbl="stock"]'; cols = heads('stock')
     cells = lambda k: p.eval_on_selector_all(f'{T} tbody tr', f'rs => rs.map(r => r.cells.length > 1 ? r.cells[{k}].innerText.trim() : "")')
     names = lambda: [x for x in cells(0) if x]
@@ -91,7 +90,7 @@ with sync_playwright() as pw:
     def sort(h, d):   # clicks the header until it sorts that way
         for _ in range(2):
             if p.get_attribute(th(h), 'aria-sort') != d: p.click(th(h) + ' button')
-    check(cols == ['Name', 'SKU', 'Category', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Price', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit cost', 'Stock cost'], f'the stock table has the 15 columns in order: {cols}')
+    check(cols == ['Name', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Price', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit cost', 'Stock cost'], f'the inventory table has the 13 columns in order: {cols}')
     check(p.get_attribute(th('Left to promise') + ' [title]', 'title').startswith('Left to promise is on hand, plus incoming supplier orders'), 'the Left to promise header carries the explanation as a hover hint')
     NUM = {'Price', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit cost', 'Stock cost'}
     key = lambda h, v: float(re.search(r'-?[\d,]+(\.\d+)?', v.replace('₱', '')).group().replace(',', '')) if h in NUM else re.match(r'\d{4}(-\d\d){0,2}', v).group() if h == 'Release date' else v.casefold()
@@ -107,36 +106,47 @@ with sync_playwright() as pw:
     sort('Unit cost', 'ascending'); r = names(); uc = cells(cols.index('Unit cost'))
     check(r[:3] == ['Epsilon Statue', 'Delta Bust', 'alpha Plush'] and uc[:3] == ['₱100', '₱250 to 500', '₱300'] and uc[3:] == ['–'] * 4, f'Unit cost shows one value or a range, sorts by the lowest, and shows a dash with no cost: {r} {uc}')
     sc = cells(cols.index('Stock cost')); check(sc[:3] == ['₱100', '₱1,250', '₱600'], f'Stock cost is the sum of the costs of the units on hand: {sc}')
-    tf = lambda k, v: p.fill(f'[data-tf="{k}"]', v) if k in ('from', 'to') else p.select_option(f'[data-tf="{k}"]', v)
+    # Filters: tick boxes for the values in use plus Blank (All and None; nothing ticked is no filter), a from and to for Release date.
+    on = lambda k: 'on' in p.get_attribute(f'{T} [data-k="{k}"]', 'class')
+    def filt(k, *vals):   # ticks exactly vals in column k's filter (from and to for 'rel'); the filter stays open
+        if p.is_hidden('#pop') or p.get_attribute('#pop', 'data-k') != k: p.click(f'{T} [data-act="tfOpen"][data-k="{k}"]')
+        if k == 'rel': p.fill('#tfFrom', (vals + ('', ''))[0]); p.fill('#tfTo', (vals + ('', ''))[1]); return
+        p.click('#pop button:has-text("None")')
+        for v in vals: p.check(f'#pop input[value="{v}"]')
     def shown(f, q):
-        for k, v in f.items(): tf(k, v)
+        for k, v in f.items(): filt(k, *v)
         p.fill('#q', q); out = set(names()) - {'Nothing matches.'}
-        for k in f: tf(k, '')
+        for k in f: filt(k)
         p.fill('#q', ''); return out
-    opts = p.eval_on_selector('[data-tf="mfr"]', 'e => [...e.options].map(o => o.textContent)')
-    check(opts == ['Any', 'Bandai', 'Sega'], f'a filter offers the values in use plus Any: {opts}')
-    for f, q, want in [({'cat': 'Plush'}, '', {'alpha Plush'}), ({'cat': 'General'}, 'goku', {'Grandista Son Goku', 'Delta Bust'}), ({'cat': 'Plush'}, 'goku', set()), ({'mfr': 'Bandai'}, '', {'alpha Plush', 'Delta Bust'}), ({'mfr': 'Bandai'}, 'delta', {'Delta Bust'}),
-                       ({'brand': 'Banpresto'}, 'luffy', {'Maximatic Monkey D. Luffy'}), ({'line': 'Grandista'}, 'zoro', set()), ({'chr': 'Son Goku'}, 'bust', {'Delta Bust'}),
-                       ({'from': '2024', 'to': '2024-07'}, '', {'alpha Plush', 'Beta Figure', 'Delta Bust'}), ({'from': '2024-07-15'}, '', {'Delta Bust'}), ({'to': '2023'}, '', {'Grandista Son Goku', 'Epsilon Statue'}), ({'from': '2024'}, 'beta', {'Beta Figure'})]:
+    filt('mfr'); opts = p.eval_on_selector_all('#pop label', 'ls => ls.map(l => l.innerText.trim())')
+    check(opts == ['Bandai', 'Sega', 'Blank'], f'a filter lists the values in use, then Blank: {opts}')
+    for f, q, want in [({'mfr': ['Bandai']}, '', {'alpha Plush', 'Delta Bust'}), ({'mfr': ['Bandai', 'Sega']}, 'a', {'alpha Plush', 'Delta Bust', 'Gigo Roronoa Zoro'}), ({'mfr': ['']}, '', {'Grandista Son Goku', 'Maximatic Monkey D. Luffy', 'Beta Figure', 'Epsilon Statue'}),
+                       ({'brand': ['Banpresto']}, 'luffy', {'Maximatic Monkey D. Luffy'}), ({'line': ['Grandista']}, 'zoro', set()), ({'chr': ['Son Goku', 'Roronoa Zoro']}, '', {'Grandista Son Goku', 'Delta Bust', 'Gigo Roronoa Zoro'}),
+                       ({'rel': ['2024', '2024-07']}, '', {'alpha Plush', 'Beta Figure', 'Delta Bust'}), ({'rel': ['2024-07-15']}, '', {'Delta Bust'}), ({'rel': ['', '2023']}, '', {'Grandista Son Goku', 'Epsilon Statue'}), ({'mfr': ['Bandai'], 'rel': ['2024-07']}, '', {'Delta Bust'})]:
         got = shown(f, q); check(got == want, f'filter {f} with search "{q}" shows {sorted(want)}: {sorted(got)}')
-    tf('cat', 'Plush'); p.fill('#q', 'goku')
-    check(p.inner_text(f'{T} tbody') == 'Nothing matches.' and p.input_value('[data-tf="cat"]') == 'Plush', 'when nothing matches, the filter row stays so the filter can be undone'); tf('cat', ''); p.fill('#q', '')
-    tab(p, 'Home'); p.click('#view [data-to="nocost"]'); a = set(names()); tf('brand', 'Banpresto'); b2 = set(names()); p.fill('#q', 'luffy'); c = set(names())
+    filt('mfr', 'Sega'); p.click('#pop button:has-text("All")'); every = len(names()) == 7 and p.eval_on_selector_all('#pop input', 'xs => xs.every(x => x.checked)') and on('mfr')
+    p.click('#pop button:has-text("None")'); check(every and len(names()) == 7 and not on('mfr'), 'All ticks every value, Blank included; None clears the filter')
+    p.evaluate(f"document.querySelector('{T} thead').dataset.keep = document.querySelector('#q').dataset.keep = '1'"); widths = lambda: p.eval_on_selector_all(f'{T} thead th', 'ths => ths.map(t => t.offsetWidth)'); w0 = widths()
+    filt('mfr', 'Sega'); p.check('#pop input[value="Bandai"]'); open_ = p.is_visible('#pop') and on('mfr'); p.keyboard.press('Escape'); sort('Name', 'descending')
+    kept = p.evaluate(f"document.querySelector('{T} thead').dataset.keep === '1' && document.querySelector('#q').dataset.keep === '1'")
+    check(open_ and names() == ['Gigo Roronoa Zoro', 'Delta Bust', 'alpha Plush'] and kept and widths() == w0 and p.is_hidden('#pop'), f'the filter stays open while ticking; a filter or a sort redraws only the rows, and no column changes width: {names()}')
+    p.fill('#q', 'zzz'); check(p.inner_text(f'{T} tbody') == 'Nothing matches.' and on('mfr'), 'when nothing matches, the header keeps its filter so it can be undone'); p.fill('#q', ''); filt('mfr')
+    tab(p, 'Home'); p.click('#view [data-to="nocost"]'); a = set(names()); filt('brand', 'Banpresto'); b2 = set(names()); p.fill('#q', 'luffy'); c = set(names())
     check(a == {'Grandista Son Goku', 'Maximatic Monkey D. Luffy', 'Gigo Roronoa Zoro', 'Beta Figure'} and b2 == {'Grandista Son Goku', 'Maximatic Monkey D. Luffy'} and c == {'Maximatic Monkey D. Luffy'}, f'a Home shortcut, a column filter and the search combine: {a} {b2} {c}')
-    tf('brand', ''); p.fill('#q', ''); p.click('#view button:has-text("Show all")')
-    sort('Release date', 'descending'); tf('mfr', 'Bandai'); p.fill('[data-tf="from"]', '2023')
+    filt('brand'); p.fill('#q', ''); p.click('#view button:has-text("Show all")')
+    sort('Release date', 'descending'); filt('mfr', 'Bandai'); filt('rel', '2023')
     p.evaluate(f"document.querySelector('{T}').dataset.old = '1'"); p.click('#syncBtn'); p.wait_for_function(f"!document.querySelector('{T}').dataset.old")
-    check(names() == ['Delta Bust', 'alpha Plush'] and p.get_attribute(th('Release date'), 'aria-sort') == 'descending' and p.input_value('[data-tf="mfr"]') == 'Bandai' and p.input_value('[data-tf="from"]') == '2023', f'sort and filter survive the re-render after a sync: {names()}')
-    tf('mfr', ''); tf('from', '')
+    check(names() == ['Delta Bust', 'alpha Plush'] and p.get_attribute(th('Release date'), 'aria-sort') == 'descending' and on('mfr') and on('rel'), f'sort and filters survive the re-render after a sync: {names()}')
+    filt('mfr'); filt('rel'); p.keyboard.press('Escape')
     wide_box = p.eval_on_selector(T, 'e => e.scrollWidth > e.clientWidth')
     p.eval_on_selector(T, 'e => e.scrollLeft = e.scrollWidth'); p.click(th('Stock cost') + ' button')
     check(wide_box and fits() and p.eval_on_selector(T, 'e => e.scrollLeft') > 0, 'the table scrolls sideways in its own box, and keeps its place when sorted')
-    p.set_viewport_size({'width': 1280, 'height': 450}); p.wait_for_timeout(200)
+    p.set_viewport_size({'width': 1280, 'height': 340}); p.wait_for_timeout(200)
     top = p.eval_on_selector(T, 'e => { e.scrollTop = 150; return [e.scrollTop, e.getBoundingClientRect().top, e.querySelector("thead th").getBoundingClientRect().top]; }')
     check(top[0] > 0 and abs(top[2] - top[1] - 1) < 2, f'the header row stays in view while the table scrolls down: {top}')
     p.set_viewport_size({'width': 1280, 'height': 800}); p.wait_for_timeout(200)
     p.click(f'{T} tbody tr:has-text("Delta Bust")'); check(p.inner_text('#sheet h2') == 'Delta Bust' and len(p.query_selector_all('#sheet [data-unit]')) == 4, 'clicking a row opens the item sheet'); p.click('#sheet button[aria-label="Close"]')
-    check(p.query_selector(f'{T} input:not([data-tf]), {T} tbody [contenteditable]') is None, 'no cell of the table can be edited')
+    check(p.query_selector(f'{T} input, {T} [contenteditable]') is None, 'no cell of the table can be edited')
     p.screenshot(path=f'{SHOTS}/stock-table.png')
     tab(p, 'Home')
     cols = p.eval_on_selector_all('.cols > div', 'els => els.map(e => Math.round(e.getBoundingClientRect().left))')
@@ -147,7 +157,7 @@ with sync_playwright() as pw:
     no_toy(p, 'desktop Home')
     tab(p, 'Stock'); no_toy(p, 'Stock'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); tab(p, 'Update stock'); no_toy(p, 'Update stock')
     tab(p, 'Activity'); no_toy(p, 'Activity'); check(p.inner_text('header.top h1') == 'Activity' and 'Sale' in p.inner_text('#actList') and fits(), 'Activity opens from the side bar')
-    check(heads('moves') == ['Date', 'Item', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
+    check(heads('moves') == ['Date', 'Product', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
     p.click('[data-tbl="moves"] tbody tr:has-text("Sale")'); check('Grandista Son Goku' in p.inner_text('#sheet h2') and p.is_visible('#sheet button:has-text("Reverse this movement")'), 'clicking a movement row opens the movement'); p.click('#sheet button[aria-label="Close"]')
     p.focus('[data-tbl="moves"] tbody tr:first-child'); p.keyboard.press('Enter'); check(p.is_visible('#sheet button[aria-label="Close"]'), 'Enter on a focused row opens it too'); p.click('#sheet button[aria-label="Close"]')
     p.screenshot(path=f'{SHOTS}/activity.png')
