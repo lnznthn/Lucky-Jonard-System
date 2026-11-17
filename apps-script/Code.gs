@@ -70,6 +70,8 @@ var T_ = {
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), invNo: Number(v[2]), invId: s_(v[3]), cust: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), outcome: s_(v[8]), refund: Number(v[9]), note: String(v[10]) }; },
     to: function (o) { return [o.id, o.date, o.invNo, o.invId, o.cust, o.sku, o.name, o.qty, o.outcome, o.refund, o.note]; } }
 };
+// The tabs only the app writes: protected by setup(), cleared by wipeAllData().
+var APP_TABS_ = ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }));
 
 /** Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data. */
 function setup() {
@@ -82,7 +84,7 @@ function setup() {
   var ed = asText_(ensureSheet_(ss, 'Edits', EDIT_HEAD_), ['A:E']);
   ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
   // A warning, not a lock: the owner can still edit, but is asked first.
-  ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; })).forEach(function (n) {
+  APP_TABS_.forEach(function (n) {
     var sh = ss.getSheetByName(n);
     var has = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).some(function (p) { return p.getDescription() === PROTECT_NOTE_; });
     if (!has) sh.protect().setDescription(PROTECT_NOTE_).setWarningOnly(true);
@@ -112,10 +114,7 @@ function wipeAllData() {
   locked_(function () {
     var ss = SpreadsheetApp.getActiveSpreadsheet(), name = 'Bodega backup ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
     ss.copy(name);
-    ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }), ['Edits']).forEach(function (n) {
-      var sh = ss.getSheetByName(n);
-      if (sh && sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent();
-    });
+    APP_TABS_.concat('Edits').map(sheet_).forEach(function (sh) { if (sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent(); });
     if (ss.getSheetByName('Browse')) ss.deleteSheet(ss.getSheetByName('Browse'));
     raiseRev_();
     Logger.log('Wiped. Backup: ' + name);
@@ -634,6 +633,7 @@ function plan_(entries, skip) {
     return it;
   }
   function cust_(id) { var c = custById[s_(id)]; if (!c) throw new Error('Unknown customer'); return c; }
+  function allMoves_() { return moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); })); }
   function pushMove_(id, date, it, dir, qty, reason, ref, note, cost) {
     if (existingIds[id]) return;
     existingIds[id] = true;
@@ -815,7 +815,7 @@ function plan_(entries, skip) {
       } else if (e.kind === 'cost') {
         // Only while a unit of that In is on hand, after every movement so far including this request's. The same value again
         // changes nothing and is not refused, so a retry after a lost response still succeeds once the unit has been sold.
-        var mid = s_(e.moveId), mc = moneyOrNull_(e.cost, 'Unit cost'), now = moveList.concat(newMoves.map(function (x) { return moveOf_(x.v); }));
+        var mid = s_(e.moveId), mc = moneyOrNull_(e.cost, 'Unit cost'), now = allMoves_();
         var tm = now.filter(function (x) { return x.id === mid; })[0], nm = newMoves.filter(function (x) { return x.v[0] === mid; })[0];
         if (!tm) throw new Error('Unknown movement');
         var left = tm.dir === 'In' && (stockOf_(now).units[tm.sku.toLowerCase()] || []).some(function (u) { return u.id === mid; });
@@ -837,7 +837,7 @@ function plan_(entries, skip) {
     }
   });
 
-  var stock = stockOf_(moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); }))).stock;
+  var stock = stockOf_(allMoves_()).stock;
   return { results: results, items: items, moves: moveList, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
     tabs: { cust: custs, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
 }
