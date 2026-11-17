@@ -1,62 +1,24 @@
 # End-to-end test: python3 test/e2e.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import json, sys, urllib.request
+import json, os, urllib.request
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP, API = 'http://localhost:8765/index.html', 'http://localhost:8766'
 SHOTS = '/tmp/shots'
-import os; os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
+os.makedirs(SHOTS, exist_ok=True)
 def activity(p): tab(p, 'Stock'); p.click('#view button[data-t="activity"]')
-def update_stock(p): tab(p, 'Home'); p.click('#view button[data-t="import"]')
 def update_label(p): tab(p, 'Home'); return p.inner_text('#view button[data-t="import"]')
-# Product names in the test data that contain the word; everything else on screen must not say it.
-DATA_NAMES = ['Plain Toy', 'Toy Train Set']
-def no_toy(p, where):
-    txt = p.evaluate("() => document.body.innerText + ' ' + [...document.querySelectorAll('[placeholder],[aria-label]')].filter(e => e.offsetParent || e.closest('#sheet')).map(e => (e.getAttribute('placeholder') || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')")
-    for n in DATA_NAMES: txt = txt.replace(n, '')
-    check('toy' not in txt.lower(), f'no “toy” in the text of {where}')
-def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def post_inbox(rows):
-    urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rows).encode(), method='POST')).read()
-def stock_map_here(p):
-    return {row.query_selector('.name').inner_text().strip(): int(row.query_selector('.qty').inner_text()) for row in p.query_selector_all('#stockList .item')}
-def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); out = {}
-    for row in p.query_selector_all('#stockList .item'):
-        out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
-    return out
-def paste_import(p, mode, text):
-    update_stock(p)
-    if not p.is_visible('#impText'): p.click('#manual summary')
-    if mode == 'moves': p.click('button[data-m="moves"]')
-    else: p.click('button[data-m="count"]')
-    p.fill('#impText', text); p.click('button:has-text("Preview")')
-def connect(p, code=CODE):
-    p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
+def post_rows(name, rs): urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': name, 'rows': rs}).encode(), method='POST')).read()   # rows 2 onward of a tab, as typed in the sheet
 
-def apply(p, label):
-    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
-    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
-    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx1 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
-    p = ctx1.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx1)
     p.goto(APP)
     check(p.is_visible('#view button.primary:has-text("New sale")') and p.is_visible('#view button[data-t="import"]:has-text("Update stock")') and 'Nothing needs you.' in p.inner_text('#view'), 'empty Home still shows New sale and Update stock')
     p.click('#view button.primary:has-text("New sale")'); p.wait_for_timeout(200)
     check('No items to sell yet' in p.inner_text('#view') and p.is_visible('#view button.primary:has-text("Add an item")'), 'New sale with no items offers Add an item')
     p.click('nav button[data-t="home"]'); p.wait_for_timeout(200)
-    check(p.title() == 'Bodega' and json.load(urllib.request.urlopen('http://localhost:8765/manifest.webmanifest'))['name'] == 'Bodega', 'document title and manifest name are Bodega')
+    check(p.title() == 'Bodega' and json.load(urllib.request.urlopen(f'http://localhost:{APP_PORT}/manifest.webmanifest'))['name'] == 'Bodega', 'document title and manifest name are Bodega')
     check(p.inner_text('#title') == 'Bodega', 'Home header shows the app name when no shop name is set')
     check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sales', 'Orders'], 'first launch opens Home; the bar is Home, Stock, Sales, Orders')
     check(all(b.query_selector('svg') for b in p.query_selector_all('#tabs button')), 'each tab has a stroke icon')
@@ -66,7 +28,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#impText'), 'with no connection code the paste box is open')
     no_toy(p, 'Update stock')
     p.click('#view .item:has-text("One item by hand")')
-    check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('#mvQ'), 'One item by hand opens the Move screen with a picker')
+    check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('[data-pk="mv"]'), 'One item by hand opens the Move screen with a picker')
     p.click('#backBtn'); check(p.inner_text('#title') == 'Bodega', 'the close button leaves the Move screen')
     check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
     p.screenshot(path=f'{SHOTS}/01-empty.png')
@@ -108,7 +70,7 @@ with sync_playwright() as pw:
     # ---- manual move via Move tab
     p.click('.item:has-text("Hot Wheels 5-Pack")'); p.screenshot(path=f'{SHOTS}/05-item-sheet.png')
     p.click('button:has-text("Stock out")')
-    check(p.inner_text('#pick').find('Hot Wheels 5-Pack') >= 0, 'Stock out opens Move with the toy preselected')
+    check(p.inner_text('#view .picked').find('Hot Wheels 5-Pack') >= 0, 'Stock out opens Move with the toy preselected')
     p.click('button[aria-label="More"]'); p.click('button[aria-label="More"]')
     check(p.input_value('#mvQty') == '3' and 'Stock 10 → 7' in p.inner_text('#mvHint'), 'stepper and hint show stock 10 → 7')
     p.fill('#mvNote', 'Weekend sale'); p.screenshot(path=f'{SHOTS}/06-move.png')
@@ -148,30 +110,30 @@ with sync_playwright() as pw:
 
     # ---- connect: queue flushes into the sheet
     check(p.inner_text('#syncTxt').endswith('saved here'), 'pill counts items saved on the device')
-    connect(p); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    connect(p); synced(p)
     d = dump()
     check(len(d['Items']['rows']) - 1 == 4, f"sheet has 4 items: {len(d['Items']['rows']) - 1}")
     mv_rows = d['Movements']['rows'][1:]
-    check(len(mv_rows) == 7, f'sheet has movement rows: {len(mv_rows)}')
+    check(len(mv_rows) == 27, f'sheet has movement rows, one per unit stocked in: {len(mv_rows)}')
     check(stock_map(p) == before, 'stock unchanged by sync')
     check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
     check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
     onh = {r[1]: r[6] for r in d['Items']['rows'][1:]}
-    check(d['Items']['formulas'] == {} and onh == before, f'On hand in the sheet is a written number per item, with no formula: {onh}')
+    check(onh == before, f'On hand in the sheet is a written number per item: {onh}')
     p.screenshot(path=f'{SHOTS}/08-synced.png')
 
     # ---- reverse a synced movement
     activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")'); p.click('button:has-text("Reverse this movement")')
     check(stock_map(p)['Hot Wheels 5-Pack'] == 10, 'reversal restores 10')
-    p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    synced(p)
     activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
     check(p.is_disabled('button:has-text("Already reversed")'), 'second reversal blocked')
     p.click('button[aria-label="Close"]')
     check(any(r[6] == 'Correction' and r[7] for r in dump()['Movements']['rows'][1:]), 'correction row with Ref is in the sheet')
 
     # ---- device 2 connects and sees the same numbers
-    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
-    p2.goto(APP); connect(p2); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = page(ctx2, 'p2 ')
+    p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 matches device 1: {stock_map(p2)}')
 
     # ---- movements import: dup, unknown item, bad reason, negative warning
@@ -179,25 +141,25 @@ with sync_playwright() as pw:
     txt = p2.inner_text('#impOut'); p2.screenshot(path=f'{SHOTS}/09-moves-preview.png')
     check('Below zero' in txt and 'No item matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown item, bad reason')
     check('Apply 3 changes' in txt, 'moves preview applies the 3 good rows')
-    apply(p2, 'Apply 3 changes'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    apply(p2, 'Apply 3 changes'); synced(p2)
     check(stock_map(p2)['Hot Wheels 5-Pack'] == 15 and stock_map(p2)['Toy Train Set'] == 5, f'stock after movement import: {stock_map(p2)}')
     paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery")
     check('Duplicate?' in p2.inner_text('#impOut') and 'Apply 0 changes' in p2.inner_text('#impOut'), 'pasting the same movement again is held as a duplicate')
 
     # ---- device 1 catches up
-    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    p.click('#syncBtn'); synced(p)
     check(stock_map(p) == stock_map(p2), 'device 1 pulls device 2 changes incrementally')
 
     # ---- offline: queue then reconnect
     ctx1.set_offline(True)
     tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.click('button:has-text("Change")')
-    p.click('button[data-d="In"]'); p.fill('#mvQ', 'train'); p.click('#sug button')
-    check('Toy Train Set' in p.inner_text('#pick') and p.is_visible('button:has-text("Record stock in")'), 'Change on the Move screen lets another toy be searched and picked')
+    p.click('button[data-d="In"]'); p.fill('[data-pk="mv"]', 'train'); p.click('[data-sug="mv"] button')
+    check('Toy Train Set' in p.inner_text('#view .picked') and p.is_visible('button:has-text("Record stock in")'), 'Change on the Move screen lets another toy be searched and picked')
     p.click('button:has-text("Record stock in")')
     p.wait_for_timeout(1500)
     check(stock_map(p)['Toy Train Set'] == 6 and 'waiting' in p.inner_text('#syncTxt') or 'failed' in p.inner_text('#syncTxt'), f"offline entry is kept ({p.inner_text('#syncTxt')})")
-    ctx1.set_offline(False); p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-    p2.click('#syncBtn'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    ctx1.set_offline(False); p.click('#syncBtn'); synced(p)
+    p2.click('#syncBtn'); synced(p2)
     check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
 
     def add_toy(pg, name, start, sku=None):
@@ -223,7 +185,7 @@ with sync_playwright() as pw:
     ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
     p2.click('#syncBtn'); p2.wait_for_timeout(1500)
     check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
-    tab(p2, 'Home'); check('Fix 2 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries')
+    tab(p2, 'Home'); check('Fix 5 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries: the item and its four units')
     p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
     check('New item “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which item was refused and why')
     check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
@@ -271,7 +233,7 @@ with sync_playwright() as pw:
     synced(p); sm = stock_map(p)
     check(sm['Dino Figure'] == before['Dino Figure'] + 2 and sm['Inbox Car'] == 1, f'received stock recorded: {sm}')
     mv = dump()['Movements']['rows'][1:]
-    check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150], 'receive rows carry their cost')
+    check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150, 150], 'receive rows carry their cost, one row per unit')
     check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
     update_stock(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Update stock is back to the other ways; with a connection the paste box is folded')
     # Dismiss records nothing
@@ -326,7 +288,7 @@ with sync_playwright() as pw:
     ib = dump()['Inbox']['rows'][1:]
     for r in ib:
         if r[2] == 'Bulk 1': r[3] = '7'
-    urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Inbox', 'rows': ib}).encode(), method='POST')).read()
+    post_rows('Inbox', ib)
     p.click('#syncBtn'); synced(p)
     check('opening stock 7' in p.inner_text('.prow:has-text("Bulk 1")') and 'Corrected here' in p.inner_text('#impOut') and 'opening stock 4' in p.inner_text('#impOut .grp-check'), f"a row edited in the sheet shows its new content after a sync; corrections stay: {p.inner_text('#impOut')[:900]!r}")
     check(not p.is_checked('.prow:has-text("Keep Me") input[type=checkbox]'), 'an untick survives that sync')
@@ -346,19 +308,18 @@ with sync_playwright() as pw:
     check([v for k, v in {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}.items() if k in ('Keep Me', 'Unidentified figure, blue')] == ['Dismissed', 'Dismissed'], 'Dismiss these rows marks everything shown')
     # warnings from the sheet: a banner on Home under the buttons, gone once fixed
     items_rows = dump()['Items']['rows'][1:]
-    post_rows = lambda rows: urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Items', 'rows': rows}).encode(), method='POST')).read()
-    post_rows(items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
+    post_rows('Items', items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
     warn = f'Items: SKU {items_rows[0][0]} appears on 2 rows. The first is used.'
     check(p.inner_text('#view .banner.danger') == warn and p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).color") == p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).borderTopColor"), 'a warning from the sheet shows on Home in the danger colour')
     check(p.evaluate("document.querySelector('.banner.danger').previousElementSibling.classList.contains('actions')"), 'the banner sits under the buttons'); p.screenshot(path=f'{SHOTS}/14-warning.png')
-    post_rows(items_rows); p.click('#syncBtn'); synced(p)
+    post_rows('Items', items_rows); p.click('#syncBtn'); synced(p)
     check(p.query_selector('#view .banner.danger') is None, 'no banner when the sheet reports no warnings')
 
     # ---- theme: Device, Light or Dark, set in Settings only, kept on the device
     bg = lambda pg: pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toUpperCase()")
     check(p.query_selector('header [data-act="theme"]') is None and p.evaluate("document.documentElement.getAttribute('data-theme')") is None, 'no theme control in the header; Device leaves data-theme unset')
     tab(p, 'Home'); p.click('button[aria-label="Settings"]'); no_toy(p, 'Settings')
-    check([h.inner_text() for h in p.query_selector_all('#sheet .sec > h2')] == ['Connection', 'Invoice PDF', 'Preferences', 'Data'], 'Settings is grouped under four headings')
+    check([h.inner_text() for h in p.query_selector_all('#sheet .sec > h2')] == ['Connection', 'Invoice image', 'Preferences', 'Data'], 'Settings is grouped under four headings')
     p.click('#sheet button[data-act="theme"][data-v="dark"]')
     check(p.evaluate("document.documentElement.getAttribute('data-theme')") == 'dark' and bg(p) == '#0D0D0D', 'Dark sets data-theme and the dark tokens')
     p.reload(); p.wait_for_selector('#tabs button')
@@ -367,7 +328,7 @@ with sync_playwright() as pw:
     check(p.evaluate("document.documentElement.getAttribute('data-theme')") is None and bg(p) == '#FAFAFA', 'Device removes data-theme and follows the light device')
     p.click('button[aria-label="Close"]')
     for scheme, want in [('dark', '#0D0D0D'), ('light', '#FAFAFA')]:
-        cx = b.new_context(color_scheme=scheme); pp = cx.new_page(); pp.on('pageerror', lambda e: errors.append('theme ' + str(e))); pp.goto(APP); pp.wait_for_selector('#tabs button')
+        cx = b.new_context(color_scheme=scheme); pp = page(cx, 'theme '); pp.goto(APP); pp.wait_for_selector('#tabs button')
         check(bg(pp) == want, f'Device follows a {scheme} device: {bg(pp)}')
         pp.evaluate("prefs.theme = '" + ('light' if scheme == 'dark' else 'dark') + "'; savePrefs()"); pp.reload(); pp.wait_for_selector('#tabs button')
         check(bg(pp) == ('#FAFAFA' if scheme == 'dark' else '#0D0D0D'), f'an explicit choice overrides a {scheme} device')
@@ -379,5 +340,4 @@ with sync_playwright() as pw:
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()

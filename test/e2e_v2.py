@@ -1,71 +1,35 @@
-# End-to-end test of the v2 flows: toy details, receipt cost, supplier orders, pre-orders, invoices with PDF, returns.
+# End-to-end test of the v2 flows: toy details, receipt cost, supplier orders, pre-orders, invoices with the image, returns.
 # python3 test/e2e_v2.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import datetime, json, os, re, subprocess, sys, urllib.request
+import datetime, os, re
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP, API = 'http://localhost:8765/index.html', 'http://localhost:8766'
 SHOTS = '/tmp/shots2'
 os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-def rows(name): return dump()[name]['rows'][1:]
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
-def update_stock(p): tab(p, 'Home'); p.click('#view button[data-t="import"]')
-def new_sale(p): tab(p, 'Sales'); p.click('#view [data-act="sellNew"]') if p.is_visible('#view [data-act="sellNew"]') else None
-def no_toy(p, where):
-    txt = p.evaluate("() => document.body.innerText + ' ' + [...document.querySelectorAll('[placeholder],[aria-label]')].filter(e => e.offsetParent || e.closest('#sheet')).map(e => (e.getAttribute('placeholder') || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')").replace('Plain Toy', '')
-    check('toy' not in txt.lower(), f'no “toy” in the text of {where}')
-def home(p): tab(p, 'Home'); return p.inner_text('#view')
-def stock_names(p): return [e.inner_text().strip() for e in p.query_selector_all('#stockList .item .name')]
 TODAY = datetime.date.today().isoformat()
-def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); out = {}
-    for row in p.query_selector_all('#stockList .item'):
-        out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
-    return out
-def paste_import(p, mode, text):
-    update_stock(p)
-    if not p.is_visible('#impText'): p.click('#manual summary')
-    p.click(f'button[data-m="{mode}"]'); p.fill('#impText', text); p.click('button:has-text("Preview")')
-def connect(p, code=CODE):
-    p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
-def pick(p, key, text):
-    p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug="{key}"] button')
-def close(p): p.click('button[aria-label="Close"]')
-def pdf(p, name, blocked=False):
-    """Taps Print PDF. Normally the PDF opens in a new tab (returns 'tab'); with blocked=True no tab can open,
-    so the file downloads instead (returns its file name)."""
-    path = f'{SHOTS}/{name}.pdf'
+def png_size(data):
+    """Width and height from a PNG's IHDR chunk, or None when the bytes are not a PNG."""
+    return (int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')) if data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR' else None
+def save_img(p, name, blocked=False):
+    """Taps Save image. Normally the PNG opens in a new tab (returns 'tab'); with blocked=True no tab can open,
+    so the file downloads instead (returns its file name). Also returns the image's width and height."""
+    path = f'{SHOTS}/{name}.png'
     if blocked:
         p.evaluate("() => { window.__open = window.open; window.open = () => null; }")
-        with p.expect_download() as d: p.click('button:has-text("Print PDF")')
+        with p.expect_download() as d: p.click('button:has-text("Save image")')
         d.value.save_as(path); got = d.value.suggested_filename
         p.evaluate("() => { window.open = window.__open; }")
     else:
-        with p.expect_popup() as pop: p.click('button:has-text("Print PDF")')
+        with p.expect_popup() as pop: p.click('button:has-text("Save image")')
         t = pop.value; t.wait_for_url('blob:**')
         data = t.evaluate("async () => Array.from(new Uint8Array(await (await fetch(location.href)).arrayBuffer()))")
         t.close(); open(path, 'wb').write(bytes(data)); got = 'tab'
-    info = subprocess.run(['pdfinfo', path], capture_output=True, text=True)
-    subprocess.run(['pdftoppm', '-r', '70', '-png', path, f'{SHOTS}/{name}'])
-    return got, open(path, 'rb').read(5), info.returncode == 0 and re.search(r'Pages:\s+(\d+)', info.stdout).group(1)
+    return got, png_size(open(path, 'rb').read())
 
-def apply(p, label):
-    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
-    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
-    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, accept_downloads=True)
-    p = ctx.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx)
     p.goto(APP); connect(p); synced(p)
 
     # ---- photo import carries the toy details; the release-date flag is its own field
@@ -82,8 +46,8 @@ with sync_playwright() as pw:
     check(it['Maximatic Luffy'][11:13] == ['', ''], 'no release date, no flag')
     h = home(p); p.screenshot(path=f'{SHOTS}/01a-home.png')
     titles = [e.inner_text() for e in p.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    check(titles == ['Price 3 items', 'Check 1 release date'] and p.inner_text('#view .badge') == '2', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
-    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; two rows need no See more')
+    check(titles == ['Price 3 items', 'Add the cost of 4 units', 'Check 1 release date'] and p.inner_text('#view .badge') == '3', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
+    check('Price 3 items\nA sale needs the price typed each time' in h and 'See ' not in h, 'each row is an action with a second line; three rows need no See more')
     check('Collect' not in h and 'supplier order' not in h and 'promised beyond supply' not in h and 'Ship' not in h, 'Home leaves out rows that are zero')
     p.click('#view .item:has-text("Check 1 release date")')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and 'Showing only: Release date to verify' in p.inner_text('#view') and stock_names(p) == ['Grandista Son Goku'], 'the verify row opens Stock with its filter named')
@@ -95,7 +59,7 @@ with sync_playwright() as pw:
     check('Showing only' not in p.inner_text('#view') and p.get_attribute('#view .seg button[data-f="out"]', 'class') == 'on', 'a filter tab replaces the special filter')
     p.click('#view .seg button[data-f="all"]')
     tab(p, 'Stock'); p.click('.item:has-text("Grandista Son Goku")'); sheet = p.inner_text('#sheet')
-    check('Banpresto' in sheet and 'to verify' in sheet and 'No cost recorded yet' in sheet, 'toy sheet shows details, flag and missing cost')
+    check('Banpresto' in sheet and 'to verify' in sheet and '2 units have no cost yet.' in sheet, 'toy sheet shows details, flag and the units with no cost')
     p.screenshot(path=f'{SHOTS}/02-toy-sheet.png')
     p.click('button:has-text("Edit")'); p.fill('#fPrice', '1800'); p.uncheck('#fRelCheck'); p.fill('#fRel', '2019-06-20'); p.click('#sheet button.primary:has-text("Save")'); synced(p)
     it = {r[1]: r for r in rows('Items')}
@@ -109,7 +73,7 @@ with sync_playwright() as pw:
     it = {r[1]: r for r in rows('Items')}
     check(it['Plain Toy'][7:9] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][7] == 'Bandai Spirits', 'details filled without overwriting')
 
-    # ---- receive mode: supplier paperwork adds stock at its cost and sets the average
+    # ---- receive mode: supplier paperwork adds stock at its cost, one unit per row
     paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tFigures\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/03-receive-preview.png')
     check('+3 at ₱1,200 each' in txt and 'New item' in txt and 'Needs a name · 1' in txt and 'Apply 2 changes' in txt, 'receive preview')
@@ -118,8 +82,9 @@ with sync_playwright() as pw:
     sm = stock_map(p)
     check(sm['Grandista Son Goku'] == 5 and sm['Gigo Zoro'] == 2, f'stock after receiving: {sm}')
     mv = [r for r in rows('Movements') if r[6] == 'Restock']
-    check(sorted(r[9] for r in mv) == [900, 1200], f'cost recorded on each receipt: {[r[9] for r in mv]}')
-    p.click('.item:has-text("Grandista Son Goku")'); check('₱1,200' in p.inner_text('#sheet .kv'), 'average cost shown on the toy'); close(p)
+    check(sorted(r[9] for r in mv) == [900, 900, 1200, 1200, 1200] and {r[5] for r in mv} == {1}, f'cost recorded on each unit received: {[r[9] for r in mv]}')
+    p.click('.item:has-text("Grandista Son Goku")')
+    check([e.input_value() for e in p.query_selector_all('#sheet [data-unit]')] == ['', '', '1200', '1200', '1200'] and 'Cost of stock on hand ₱3,600. 2 units have no cost yet.' in p.inner_text('#sheet'), 'the item sheet lists the units on hand, oldest first, with their costs'); close(p)
 
     # ---- supplier order counts as incoming
     tab(p, 'Orders'); p.click('button[data-s="sup"]'); p.click('button:has-text("New supplier order")')
@@ -134,7 +99,7 @@ with sync_playwright() as pw:
     p.click('#view button:has-text("New sale")')
     check('on' in p.get_attribute('#tabs button[data-t="sell"]', 'class') and p.inner_text('#title') == 'New sale' and p.is_visible('button:has-text("Issue invoice no. 1")'), 'New sale on Home opens the form')
 
-    # ---- customer pre-order: partial payment, receipt PDF, no stock movement, four numbers
+    # ---- customer pre-order: partial payment, receipt image, no stock movement, four numbers
     n_moves = len(rows('Movements'))
     pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.lines.0.price"]', '1500')
     check(not p.is_visible('#invNotice') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice.' == p.inner_text('#invHint'), 'one in stock and one wanted: the form is a sale and says what the tap does')
@@ -151,8 +116,8 @@ with sync_playwright() as pw:
     p.click('button:has-text("Save pre-order · receipt no. 1")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/06-receipt.png')
     check('Pre-order receipt no. 1' in sheet and 'Paid ₱1,000 · balance ₱2,000' in sheet, 'receipt opens straight after saving')
-    name, magic, pages = pdf(p, 'receipt-1', blocked=True)
-    check(name == 'Receipt-1.pdf' and magic == b'%PDF-' and pages == '1', f'with no tab allowed, the receipt PDF downloads as a valid one-page PDF: {name} {magic} {pages}')
+    name, size = save_img(p, 'receipt-1', blocked=True)
+    check(name == 'Receipt-1.png' and size and size[0] == 1190 and size[1] <= 2048, f'with no tab allowed, the receipt image downloads as a valid PNG 1190 px wide: {name} {size}')
     close(p); synced(p)
     check(len(rows('Movements')) == n_moves, 'pre-order moved no stock')
     pre = rows('Pre-orders')[0]
@@ -186,14 +151,14 @@ with sync_playwright() as pw:
 
     # ---- supplier stock arrives: cost typed at receipt, pre-order becomes ready to ship
     p.click('button[data-s="sup"]'); p.click('.item:has-text("Maximatic Luffy")')
-    p.click('button:has-text("Received")'); check('cost each' in p.inner_text('#toast'), 'receiving asks for the cost')
-    p.fill('[data-b="sub.cost"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('button:has-text("Received")')
+    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'receiving shows one cost field per unit')
+    p.fill('#sheet [data-cost][data-k="0"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('button:has-text("Received")')
     check('1 pre-order is ready to ship' in p.inner_text('#toast'), 'receiving announces the waiting customer')
     view = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/09-ready-to-ship.png')
     check('ready to ship' in view.lower() and 'Ana Reyes' in view and '+63 917 000 0000' in view, 'ready-to-ship list shows the customer and contact')
     synced(p)
-    so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')][0]
-    check(so[6:8] == ['Received', 4] and rc[4:8] == ['In', 4, 'Restock', so[0]] and rc[9] == 800, f'order received, movement refers to it with its cost: {rc}')
+    so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')]
+    check(so[6:8] == ['Received', 4] and [r[0] for r in rc] == [f'rcv-{so[0]}-{k}' for k in (1, 2, 3, 4)] and all(r[4:8] == ['In', 1, 'Restock', so[0]] and r[9] == 800 for r in rc), f'order received, one movement per unit refers to it with its cost: {rc}')
 
     # ---- ready to ship -> one tap pre-fills the invoice; stock leaves when the invoice is issued
     h = home(p); p.screenshot(path=f'{SHOTS}/09a-home-ready.png')
@@ -219,7 +184,7 @@ with sync_playwright() as pw:
     tab(p, 'Stock'); p.click('.item:has-text("Gigo Zoro")'); p.click('#sheet button:has-text("Order stock")')
     check('New supplier order' in p.inner_text('#sheet') and 'Gigo Zoro' in p.inner_text('#sheet'), 'Order stock on an item opens the form with it picked'); close(p)
 
-    # ---- ordinary chat sale: one toy, listed price prefilled, overridden, margin at average cost
+    # ---- ordinary chat sale: one toy, listed price prefilled, overridden; the oldest unit has no cost, so the margin is unknown
     new_sale(p)
     p.click('button:has-text("Issue invoice")'); check('Pick an item' in p.inner_text('#toast'), 'invoice needs an item')
     pick(p, 'inv.lines.0', 'goku')
@@ -227,22 +192,28 @@ with sync_playwright() as pw:
     no_toy(p, 'New sale in sale mode')
     p.fill('[data-b="inv.lines.0.price"]', '1700'); p.fill('[data-b="inv.cust"]', 'Ben Cruz')
     check(p.inner_text('#invTotal') == '₱1,700', 'total follows the overridden price'); p.screenshot(path=f'{SHOTS}/10-invoice-form.png')
+    check('1 unit of this item has no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody') and p.is_visible('#sellBody button:has-text("Add the cost")'), 'the form says the unit sold has no cost')
     p.click('button:has-text("Issue invoice no. 3")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/11-invoice.png')
-    check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin ₱500 at average cost' in sheet, 'invoice sheet shows override and margin')
-    name, magic, pages = pdf(p, 'invoice-3'); check(name == 'tab' and magic == b'%PDF-' and pages == '1', 'Print PDF opens a valid invoice PDF in a new tab')
+    check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin unknown: an item has no cost' in sheet, 'invoice sheet shows override and the unknown margin')
+    name, size = save_img(p, 'invoice-3')
+    check(name == 'tab' and size and size[0] == 1190 and size[1] < 1684, f'Save image opens a valid PNG in a new tab, 1190 px wide and cropped shorter than an A4 page: {size}')
+    ctx.grant_permissions(['clipboard-read', 'clipboard-write']); p.wait_for_selector('#sheet button:has-text("Copy image")', state='visible')
+    p.click('#sheet button:has-text("Copy image")'); p.wait_for_function("document.querySelector('#toast').textContent.startsWith('Copied')", timeout=5000)
+    clip = p.evaluate("async () => { const [it] = await navigator.clipboard.read(); return Array.from(new Uint8Array(await (await it.getType('image/png')).arrayBuffer())); }")
+    check(p.inner_text('#toast') == 'Copied. Paste it into the chat.' and png_size(bytes(clip)) == size, f'with the clipboard API, Copy image sits beside Save image and copies the PNG: {png_size(bytes(clip))}')
     p.click('#sheet [data-act="ship"]'); check(p.is_checked('#sheet [data-act="ship"]'), 'ticking Delivered marks it')
     p.click('#sheet [data-act="ship"]'); check(not p.is_checked('#sheet [data-act="ship"]'), 'unticking takes the mark off')
     p.click('#sheet [data-act="ship"]'); close(p); synced(p)
     check(len([q for q in p.evaluate('queue') if q['kind'] == 'ship']) == 0, 'the three taps were sent and cleared')
     inv = [r for r in rows('Invoices') if r[0] == 3][0]; sale = [r for r in rows('Movements') if r[7] == '3']
     check(inv[3] == 'Sale' and inv[5] == 'Ben Cruz' and inv[7] == 1700 and inv[8] == 'Delivered', f'invoice row: {inv}')
-    check(len(sale) == 1 and sale[0][4:7] == ['Out', 1, 'Sale'] and sale[0][9] == 1200, f'issuing wrote the stock-out with Ref = invoice number: {sale}')
-    ln = [r for r in rows('Invoice lines') if r[0] == 3][0]; check(ln[4:8] == [1, 1800, 1700, 1200], f'line keeps listed price, charged price and cost: {ln}')
+    check(len(sale) == 1 and sale[0][4:7] == ['Out', 1, 'Sale'] and sale[0][9] == '', f'issuing wrote the stock-out with Ref = invoice number, with no cost: {sale}')
+    ln = [r for r in rows('Invoice lines') if r[0] == 3][0]; check(ln[4:8] == [1, 1800, 1700, ''], f'line keeps listed price, charged price and the blank cost: {ln}')
     check(stock_map(p)['Grandista Son Goku'] == 4, 'sale took one out of stock')
     tab(p, 'Sales'); check('delivered' in p.inner_text('.item:has-text("No. 3")'), 'the invoice list shows the delivered tag')
     h = home(p)
-    check('Today\n₱4,700' in h and 'Month\n₱4,700' in h and 'Margin\n₱1,900' in h and 'invoices this month' not in h, 'Home numbers strip after two sales')
+    check('Today\n₱4,700' in h and 'Month\n₱4,700' in h and 'Margin\n–' in h and 'the items sold have no cost on file' in h and 'invoices this month' not in h, 'Home numbers strip after two sales whose oldest units had no cost')
     p.click('#view .strip'); check('on' in p.get_attribute('#tabs button[data-t="sell"]', 'class') and p.is_visible('#invList .item'), 'tapping the numbers strip opens the invoice list')
 
     # ---- several toys on one invoice; known customer brings the contact; many lines paginate
@@ -289,22 +260,22 @@ with sync_playwright() as pw:
     check(cp[11] == 'Cancelled' and cp[12] == 200 and len(rows('Movements')) == n_moves, f'cancellation in the sheet, stock untouched: {cp[11:13]}')
 
     # ---- a second phone sees the same documents
-    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = page(ctx2, 'p2 ')
     p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 stock matches: {stock_map(p2)}')
     tab(p2, 'Sales'); check(len(p2.query_selector_all('#invList .item')) == 5, 'device 2 lists all five documents')
-    p2.click('.item:has-text("No. 3")'); check('Margin ₱500' in p2.inner_text('#sheet') and 'Restock' in p2.inner_text('#sheet'), 'device 2 sees margin and the return'); close(p2)
+    p2.click('.item:has-text("No. 3")'); check('Margin unknown' in p2.inner_text('#sheet') and 'Restock' in p2.inner_text('#sheet'), 'device 2 sees the margin and the return'); close(p2)
 
     # ---- offline: invoice issued with no signal waits, then lands once
     ctx.set_offline(True)
     new_sale(p); pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.click('button:has-text("Issue invoice no. 6")')
     check('waiting' in p.inner_text('#sheet') and 'Delete this invoice' in p.inner_text('#sheet'), 'offline invoice is marked waiting and can still be deleted')
-    name, magic, pages = pdf(p, 'invoice-6-offline'); check(magic == b'%PDF-', 'PDF works offline'); close(p)
+    name, size = save_img(p, 'invoice-6-offline'); check(size and size[0] == 1190, 'the image works offline'); close(p)
     check(stock_map(p)['Grandista Son Goku'] == 4, 'offline invoice already counts against stock')
     ctx.set_offline(False); p.click('#syncBtn'); synced(p)
     check(len([r for r in rows('Invoices') if r[0] == 6]) == 1 and len([r for r in rows('Movements') if r[7] == '6']) == 1, 'offline invoice reached the sheet once')
 
-    # ---- shop details and logo appear on the PDF; long invoices paginate
+    # ---- shop details and logo appear on the image
     logo = f'{SHOTS}/logo.png'
     p.evaluate("""() => { const c = document.createElement('canvas'); c.width = 300; c.height = 120; const x = c.getContext('2d'); x.fillStyle = '#e4572e'; x.fillRect(0, 0, 300, 120); x.fillStyle = '#fff'; x.font = '700 48px sans-serif'; x.fillText('SHOP', 70, 78); window._logo = c.toDataURL('image/png'); }""")
     import base64; open(logo, 'wb').write(base64.b64decode(p.evaluate('window._logo').split(',')[1]))
@@ -313,12 +284,8 @@ with sync_playwright() as pw:
     check(p.input_value('#sShop') == 'Sample Toy Shop', 'typed shop fields survive the logo upload'); p.screenshot(path=f'{SHOTS}/15-settings.png')
     p.click('#sheet [data-act="savePrefs"]')
     check(home(p) and p.inner_text('#title') == 'Sample Toy Shop', 'with a shop name set, Home is headed by it')
-    tab(p, 'Sales'); p.click('.item:has-text("No. 4")'); pdf(p, 'invoice-4-branded'); close(p)
-    p.click('.item:has-text("No. 1")'); pdf(p, 'receipt-1-branded'); close(p)
-    many = p.evaluate("""async () => { const v = live().invs.find(x => x.no === 4); const big = { ...v, lines: Array.from({ length: 45 }, (_, i) => ({ ...v.lines[0], name: 'Sample toy with a fairly long product name, variant ' + (i + 1) })) }; const b = await docPdf(big); return Array.from(new Uint8Array(await b.arrayBuffer())); }""")
-    open(f'{SHOTS}/long.pdf', 'wb').write(bytes(many)); info = subprocess.run(['pdfinfo', f'{SHOTS}/long.pdf'], capture_output=True, text=True).stdout
-    subprocess.run(['pdftoppm', '-r', '50', '-png', f'{SHOTS}/long.pdf', f'{SHOTS}/long'])
-    check(int(re.search(r'Pages:\s+(\d+)', info).group(1)) >= 2, 'a 45-line invoice runs onto more pages')
+    tab(p, 'Sales'); p.click('.item:has-text("No. 4")'); save_img(p, 'invoice-4-branded'); close(p)
+    p.click('.item:has-text("No. 1")'); save_img(p, 'receipt-1-branded'); close(p)
 
     # ---- invoice number already used in the sheet (second phone): renumbered, both kept
     ctx2.set_offline(True)
@@ -352,16 +319,39 @@ with sync_playwright() as pw:
     check(ep[11:13] == ['Cancelled', 0], f'full refund in the sheet: {ep[11:13]}')
     check('promised beyond supply' not in home(p), 'a cancelled pre-order is no longer owed')
 
-    # ---- the invoice PDF is drawn with literal colours: the same bytes in light and dark
-    pdf_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const b = await docPdf(v); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
-    light, dark = p.evaluate(pdf_bytes, 'light'), p.evaluate(pdf_bytes, 'dark')
-    check(len(light) > 1000 and light == dark, f'PDF bytes identical in light and dark ({len(light)} bytes)')
+    # ---- the invoice image is drawn with literal colours: the same bytes in light and dark
+    png_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const [b] = await docPngs(drawDoc(v)); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
+    light, dark = p.evaluate(png_bytes, 'light'), p.evaluate(png_bytes, 'dark')
+    check(len(light) > 1000 and light == dark and png_size(bytes(light)) is not None, f'image bytes identical in light and dark ({len(light)} bytes)')
     p.evaluate("prefs.theme = 'auto'; applyTheme()")
 
-    # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
-    cx = b.new_context(viewport={'width': 390, 'height': 844}); q = cx.new_page(); q.on('pageerror', lambda e: errors.append('needs ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
+    # ---- a 40-line invoice continues on a second image: both download with no tab, the second repeats the column header with its page number
+    cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = page(cl, 'long '); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
-      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, min: null, active: true }, extra), false);
+      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, active: true }, false);
+      dirty(); qAdd('invoice', { invoice: { id: 'vlong', no: nextNo(), date: todayISO(), custId: custFor('Ana Reyes', ''), lines: Array.from({ length: 40 }, (_, i) => ({ sku: 'L' + (i + 1), qty: 1, list: 100, price: 100, cost: null })), preId: '' } }); commit();
+      const fill = CanvasRenderingContext2D.prototype.fillText; window._drawn = [];
+      CanvasRenderingContext2D.prototype.fillText = function (s, ...a) { window._drawn.push(String(s)); return fill.call(this, s, ...a); };
+    }""")
+    tab(q, 'Sales'); q.click('.item:has-text("No. 1")')
+    got, tabs = [], []; q.on('download', lambda d: got.append(d)); cl.on('page', lambda t: tabs.append(t))
+    q.click('button:has-text("Save image")')
+    for _ in range(50):
+        if len(got) == 2: break
+        q.wait_for_timeout(100)
+    for d in got: d.save_as(f'{SHOTS}/{d.suggested_filename}')
+    sizes = [png_size(open(f'{SHOTS}/{d.suggested_filename}', 'rb').read()) for d in got]
+    check([d.suggested_filename for d in got] == ['Invoice-1-1.png', 'Invoice-1-2.png'] and not tabs and '2 images downloaded' in q.inner_text('#toast'), f'a 40-line invoice downloads two images and opens no tab: {[d.suggested_filename for d in got]}')
+    check(all(s and s[0] == 1190 and s[1] <= 2048 for s in sizes) and len(sizes) == 2, f'each image is a PNG 1190 px wide and at most 2048 px tall: {sizes}')
+    drawn = q.evaluate('window._drawn')
+    check(drawn.count('ITEM') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
+    check(q.evaluate('canCopyImg') and not q.is_visible('#sheet button:has-text("Copy image")'), 'Copy image is hidden for a document with several images')
+    cl.close()
+
+    # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
+    cx = b.new_context(viewport={'width': 390, 'height': 844}); q = page(cx, 'needs '); q.goto(APP); q.wait_for_selector('#tabs button')
+    q.evaluate("""() => {
+      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, active: true }, extra), false);
       const mv = (sku, qty) => qMove({ id: 'm' + uid(), date: todayISO(), sku, dir: 'In', qty, reason: 'Opening', ref: '', note: '', cost: null });
       const pre = (sku, cust, qty, paid) => { const c = custFor(cust, '0917'); qAdd('pre', { pre: { id: 'p' + uid(), date: todayISO(), custId: c, sku, qty, price: 100, paid, note: '', invId: 'v' + uid(), no: nextNo() } }); dirty(); };
       it('A', 'Alpha'); mv('A', 9); it('B', 'Bravo', { price: null }); mv('B', 1); it('C', 'Charlie', { relCheck: true, rel: '2024' }); mv('C', 5); it('D', 'Delta'); dirty();
@@ -372,12 +362,12 @@ with sync_playwright() as pw:
       commit();
     }""")
     names = lambda: [e.inner_text() for e in q.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Check 1 release date']
-    check(names() == want[:4] and q.inner_text('#view .badge') == '9' and q.inner_text('#view .more') == 'See 5 more', f'phone shows the first four rows, the badge counts all nine jobs: {names()}')
+    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Add the cost of 15 units', 'Check 1 release date']
+    check(names() == want[:4] and q.inner_text('#view .badge') == '10' and q.inner_text('#view .more') == 'See 6 more', f'phone shows the first four rows, the badge counts all ten jobs: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-collapsed.png')
-    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 5 more shows every row in the fixed order: {names()}')
+    q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 6 more shows every row in the fixed order: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-expanded.png', full_page=True)
-    q.evaluate('render()'); check(len(names()) == 9, 'the expanded list survives a re-render')
+    q.evaluate('render()'); check(len(names()) == 10, 'the expanded list survives a re-render')
     tab(q, 'Stock'); tab(q, 'Home'); check(len(names()) == 4, 'entering Home from the tab bar collapses it again')
     q.click('#view .item:has-text("Ship Ben")'); check(q.input_value('[data-b="inv.cust"]') == 'Ben' and 'For the pre-order of Ben' in q.inner_text('#view'), 'a ready row opens New sale pre-filled from that pre-order')
     q.click('#backBtn')
@@ -386,10 +376,9 @@ with sync_playwright() as pw:
     check(n[1] == 'Ship 4 pre-orders now in stock' and not any(x.startswith('Ship ') and 'pre-orders' not in x for x in n), f'four ready pre-orders collapse into one row: {n[:3]}')
     q.click('#view .item:has-text("Ship 4 pre-orders")'); check(q.inner_text('#title') == 'Orders' and q.get_attribute('#view button[data-s="pre"]', 'class') == 'on', 'that row opens the pre-order list')
     q.set_viewport_size({'width': 1280, 'height': 800}); tab(q, 'Home')
-    check(len(names()) == 8 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
+    check(len(names()) == 9 == int(q.inner_text('#view .badge')) and not q.is_visible('#view .more'), 'a desktop window shows every row')
     cx.close()
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()
