@@ -87,7 +87,7 @@ assert.ok(r.results.every(x => x.ok)); assert.equal(r.results[0].sku, renum.sku)
 assert.equal(r.sync.rows, before.rows, 'no duplicate movement'); assert.equal(r.sync.items.length, before.items.length, 'no duplicate item');
 
 // ---------- v2: toy details, receipt cost, customers, supplier orders, pre-orders, invoices, returns ----------
-['Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns'].forEach(n => assert.ok(sheet(n), n + ' tab exists'));
+['Customers', 'Suppliers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns'].forEach(n => assert.ok(sheet(n), n + ' tab exists'));
 
 // 9. item details: stored, patched, validated; On hand is a written number
 r = add([
@@ -116,22 +116,32 @@ assert.equal(r.sync.custs.find(c => c.id === 'c-ana').contact, '+63 917 000 0000
 r = add([{ id: 'k4', kind: 'cust', cust: { id: 'c-ana', name: 'Ana Reyes', contact: 'm.me/ana' } }]);
 assert.equal(r.sync.custs.length, 2); assert.equal(r.sync.custs.find(c => c.id === 'c-ana').contact, 'm.me/ana');
 
-// 12. supplier orders: ordered, received with cost (movement Ref = order ID), cancelled, idempotent
-const order = (id, sku, qty, extra = {}) => ({ id: 'o' + id, kind: 'order', order: { id, date: '2026-11-10', sku, qty, expected: '2026-12-01', note: '', ...extra } });
-r = add([order('so1', 'T0100', 6), order('so2', 'T0100', 2, { expected: '' }), order('so3', 'T9999', 1), order('so4', 'T0100', 1, { expected: 'soon' })]);
-assert.ok(res(r).oso1.ok && res(r).oso2.ok); assert.match(res(r).oso3.error, /Unknown product/); assert.match(res(r).oso4.error, /Expected arrival/);
-assert.deepEqual(r.sync.orders.map(o => o.status), ['Ordered', 'Ordered']);
+// 12. suppliers; supplier orders as one row per line, no stock until a line is received, in parts (Ref = order ID), retry safe
+r = add([{ id: 'su1', kind: 'supplier', supplier: { id: 'sup-a', name: 'Toy Hub', contact: '+63 2 000', note: '=net 30' } }, { id: 'su2', kind: 'supplier', supplier: { id: 'sup-b', name: ' ' } }]);
+assert.ok(res(r).su1.ok); assert.match(res(r).su2.error, /name is required/);
+assert.deepEqual(r.sync.sups, [{ id: 'sup-a', name: 'Toy Hub', contact: '+63 2 000', note: '=net 30' }]);
+const order = (id, lines, extra = {}) => ({ id: 'o' + id, kind: 'order', order: { id, date: '2026-11-10', supId: 'sup-a', expected: '2026-12-01', note: '', lines, ...extra } });
 let rowsBefore = full().rows;
-r = add([{ id: 'rc0', kind: 'receive', orderId: 'so1', date: '2026-11-14', qty: 5, costs: [1300, -5, 1300, 1300, 1300] },
-  { id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-14', qty: 5, costs: [1300, 1300, 1250, null, 1300] }, { id: 'oc2', kind: 'orderCancel', orderId: 'so2' },
-  { id: 'rc2', kind: 'receive', orderId: 'so2', date: '2026-11-14', qty: 2, costs: [1, 1] }, { id: 'oc1', kind: 'orderCancel', orderId: 'so1' }]);
-assert.match(res(r).rc0.error, /Unit cost/, 'one bad cost refuses the whole receipt');
-assert.ok(res(r).rc1.ok && res(r).oc2.ok); assert.match(res(r).rc2.error, /cancelled/); assert.match(res(r).oc1.error, /already received/);
-let rcv = full().moves.filter(m => m.ref === 'so1');
-assert.deepEqual(rcv.map(m => [m.id, m.sku, m.dir, m.qty, m.reason, m.cost, m.unit]), [1300, 1300, 1250, null, 1300].map((c, k) => ['rcv-so1-' + (k + 1), 'T0100', 'In', 1, 'Restock', c, 'T0100-' + (k + 5)]), 'one row per unit, each with its cost; blank allowed; each unit gets the next SKU after the 4 units of c1');
-assert.deepEqual(full().orders.map(o => [o.status, o.recQty, o.recDate]), [['Received', 5, '2026-11-14'], ['Cancelled', null, '']]);
-r = add([{ id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-15', qty: 9, costs: [1] }, order('so1', 'T0100', 6)]);
-assert.ok(r.results.every(x => x.ok)); assert.equal(full().rows, rowsBefore + 5, 'receiving twice adds nothing more');
+r = add([order('so1', [{ id: 'sl1', sku: 'T0100', qty: 6, cost: 1300 }, { id: 'sl2', sku: 'T0100', qty: 2, cost: null }]), order('so3', [{ id: 'sl3', sku: 'T0100', qty: 1 }, { id: 'sl4', sku: 'T9999', qty: 1 }]),
+  order('so5', [{ id: 'sl5', sku: 'T0100', qty: 1 }], { expected: 'soon' }), order('so6', [{ id: 'sl6', sku: 'T0100', qty: 1 }], { supId: 'nobody' })]);
+assert.ok(res(r).oso1.ok); assert.match(res(r).oso3.error, /Unknown product/); assert.match(res(r).oso5.error, /Expected arrival/); assert.match(res(r).oso6.error, /Unknown supplier/);
+assert.deepEqual(r.sync.orders.map(o => [o.id, o.orderId, o.supId, o.sup, o.sku, o.qty, o.cost, o.expected, o.recQty, o.status]),
+  [['sl1', 'so1', 'sup-a', 'Toy Hub', 'T0100', 6, 1300, '2026-12-01', 0, 'Ordered'], ['sl2', 'so1', 'sup-a', 'Toy Hub', 'T0100', 2, null, '2026-12-01', 0, 'Ordered']], 'a bad line refuses its whole order');
+assert.equal(full().rows, rowsBefore, 'an order moves no stock');
+const rcv = (id, lineId, from, costs) => ({ id, kind: 'receive', lineId, date: '2026-11-14', from, costs });
+r = add([rcv('rc0', 'sl1', 0, [1300, -5]), rcv('rc1', 'sl1', 0, [1300, 1300, 1250]), rcv('rc2', 'sl1', 3, [5, 5, 5, 5])]);
+assert.match(res(r).rc0.error, /Unit cost/, 'one bad cost refuses the whole receipt'); assert.ok(res(r).rc1.ok);
+assert.match(res(r).rc2.error, /Only 3 of Grandista Son Goku are still due/);
+assert.deepEqual(full().orders.map(o => [o.id, o.recQty, o.status]), [['sl1', 3, 'Ordered'], ['sl2', 0, 'Ordered']], 'a short line stays open for the rest');
+r = add([rcv('rc1', 'sl1', 0, [1300, 1300, 1250]), rcv('rc3', 'sl1', 3, [null, 1300, 1300]), rcv('rc3', 'sl1', 3, [null, 1300, 1300]), order('so1', [{ id: 'sl1', sku: 'T0100', qty: 6 }])]);
+assert.ok(r.results.every(x => x.ok), 'the first part again, then the rest twice, then the order again');
+assert.deepEqual(full().moves.filter(m => m.ref === 'so1').map(m => [m.id, m.sku, m.dir, m.qty, m.reason, m.cost, m.unit]), [1300, 1300, 1250, null, 1300, 1300].map((c, k) => ['rcv-sl1-' + (k + 1), 'T0100', 'In', 1, 'Restock', c, 'T0100-' + (k + 5)]), 'one row per unit, each with its cost; blank allowed; each unit gets the next SKU after the 4 units of c1');
+assert.equal(full().rows, rowsBefore + 6, 'each unit written once');
+// orderCancel closes the rest of a line, keeps what was received, and refuses a received line; a new receive on it is refused, a retry is not
+r = add([rcv('rc4', 'sl2', 0, [700]), { id: 'oc2', kind: 'orderCancel', lineId: 'sl2' }, { id: 'oc2', kind: 'orderCancel', lineId: 'sl2' }, rcv('rc4', 'sl2', 0, [700]), rcv('rc5', 'sl2', 1, [700]), { id: 'oc3', kind: 'orderCancel', lineId: 'sl1' }]);
+assert.ok(res(r).rc4.ok && res(r).oc2.ok); assert.match(res(r).rc5.error, /cancelled/); assert.match(res(r).oc3.error, /already received/);
+assert.deepEqual(full().orders.map(o => [o.id, o.recQty, o.status]), [['sl1', 6, 'Received'], ['sl2', 1, 'Cancelled']]);
+assert.equal(full().rows, rowsBefore + 7);
 
 // 13. pre-orders: receipt numbered 1, no movement, partial payment, validation
 const pre = (id, extra = {}) => ({ id: 'p' + id, kind: 'pre', pre: { id, date: '2026-11-12', custId: 'c-ana', sku: 'T0100', qty: 2, price: 1700, paid: 1000, note: '', invId: 'rcpt-' + id, no: 1, ...extra } });
@@ -213,11 +223,11 @@ r = add([ret('rt1', 'T0002', 1, 'Restock'), ret('rt8', 'T0002', 1, 'Restock')]);
 assert.ok(res(r).rrt1.ok); assert.match(res(r).rrt8.error, /Only 0 of/); assert.equal(full().rows, rowsBefore + 2);
 
 // 18. a renumbered toy carries its documents with it; a refused toy blocks them
-r = add([{ ...item('T0001', 'Gigo Luffy'), auto: true }, order('so9', 'T0001', 3), invoice('inv9', 20, [{ sku: 'T0001', qty: 1, price: 900 }]),
-  { ...item('T0888', 'Gigo Luffy'), id: 'dupname2' }, order('so10', 'T0888', 1)]);
+r = add([{ ...item('T0001', 'Gigo Luffy'), auto: true }, order('so9', [{ id: 'sl9', sku: 'T0001', qty: 3 }]), invoice('inv9', 20, [{ sku: 'T0001', qty: 1, price: 900 }]),
+  { ...item('T0888', 'Gigo Luffy'), id: 'dupname2' }, order('so10', [{ id: 'sl10', sku: 'T0888', qty: 1 }])]);
 let z18 = res(r), luffy = z18.iT0001.sku;
 assert.ok(luffy && luffy !== 'T0001' && z18.oso9.ok && z18.vinv9.ok);
-assert.equal(r.sync.orders.find(o => o.id === 'so9').sku, luffy); assert.equal(r.sync.invs.find(i => i.id === 'inv9').lines[0].sku, luffy);
+assert.equal(r.sync.orders.find(o => o.id === 'sl9').sku, luffy); assert.equal(r.sync.invs.find(i => i.id === 'inv9').lines[0].sku, luffy);
 assert.equal(full().moves.find(m => m.id === 'inv9-1').sku, luffy);
 assert.match(z18.dupname2.error, /already exists/); assert.match(z18.oso10.error, /refused/);
 
@@ -347,14 +357,15 @@ assert.deepEqual(G(), Object.fromEntries(Object.keys(names()).map(k => [k, st[k]
 assert.equal(G().S9, 0);
 
 // (f) Browse: every item with its numbers, rewritten on add and on sync; a filter stays
-W.add([{ id: 'f1', kind: 'order', order: { id: 'fo1', date: '2026-11-10', sku: 'S5', qty: 4, expected: '', note: '' } }, move('f2', 'S5', 'In', 2, 'Restock', { cost: 100 }), move('f3', 'S5', 'In', 2, 'Restock', { cost: 200 }), move('f4', 'S5', 'Out', 1, 'Sale'), preD('f5', 20)]);
+W.add([{ id: 'fs', kind: 'supplier', supplier: { id: 'fs', name: 'Supplier F' } }, { id: 'f1', kind: 'order', order: { id: 'fo1', date: '2026-11-10', supId: 'fs', expected: '', note: '', lines: [{ id: 'fl1', sku: 'S5', qty: 2 }, { id: 'fl2', sku: 'S5', qty: 5 }] } },
+  { id: 'f0', kind: 'receive', lineId: 'fl2', date: '2026-11-11', from: 0, costs: [100, 150, 200] }, move('f2', 'S5', 'In', 2, 'Restock', { cost: 100 }), move('f4', 'S5', 'Out', 2, 'Sale'), preD('f5', 20)]);
 W.add([{ ...preD('f6', 21), pre: { ...preD('f6', 21).pre, sku: 'S5', qty: 2, paid: 0 } }]);
 const br = W.sheet('Browse');
 assert.equal(br.frozen, 1);
 assert.deepEqual(br.getRange(1, 1, 1, 17).getValues()[0], ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
 let bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
 assert.equal(Object.keys(bs).length, Object.keys(names()).length, 'one row per item');
-assert.deepEqual(bs.S5.slice(4, 11), [4, 4, 2, 6, '100, 100, 200, 200', 600, 0], 'on hand, incoming, owed, left to promise, units on hand (the sale took the uncosted unit, the oldest; an In of Qty 2 has no unit SKUs), stock value, units without cost');
+assert.deepEqual(bs.S5.slice(4, 11), [4, 4, 2, 6, 'S5-3 150, S5-4 200, 100, 100', 550, 0], 'on hand, incoming (Qty less Received qty over Ordered lines), owed, left to promise, units on hand (the sale took the uncosted unit, the oldest; an In of Qty 2 has no unit SKUs), stock value, units without cost');
 assert.deepEqual(bs.S2.slice(0, 4), ['S2', 'Item C renamed', 5, 'Yes']); assert.deepEqual(bs.S2.slice(8, 11), ['?, ?, ?, ?, ?, ?, ?, S2-8 ?', 0, 8], 'a unit without a cost shows as ?; the In of Qty 7 used SKU numbers 1 to 7');
 assert.deepEqual(bs.S9.slice(4, 11), [0, 0, 0, 0, '', '', ''], 'nothing on hand leaves the cost columns blank');
 assert.ok(br.textCols.has(9), 'Units on hand is a text column');
@@ -401,12 +412,12 @@ W.add([{ id: 'ibw', kind: 'inboxDone', rows: [{ row: 5, name: 'Box Three', added
 assert.equal(ibx.cell(5, 13), 'Working', 'a row with a status is never overwritten');
 
 // (h) setup(): warning-only protection on the app tabs and none on the Inbox; running it again keeps every cell and adds no second protection
-const tabsH = ['Products', 'Movements', 'Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Inbox'];
+const tabsH = ['Products', 'Movements', 'Customers', 'Suppliers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns', 'Inbox'];
 const snap = () => Object.fromEntries(tabsH.map(n => [n, W.sheet(n).rowsOf()]));
-const prot = () => tabsH.slice(0, 8).map(n => W.sheet(n).getProtections().map(p => [p.desc, p.warn]));
+const prot = () => tabsH.slice(0, -1).map(n => W.sheet(n).getProtections().map(p => [p.desc, p.warn]));
 const beforeH = snap();
 vm.runInContext('setup()', W.b);
-assert.deepEqual(prot(), tabsH.slice(0, 8).map(() => [['Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.', true]]), 'warning-only protection on the app tabs');
+assert.deepEqual(prot(), tabsH.slice(0, -1).map(() => [['Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.', true]]), 'warning-only protection on the app tabs');
 assert.deepEqual(W.sheet('Inbox').getProtections(), [], 'the Inbox stays open for Claude');
 assert.deepEqual(snap(), beforeH, 'every cell kept');
 
@@ -434,10 +445,10 @@ assert.deepEqual([onHandU('U4'), brU('U4')[4]], [0, ''], 'a read In of Qty 2 is 
 
 // (k) four units received at four costs, then two sales: each line keeps the cost the app sent, the two newest units stay, oldest first
 const saleU = (id, no, lines) => ({ id: 'v' + id, kind: 'invoice', invoice: { id, no, date: '2026-11-16', custId: 'cu', lines } });
-r = U.add([{ id: 'uo', kind: 'order', order: { id: 'uo1', date: '2026-11-10', sku: 'U1', qty: 4, expected: '', note: '' } },
-  { id: 'ur', kind: 'receive', orderId: 'uo1', date: '2026-11-14', qty: 4, costs: [100, 200, 300, 400] }]);
+r = U.add([{ id: 'us', kind: 'supplier', supplier: { id: 'us', name: 'Supplier U' } }, { id: 'uo', kind: 'order', order: { id: 'uo', date: '2026-11-10', supId: 'us', expected: '', note: '', lines: [{ id: 'uo1', sku: 'U1', qty: 4 }] } },
+  { id: 'ur', kind: 'receive', lineId: 'uo1', date: '2026-11-14', from: 0, costs: [100, 200, 300, 400] }]);
 assert.ok(r.results.every(x => x.ok));
-assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'uo1').map(x => [x[0], x[5], x[9], x[10]]), [['rcv-uo1-1', 1, 100, 'U1-1'], ['rcv-uo1-2', 1, 200, 'U1-2'], ['rcv-uo1-3', 1, 300, 'U1-3'], ['rcv-uo1-4', 1, 400, 'U1-4']], 'each unit received has its SKU in column K');
+assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'uo').map(x => [x[0], x[5], x[9], x[10]]), [['rcv-uo1-1', 1, 100, 'U1-1'], ['rcv-uo1-2', 1, 200, 'U1-2'], ['rcv-uo1-3', 1, 300, 'U1-3'], ['rcv-uo1-4', 1, 400, 'U1-4']], 'each unit received has its SKU in column K');
 assert.deepEqual(brU('U1'), [4, 0, 0, 4, 'U1-1 100, U1-2 200, U1-3 300, U1-4 400', 1000, 0]);
 r = U.add([saleU('us1', 1, [{ sku: 'U1', qty: 1, price: 500, cost: 100 }]), saleU('us2', 2, [{ sku: 'U1', qty: 1, price: 500, cost: 150 }])]);
 assert.ok(r.results.every(x => x.ok));

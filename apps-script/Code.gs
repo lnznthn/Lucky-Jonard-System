@@ -7,8 +7,8 @@
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
  * The app is the writer of the data tabs. Movements, invoice lines and returns are append-only, except that a cost entry
- * rewrites the Unit cost of an In movement while one of its units is on hand. Products, customers,
- * supplier orders, pre-orders and invoices are one row each; only their status-type fields change later.
+ * rewrites the Unit cost of an In movement while one of its units is on hand. Products, customers, suppliers,
+ * supplier order lines, pre-orders and invoices are one row each; only their status-type fields change later.
  * A product is keyed by its Product ID (called sku inside this script and in the JSON); each unit it receives gets a SKU, see unit_().
  * Units leave stock first in, first out, in the order of the Movements tab; see stockOf_().
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
@@ -54,9 +54,13 @@ var T_ = {
   cust: { name: 'Customers', col: 1, head: ['ID', 'Name', 'Contact'], text: ['A:C'],
     from: function (v) { return { id: s_(v[0]), name: s_(v[1]), contact: s_(v[2]) }; },
     to: function (o) { return [o.id, o.name, o.contact]; } },
-  order: { name: 'Supplier orders', col: 1, head: ['ID', 'Date', 'Product ID', 'Product', 'Qty', 'Expected', 'Status', 'Received qty', 'Received on', 'Note'], text: ['A:D', 'F:G', 'I:J'],
-    from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), name: s_(v[3]), qty: Number(v[4]), expected: dateStr_(v[5]), status: s_(v[6]), recQty: num_(v[7]), recDate: dateStr_(v[8]), note: String(v[9]) }; },
-    to: function (o) { return [o.id, o.date, o.sku, o.name, o.qty, o.expected, o.status, blank_(o.recQty), o.recDate, o.note]; } },
+  sup: { name: 'Suppliers', col: 1, head: ['ID', 'Name', 'Contact', 'Note'], text: ['A:D'],
+    from: function (v) { return { id: s_(v[0]), name: s_(v[1]), contact: s_(v[2]), note: String(v[3]) }; },
+    to: function (o) { return [o.id, o.name, o.contact, o.note]; } },
+  // One row per order line, keyed by the line ID. Status is Ordered, Received or Cancelled; a line can be received in parts.
+  order: { name: 'Supplier orders', col: 1, head: ['ID', 'Order ID', 'Date', 'Supplier ID', 'Supplier', 'Product ID', 'Product', 'Qty', 'Cost each', 'Expected', 'Received qty', 'Status', 'Note'], text: ['A:G', 'J:J', 'L:M'],
+    from: function (v) { return { id: s_(v[0]), orderId: s_(v[1]), date: dateStr_(v[2]), supId: s_(v[3]), sup: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), cost: num_(v[8]), expected: dateStr_(v[9]), recQty: Number(v[10]) || 0, status: s_(v[11]), note: String(v[12]) }; },
+    to: function (o) { return [o.id, o.orderId, o.date, o.supId, o.sup, o.sku, o.name, o.qty, blank_(o.cost), o.expected, o.recQty, o.status, o.note]; } },
   pre: { name: 'Pre-orders', col: 1, head: ['ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Product ID', 'Product', 'Qty', 'Price', 'Paid', 'Balance', 'Status', 'Kept', 'Receipt no', 'Invoice no', 'Note'], text: ['A:G', 'L:L', 'P:P'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), custId: s_(v[2]), cust: s_(v[3]), contact: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), price: Number(v[8]), paid: Number(v[9]), balance: Number(v[10]), status: s_(v[11]), kept: num_(v[12]), recNo: num_(v[13]), invNo: num_(v[14]), note: String(v[15]) }; },
     to: function (o) { return [o.id, o.date, o.custId, o.cust, o.contact, o.sku, o.name, o.qty, o.price, o.paid, o.balance, o.status, blank_(o.kept), blank_(o.recNo), blank_(o.invNo), o.note]; } },
@@ -302,7 +306,7 @@ function browseSheet_(ss) {
 function writeBrowse_() {
   var sh = browseSheet_(SpreadsheetApp.getActiveSpreadsheet());
   var m = stockOf_(readMoves_()), inc = {}, owed = {};
-  readTab_('order').forEach(function (o) { if (o.status === 'Ordered') { var k = o.sku.toLowerCase(); inc[k] = (inc[k] || 0) + o.qty; } });
+  readTab_('order').forEach(function (o) { if (o.status === 'Ordered') { var k = o.sku.toLowerCase(); inc[k] = (inc[k] || 0) + o.qty - o.recQty; } });
   readTab_('pre').forEach(function (p) { if (p.status === PRE_OPEN_) { var k = p.sku.toLowerCase(); owed[k] = (owed[k] || 0) + p.qty; } });
   var rows = readItems_().map(function (it) {
     var k = it.sku.toLowerCase(), have = m.stock[k] || 0, u = m.units[k] || [], i = inc[k] || 0, o = owed[k] || 0, val = 0, none = 0;
@@ -341,7 +345,7 @@ function raiseRev_() { PropertiesService.getScriptProperties().setProperty('move
  * Returns every item and document plus the movement rows the app does not have yet.
  * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
- * Customers, supplier orders, pre-orders, invoices (with their lines), returns and waiting Inbox rows are always sent whole.
+ * Customers, suppliers, supplier order lines, pre-orders, invoices (with their lines), returns and waiting Inbox rows are always sent whole.
  * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
@@ -361,7 +365,7 @@ function snapshot_(have) {
   invs.forEach(function (x) { x.lines = []; byInv[x.id] = x; });
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost }); });
   return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), orders: readTab_('order'), pres: readTab_('pre'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
+    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), pres: readTab_('pre'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
 }
 
 // ---------- validation ----------
@@ -445,10 +449,13 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * edit        sku, patch                                               change an item's details
  * move        move { id, date, sku, dir, qty, reason, ref, note, cost } one stock movement
  * cust        cust { id, name, contact }                               new customer, or new details for one
- * order       order { id, date, sku, qty, expected, note }             supplier order (status Ordered)
- * receive     orderId, date, qty, costs                                order Received + one In/Restock movement per unit, rcv-<orderId>-1 ...,
- *                                                                      Ref = order ID, Unit cost costs[k-1] (a number, or null for blank)
- * orderCancel orderId                                                  order Cancelled
+ * supplier    supplier { id, name, contact, note }                     new supplier, or new details for one
+ * order       order { id, date, supId, expected, note, lines: [{ id, sku, qty, cost }] }
+ *                                                                      one Supplier orders row per line (Ordered); a line ID on file is skipped
+ * receive     lineId, date, from, costs                                units from+1 ... from+n of a line (n = costs.length): one In/Restock per unit,
+ *                                                                      rcv-<lineId>-<from+k>, Ref = order ID, Unit cost costs[k-1] (a number, or null
+ *                                                                      for blank); Received qty = max(it, from + n), Received when it reaches Qty
+ * orderCancel lineId                                                   line Cancelled; what was received stays
  * pre         pre { id, date, custId, sku, qty, price, paid, note, invId, no }  pre-order (Open) + receipt; no movement
  * prePay      preId, paid                                              new total paid on an open pre-order
  * preCancel   preId, kept                                              pre-order Cancelled; kept = deposit kept, 0 = full refund; no movement
@@ -513,7 +520,7 @@ function keyRows_(sh, col, lower) {
 // On Movements only the Unit cost (column J) is ever written in place, by a cost entry.
 function tabsOf_(p) {
   var out = [['Products', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
-  ['cust', 'order', 'pre', 'inv'].forEach(function (k) { out.push([T_[k].name, T_[k].col, idKey_, p.tabs[k], T_[k].to, T_[k].head.length]); });
+  ['cust', 'sup', 'order', 'pre', 'inv'].forEach(function (k) { out.push([T_[k].name, T_[k].col, idKey_, p.tabs[k], T_[k].to, T_[k].head.length]); });
   out.push(['Movements', 1, idKey_, p.moves, function (m) { return [blank_(m.cost)]; }, 1, 10]);
   return out;
 }
@@ -648,8 +655,8 @@ function plan_(entries, skip) {
   var bySku = {}, byName = {}, existingIds = {}, unitNo = {};
   items.forEach(function (it) { bySku[it.sku.toLowerCase()] = it; byName[norm_(it.name)] = it; });
   moveList.forEach(function (m) { existingIds[m.id] = true; unit_(unitNo, m); });
-  var custs = readTab_('cust'), orders = readTab_('order'), pres = readTab_('pre'), invs = readTab_('inv'), lines = readTab_('line'), rets = readTab_('ret');
-  var custById = index_(custs, 'id'), orderById = index_(orders, 'id'), preById = index_(pres, 'id'), invById = index_(invs, 'id'), invByNo = index_(invs, 'no'), retById = index_(rets, 'id');
+  var custs = readTab_('cust'), sups = readTab_('sup'), orders = readTab_('order'), pres = readTab_('pre'), invs = readTab_('inv'), lines = readTab_('line'), rets = readTab_('ret');
+  var custById = index_(custs, 'id'), supById = index_(sups, 'id'), orderById = index_(orders, 'id'), preById = index_(pres, 'id'), invById = index_(invs, 'id'), invByNo = index_(invs, 'no'), retById = index_(rets, 'id');
   var newItems = [], newMoves = [], results = [], remap = {}, refused = {}, marks = [], who = null;
   // Every record remembers the entries that changed it (_by), so a row that cannot be written fails exactly those.
   function touch_(o) { o._dirty = true; o._by = o._by || []; if (o._by.indexOf(who) < 0) o._by.push(who); }
@@ -729,30 +736,45 @@ function plan_(entries, skip) {
         if (!have_) { have_ = made_({ id: cid }); custs.push(have_); custById[cid] = have_; } else touch_(have_);
         have_.name = cname; have_.contact = text_(c.contact, 120);
 
+      } else if (e.kind === 'supplier') {
+        var su = e.supplier || {}, suid = id_(su.id, 'Supplier'), suname = text_(su.name, 120);
+        if (!suname) throw new Error('Supplier name is required');
+        var hs = supById[suid];
+        if (!hs) { hs = made_({ id: suid }); sups.push(hs); supById[suid] = hs; } else touch_(hs);
+        hs.name = suname; hs.contact = text_(su.contact, 120); hs.note = text_(su.note, 300);
+
       } else if (e.kind === 'order') {
-        var o = e.order || {}, oid = id_(o.id, 'Supplier order');
-        if (!orderById[oid]) {
-          var oit = toy_(o.sku);
-          var ord = { id: oid, date: date_(o.date), sku: oit.sku, name: oit.name, qty: qty_(o.qty), expected: s_(o.expected) ? date_(o.expected, 'Expected arrival') : '', status: 'Ordered', recQty: null, recDate: '', note: text_(o.note, 300) };
-          orders.push(made_(ord)); orderById[oid] = ord;
-        }
+        // Every line is checked before any is made, so a bad line refuses the whole order.
+        var o = e.order || {}, oid = id_(o.id, 'Supplier order'), osu = supById[s_(o.supId)];
+        if (!osu) throw new Error('Unknown supplier');
+        if (!o.lines || !o.lines.length) throw new Error('An order needs at least one product');
+        var odate = date_(o.date), oexp = s_(o.expected) ? date_(o.expected, 'Expected arrival') : '', onote = text_(o.note, 300);
+        o.lines.map(function (l) {
+          var lit = toy_(l.sku);
+          return { id: id_(l.id, 'Order line'), orderId: oid, date: odate, supId: osu.id, sup: osu.name, sku: lit.sku, name: lit.name, qty: qty_(l.qty), cost: moneyOrNull_(l.cost, 'Cost each'), expected: oexp, recQty: 0, status: 'Ordered', note: onote };
+        }).forEach(function (ol) { if (!orderById[ol.id]) { orders.push(made_(ol)); orderById[ol.id] = ol; } });
 
       } else if (e.kind === 'receive') {
-        var ro = orderById[s_(e.orderId)];
-        if (!ro) throw new Error('Unknown supplier order');
-        if (ro.status === 'Cancelled') throw new Error('That supplier order was cancelled');
-        if (ro.status !== 'Received') {
-          // One movement per unit with its own cost; a blank cost is allowed and can be typed later.
-          var rq = qty_(e.qty), rd = date_(e.date), rcit = toy_(ro.sku), rcs = [];
-          for (var j = 0; j < rq; j++) rcs.push(moneyOrNull_((e.costs || [])[j], 'Unit cost'));
-          rcs.forEach(function (c, j) { pushMove_('rcv-' + ro.id + '-' + (j + 1), rd, rcit, 'In', 1, 'Restock', ro.id, '', c); });
-          ro.status = 'Received'; ro.recQty = rq; ro.recDate = rd; touch_(ro);
+        // One movement per unit with its own cost; a blank cost is allowed and can be typed later. When every movement is
+        // already on file this is a retry and changes nothing, even on a line received or cancelled since.
+        var ro = orderById[s_(e.lineId)];
+        if (!ro) throw new Error('Unknown supplier order line');
+        var rf = Number(e.from), rcs = (e.costs || []).map(function (c) { return moneyOrNull_(c, 'Unit cost'); }), rn = qty_(rcs.length);
+        if (!(rf >= 0) || Math.floor(rf) !== rf) throw new Error('Received so far must be a whole number');
+        var rids = rcs.map(function (c, j) { return 'rcv-' + ro.id + '-' + (rf + j + 1); });
+        if (!rids.every(function (id) { return existingIds[id]; })) {
+          if (ro.status === 'Cancelled') throw new Error('That order line was cancelled');
+          if (rf + rn > ro.qty) throw new Error('Only ' + Math.max(ro.qty - rf, 0) + ' of ' + ro.name + ' are still due on that order line');
+          var rd = date_(e.date), rcit = toy_(ro.sku);
+          rcs.forEach(function (c, j) { pushMove_(rids[j], rd, rcit, 'In', 1, 'Restock', ro.orderId, '', c); });
         }
+        var rq = Math.max(ro.recQty, rf + rn), rs = ro.status === 'Ordered' && rq >= ro.qty ? 'Received' : ro.status;
+        if (rq !== ro.recQty || rs !== ro.status) { ro.recQty = rq; ro.status = rs; touch_(ro); }
 
       } else if (e.kind === 'orderCancel') {
-        var co = orderById[s_(e.orderId)];
-        if (!co) throw new Error('Unknown supplier order');
-        if (co.status === 'Received') throw new Error('That supplier order was already received');
+        var co = orderById[s_(e.lineId)];
+        if (!co) throw new Error('Unknown supplier order line');
+        if (co.status === 'Received') throw new Error('That order line was already received');
         if (co.status !== 'Cancelled') { co.status = 'Cancelled'; touch_(co); }
 
       } else if (e.kind === 'pre') {
@@ -871,5 +893,5 @@ function plan_(entries, skip) {
 
   var stock = stockOf_(allMoves_()).stock;
   return { results: results, items: items, moves: moveList, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
-    tabs: { cust: custs, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
+    tabs: { cust: custs, sup: sups, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
 }
