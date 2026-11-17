@@ -291,7 +291,7 @@ const ICON = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   stock: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
   sell: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
-  orders: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  orders: '<path d="M2 6h12v10H2zM14 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   activity: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><path d="M13 4v6h4V4zM7 14v6h4v-6z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
@@ -337,7 +337,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
 let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
+  sellSeg: 'list', supTab: 'sups', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -646,10 +646,10 @@ function rerender() { if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn(); else 
 const custList = () => `<datalist id="custList">${[...live().custs.values()].map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`;
 
 /* ---------- rendering ---------- */
-const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Orders']];
+const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Suppliers']];
 // Routes with no phone tab, and the tab that stays lit while they show.
 const ROUTE_TAB = { move: 'stock', activity: 'stock' };
-const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Orders', move: 'Stock in and out', activity: 'Activity' };
+const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Suppliers', move: 'Stock in and out', activity: 'Activity' };
 // Add inventory is the last status tab of Inventory (ui.filter 'add'): the review of the Inbox rows, or the other ways in.
 const addOn = () => prefs.tab === 'stock' && ui.filter === 'add';
 function pageTitle() {
@@ -1222,32 +1222,92 @@ function saveReturn() {
   ui.sub = null; commit(); toast('Return recorded');
 }
 
-/* ---------- Orders: pre-orders and supplier orders ---------- */
+/* ---------- Suppliers: the supplier list, and the supplier-order lines with their order sheet ---------- */
+const dueOf = o => o.qty - (o.recQty || 0);
+/** To-follow units on invoices, per supplier-order line they wait for. */
+function waitingOn() { const m = new Map(); live().invs.forEach(v => v.lines.forEach(l => { if (l.status === 'To follow' && l.orderLine) m.set(l.orderLine, (m.get(l.orderLine) || 0) + l.qty); })); return m; }
 function renderOrders() {
-  if (wide()) { view().innerHTML = preListHtml() + ordListHtml(); return; }   // two tables, one under the other
-  const pre = ui.ordSeg === 'pre';
-  view().innerHTML = `<div class="seg"><button class="${pre ? 'on' : ''}" data-act="ordSeg" data-s="pre">Pre-orders</button><button class="${pre ? '' : 'on'}" data-act="ordSeg" data-s="sup">Supplier orders</button></div>${pre ? preListHtml() : ordListHtml()}`;
+  const o = ui.supTab === 'orders';
+  view().innerHTML = `<div class="seg"><button class="${o ? '' : 'on'}" data-act="supTab" data-s="sups">Suppliers</button><button class="${o ? 'on' : ''}" data-act="supTab" data-s="orders">Orders</button></div>${o ? linesHtml() : supsHtml()}`;
 }
-function preRow(p, ready) {
-  return row(`${esc(p.cust)}${p.status !== PRE_OPEN ? `<span class="tag">${esc(p.status.toLowerCase())}</span>` : ''}${waitTag(p)}`,
-    `${esc(p.name)} × ${p.qty}${ready ? ' · ' + esc(contactOf(p)) : ''} · ${p.status === PRE_OPEN ? (p.balance > 0 ? 'balance ' + money(p.balance) : 'paid in full') : esc(fmtDay(p.date))}`, `data-act="pre" data-id="${esc(p.id)}"`);
+function supsHtml() {
+  const L = live(), rows = [...L.sups.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(s => {
+    const open = L.orders.filter(o => o.supId === s.id && o.status === 'Ordered'); return { s, n: open.length, inc: open.reduce((t, o) => t + dueOf(o), 0) };
+  });
+  const add = `<div><button class="btn primary${wide() ? '' : ' big'}" data-act="sup" data-id="">Add supplier</button></div>`, at = r => `data-act="sup" data-id="${esc(r.s.id)}"`;
+  if (!rows.length) return add + '<p class="empty">No suppliers yet. Add one here, or with its first order.</p>';
+  if (wide()) return add + table('sups', [['Name', r => r.s.name, null, 'name'], ['Contact', r => r.s.contact], ['Open lines', r => r.n, null, 'num'], ['Units incoming', r => r.inc, null, 'num'], ['Note', r => r.s.note, null, 'name']], rows, at);
+  return add + `<div class="list">${rows.map(r => row(esc(r.s.name), [r.s.contact, r.n ? plural(r.n, 'open line') : '', r.s.note].filter(Boolean).map(esc).join(' · '), at(r), r.inc ? `<span class="qty">${r.inc}</span>` : null)).join('')}</div>`;
 }
-function preListHtml() {
-  const L = live(), ready = readyPres(), rs = new Set(ready.map(p => p.id));
-  const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
-  // Desktop: one table, ready to ship first; Status sorts in that order too.
-  const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
-  const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. A product that is not free to sell is saved as a pre-order.</p>';
-  if (wide()) return `${how}
-    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date)), 'date'], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p), 'name'], ['Contact', contactOf], ['Product', p => p.name, null, 'name'], ['Qty', p => p.qty, null, 'num'],
-      ['Price', p => p.price, p => money(p.price), 'money'], ['Paid', p => p.paid, p => money(p.paid), 'money'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'money'], ['Status', rank, p => said[rank(p)]]],
-      [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
-  return `${how}
-    ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
-    ${open.length ? sec('Waiting for stock', `<div class="list">${open.map(p => preRow(p)).join('')}</div>`) : ''}
-    ${!L.pres.length ? `<p class="empty">No pre-orders yet.</p>` : ''}
-    ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(p => preRow(p)).join('')}</div></details>` : ''}`;
+function openSup(id) {
+  const s = id && live().sups.get(id), v = k => esc(s && s[k] ? s[k] : '');
+  openSheet(`<div class="top"><h2>${s ? esc(s.name) : 'New supplier'}</h2>${closeBtn}</div>
+    <div><label for="spName">Name</label><input id="spName" value="${v('name')}" autocomplete="off"></div>
+    <div><label for="spContact">Contact</label><input id="spContact" value="${v('contact')}" placeholder="Phone, Messenger or email" autocomplete="off"></div>
+    <div><label for="spNote">Note</label><input id="spNote" value="${v('note')}" placeholder="Optional" autocomplete="off"></div>
+    <button class="btn primary big" data-act="supSave" data-id="${s ? esc(s.id) : ''}">Save</button>`);
 }
+function saveSup(id) {
+  const name = $('#spName').value.trim().replace(/\s+/g, ' '), contact = $('#spContact').value.trim(), note = $('#spNote').value.trim(), cur = id && live().sups.get(id);
+  if (!name) return toast('Give the supplier a name.');
+  const clash = [...live().sups.values()].find(x => custKey(x.name) === custKey(name) && x.id !== id);
+  if (clash) return toast(`“${clash.name}” already exists.`);
+  if (!cur || name !== cur.name || contact !== String(cur.contact || '') || note !== String(cur.note || '')) qAdd('supplier', { supplier: { id: cur ? cur.id : 's' + uid(), name, contact, note } });
+  closeSheet(); commit(); toast('Saved');
+}
+function linesHtml() {
+  const L = live(), wait = waitingOn(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
+  const add = `<div><button class="btn primary${wide() ? '' : ' big'}" data-act="ordNew">New order</button></div>`, at = o => `data-act="ord" data-id="${esc(o.orderId)}"`;
+  if (!L.orders.length) return add + '<p class="empty">No supplier orders yet. New order opens Add inventory, where Claude’s rows from an order or quotation also arrive.</p>';
+  if (wide()) return add + table('olines', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Supplier', o => o.sup], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.qty, null, 'num'], ['Received', o => o.recQty || 0, null, 'num'],
+    ['Cost each', o => blank(o.cost) ? null : o.cost, o => blank(o.cost) ? '–' : money(o.cost), 'money'], ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'],
+    ['Status', o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), o => o.status === 'Ordered' ? 'On the way' : esc(o.status)], ['Waiting', o => wait.get(o.id) || 0, o => wait.get(o.id) || '', 'num']],
+    [...open, ...closed.slice(0, 200)], at);
+  const line = o => row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`,
+    [o.sup, 'ordered ' + fmtDay(o.date), o.recQty ? `${o.recQty} of ${o.qty} received` : '', o.status === 'Ordered' && o.expected ? 'expected ' + fmtDay(o.expected) : '', wait.get(o.id) ? wait.get(o.id) + ' waiting' : ''].filter(Boolean).map(esc).join(' · '),
+    at(o), `<span class="qty">${o.status === 'Ordered' ? dueOf(o) : o.recQty || 0}</span>`);
+  return add + (open.length ? sec('On the way', `<div class="list">${open.map(line).join('')}</div>`) : '<p class="empty">Nothing on the way.</p>')
+    + (closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(line).join('')}</div></details>` : '');
+}
+// Receiving a line: the quantity starts at what is still due and each unit's cost field at the line's cost each.
+const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], open: false } });
+/** One supplier order (id is its Order ID) with its lines: Receive and Cancel the rest per line, and Receive all. */
+function openOrd(id) {
+  const L = live(), lines = L.orders.filter(o => o.orderId === id); if (!lines.length) return closeSheet();
+  const o = lines[0], sup = L.sups.get(o.supId), open = lines.filter(x => x.status === 'Ordered'), wait = waitingOn();
+  // With one line left to receive, its form shows at once.
+  if (open.length === 1 && !(ui.sub && ui.sub.id === open[0].id)) ui.sub = recvSub(open[0]);
+  const s = ui.sub && ui.sub.mode === 'recv' ? ui.sub : null, l = s && open.find(x => x.id === s.id);
+  openSheet(`
+    <div class="top"><h2>Order from ${esc(o.sup)}</h2>${closeBtn}</div>
+    <p class="hint">${[sup && sup.contact, 'ordered ' + fmtDay(o.date), o.expected ? 'expected ' + fmtDay(o.expected) : ''].filter(Boolean).map(esc).join(' · ')} ${waitTag(o)}</p>
+    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
+    <div class="list">${lines.map(x => `<div class="item"><div class="main"><div class="name">${esc(x.name)}${x.status !== 'Ordered' ? `<span class="tag">${esc(x.status.toLowerCase())}</span>` : ''}${x.q ? '' : waitTag(x)}</div>
+      <div class="sub">${[x.qty + ' ordered', x.recQty ? x.recQty + ' received' : '', blank(x.cost) ? 'no cost yet' : money(x.cost) + ' each', wait.get(x.id) ? wait.get(x.id) + ' waiting' : ''].filter(Boolean).join(' · ')}</div>
+      ${x.status === 'Ordered' ? `<div class="links"><button class="tbtn" data-act="ordLine" data-id="${esc(x.id)}">Receive</button><button class="tbtn danger" data-act="ordCancel" data-id="${esc(x.id)}">Cancel the rest</button></div>` : ''}</div>
+      <span class="qty">${x.status === 'Ordered' ? dueOf(x) : x.recQty || 0}</span></div>`).join('')}</div>
+    ${l ? sec(`Receive ${esc(l.name)}`, `<div><label for="rcQty">Quantity received (${dueOf(l)} due)</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
+      <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') : ''}
+    ${open.length > 1 ? `<button class="btn ${l ? '' : 'primary'} big" data-act="ordRecvAll" data-id="${esc(id)}">Receive all</button>` : ''}
+    ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
+}
+/** Receives part or all of what is still due on a line; a short line stays open for the rest. */
+function receiveLine() {
+  const s = ui.sub, l = s && live().orders.find(x => x.id === s.id); if (!l || l.status !== 'Ordered') return;
+  const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  if (qty > dueOf(l)) return toast(`Only ${dueOf(l)} still due on this line.`);
+  const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
+  qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs });
+  ui.sub = null; commit(); toast(`+${qty} ${l.name}`);
+}
+/** Receives everything still due on every open line of the order, each unit at its line's cost each. */
+function receiveAll(id) {
+  const open = live().orders.filter(l => l.orderId === id && l.status === 'Ordered'), n = open.reduce((t, l) => t + dueOf(l), 0);
+  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost) }));
+  ui.sub = null; commit(); toast(`+${plural(n, 'unit')} received`);
+}
+
+/* The pre-order sheet */
 function openPre(id) {
   const L = live(), p = L.pres.find(x => x.id === id); if (!p) return closeSheet();
   const open = p.status === PRE_OPEN, ready = open && readyPres().some(x => x.id === id), tot = r2(p.qty * p.price);
@@ -1265,42 +1325,6 @@ function openPre(id) {
     ${sub || (open ? `<div class="actions"><button class="btn ${ready ? 'primary' : ''}" data-act="fulfil" data-id="${esc(id)}">Issue invoice</button>${p.balance > 0 ? `<button class="btn" data-act="subOn" data-id="${esc(id)}" data-m="pay">Add payment</button>` : ''}</div><button class="tbtn danger" data-act="subOn" data-id="${esc(id)}" data-m="cancel">Cancel</button>` : '')}
     ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (image)</button>` : ''}
     ${p.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(p.q.id)}">Delete this pre-order</button>` : ''}`, 'pre:' + id, () => openPre(id));
-}
-function ordRow(o) { return row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`, o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''), `data-act="ord" data-id="${esc(o.id)}"`, `<span class="qty">${o.status === 'Received' ? o.recQty : o.qty}</span>`); }
-function ordListHtml() {
-  const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
-  const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), none = 'No supplier orders yet. Add one when stock is ordered and paid for.';
-  if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
-    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'num'],
-      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
-      [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">${none}</p>`}`;
-  return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
-    ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
-    ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
-}
-function openOrd(id) {
-  const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
-  const open = o.status === 'Ordered';
-  if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, c: newCosts() };
-  const s = ui.sub || {};
-  openSheet(`
-    <div class="top"><h2>${esc(o.name)}</h2>${closeBtn}</div>
-    <p class="hint">Supplier order · ${o.qty} ordered ${esc(fmtDay(o.date))}${o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''} ${waitTag(o)}</p>
-    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
-    ${open ? sec('When it arrives', `<div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
-      <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') + `<button class="tbtn danger" data-act="ordCancel" data-id="${esc(id)}">Cancel this order</button>`
-      : `<dl class="kv"><dt>Status</dt><dd>${esc(o.status)}${o.status === 'Received' ? ', ' + o.recQty + ' on ' + esc(o.recDate) : ''}</dd></dl>`}
-    ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
-}
-function receiveOrd() {
-  const s = ui.sub, o = s && live().orders.find(x => x.id === s.id); if (!o) return;
-  const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
-  const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
-  qAdd('receive', { orderId: o.id, date: todayISO(), qty, costs });
-  closeSheet(); commit();
-  const waiting = readyPres().filter(p => p.sku === o.sku).length;
-  toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
-  if (waiting) { ui.ordSeg = 'pre'; go('orders'); }
 }
 
 /* ---------- Invoice image: the invoice or receipt drawn on a canvas and saved as PNG ---------- */
@@ -1999,7 +2023,7 @@ document.addEventListener('click', async ev => {
     }
     case 'homeGo': {
       if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
-      else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
+      else if (d.to === 'pre' || d.to === 'sup') { ui.supTab = 'orders'; go('orders'); }
       else { ui.filter = d.to; ui.q = ''; ui.tf = {}; go('stock'); }
       break;
     }
@@ -2019,8 +2043,18 @@ document.addEventListener('click', async ev => {
     case 'retOpen': { const v = live().invs.find(x => x.id === d.id); const l = v && v.lines.find(l => returnable(v, l.sku) > 0); if (l) { ui.sub = { id: d.id, mode: 'ret', sku: l.sku, qty: 1, outcome: 'Restock', refund: '', note: '' }; rerender(); } break; }
     case 'retSave': saveReturn(); break;
 
-    // orders
-    case 'ordSeg': ui.ordSeg = d.s; renderOrders(); break;
+    // suppliers and their orders
+    case 'supTab': ui.supTab = d.s; renderOrders(); break;
+    case 'sup': openSup(d.id); break;
+    case 'supSave': saveSup(d.id); break;
+    case 'ordNew': orderStock(''); break;
+    case 'ord': ui.sub = null; openOrd(d.id); break;
+    case 'ordLine': { const l = live().orders.find(x => x.id === d.id); if (l) { ui.sub = recvSub(l); rerender(); } break; }
+    case 'ordRecv': receiveLine(); break;
+    case 'ordRecvAll': receiveAll(d.id); break;
+    case 'ordCancel': { const l = live().orders.find(x => x.id === d.id); if (l && confirm(`Cancel the rest of this line? ${plural(dueOf(l), 'unit')} of ${l.name} stop counting as incoming.`)) { qAdd('orderCancel', { lineId: l.id }); ui.sub = null; commit(); toast('The rest is cancelled'); } break; }
+
+    // pre-orders
     case 'pre': ui.sub = null; openPre(d.id); break;
     case 'fulfil': {
       const p = live().pres.find(x => x.id === d.id); if (!p) break;
@@ -2043,10 +2077,6 @@ document.addEventListener('click', async ev => {
       qAdd('preCancel', { preId: p.id, kept: r2(kept) }); ui.sub = null; commit(); toast('Pre-order cancelled'); break;
     }
 
-    case 'ordNew': orderStock(''); break;
-    case 'ord': ui.sub = null; openOrd(d.id); break;
-    case 'ordRecv': receiveOrd(); break;
-    case 'ordCancel': if (confirm('Cancel this supplier order? It stops counting as incoming.')) { qAdd('orderCancel', { orderId: d.id }); closeSheet(); commit(); toast('Order cancelled'); } break;
     // import
     case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
     case 'copyPrompt': await copyText(buildPrompt()); toast('Copied. Paste it in Claude together with the photo.'); break;
