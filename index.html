@@ -1357,6 +1357,7 @@ function drawDoc(v) {
   const W = 595, H = 1024, M = 28, S = 2, R = W - M, TL = M - 4, TR = R + 4, shop = prefs.shop, pay = docs.pay || [];
   const GREY = '#666666', PALE = '#999999', NAVY = '#213E67', pages = [], ends = []; let x, y, zebra;
   const mdy = iso => { const [yy, mm, dd] = iso.split('-'); return `${+mm}/${+dd}/${yy}`; };   // 11/17/2026, as the template writes dates
+  const peso = n => prefs.cur + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });   // ₱750.00, as the template writes amounts
   const font = (size, bold) => { x.font = `${bold ? '700' : '400'} ${size}px Helvetica, Arial, sans-serif`; };
   const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#000'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
   const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
@@ -1393,7 +1394,7 @@ function drawDoc(v) {
     if (!(zebra++ % 2)) fill(TL, y + 0.5, TR - TL, rh, '#F3F3F3');
     const row = (s, px, align, i = 0) => text(s, px, y + 13 + i * 12.5, { color: GREY, align }), exp = l.status === FOLLOW ? (lineExp(l) ? mdy(lineExp(l)) : 'To follow') : '';
     ls.forEach((s, i) => text(s, M, y + 13 + i * 12.5)); cs.forEach((s, i) => row(s, COND, 'center', i));
-    row(l.qty, QTY, 'center'); if (exp) row(exp, EXP, 'center'); row(money(r2(l.qty * l.price)), R, 'right');
+    row(l.qty, QTY, 'center'); if (exp) row(exp, EXP, 'center'); row(peso(r2(l.qty * l.price)), R, 'right');
     y += rh;
   });
   // Two rules under the rows, then payment details at the left and the totals at the right: labels always, values when above zero
@@ -1401,10 +1402,10 @@ function drawDoc(v) {
   const by = y += 19, LX = 456, BX = 396, sub = r2(shown.reduce((t, l) => t + l.qty * l.price, 0));
   rule(by, '#000', TL, 184); rule(by, '#000', 292, TR);
   pay.forEach((p, i) => { y += 19; text(p.method || '', M, y, { bold: true }); text(p.number || '', NR, y, { color: GREY, align: 'right' }); names[i].forEach((s, j) => text(s, NR + 8, y + j * 13, { color: GREY })); y += (names[i].length - 1) * 13; });
-  [['SubTotal', money(sub)], ['Discount', v.disc > 0 ? '−' + money(v.disc) : ''], ['Paid', v.balance > 0 && v.paid > 0 ? money(v.paid) : ''], ['Shipping Fee', v.fee > 0 ? money(v.fee) : '']]
+  [['SubTotal', peso(sub)], ['Discount', v.disc > 0 ? '−' + peso(v.disc) : ''], ['Paid', v.balance > 0 && v.paid > 0 ? peso(v.paid) : ''], ['Shipping Fee', v.fee > 0 ? peso(v.fee) : '']]
     .forEach(([k, val], i) => { text(k, LX, by + 19 * (i + 1), { color: GREY, align: 'right' }); text(val, R, by + 19 * (i + 1), { color: GREY, bold: !i, align: 'right' }); });
   // The Total box: what is still owed after a part payment, else the invoice total; a long amount shrinks to fit.
-  const bt = by + 81, amt = money(v.balance > 0 ? v.balance : v.total); fill(BX, bt, TR - BX, BOX, '#FFF2CC'); rule(bt, '#B7B7B7', BX, TR);
+  const bt = by + 81, amt = peso(v.balance > 0 ? v.balance : v.total); fill(BX, bt, TR - BX, BOX, '#FFF2CC'); rule(bt, '#B7B7B7', BX, TR);
   text('Total', LX, bt + 31, { bold: true, align: 'right' }); font(22, true); text(amt, R - 10, bt + 35, { size: Math.min(22, 22 * (R - 20 - LX) / x.measureText(amt).width), bold: true, align: 'right' });
   // Foot: a rule, then "Notes:" and the footer line; nothing without a footer line.
   y = by + Math.max(81 + BOX, payH + 8);
