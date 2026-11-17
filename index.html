@@ -359,7 +359,8 @@ function live() {
   const all = moves.map((m, i) => ({ ...m, _i: i }));
   const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, q) => perUnit(m, costs).forEach(x => push(x, q));
   const find = (list, id) => list.find(x => x.id === id);
-  // The Sale movement that takes an invoice line out of stock: <invId>-<line>, Ref = invoice number.
+  // A line of an invoice, and the Sale movement that takes it out of stock: <invId>-<line>, Ref = invoice number.
+  const lineOf = q => { const v = find(invs, q.invId), l = v && v.lines.find(x => x.line === q.line); return l && l.status === FOLLOW ? [v, l] : []; };
   const sale = (v, line, sku, qty, date, cost, q) => push({ id: v.id + '-' + line, date, sku, dir: 'Out', qty, reason: 'Sale', ref: String(v.no), note: '', cost }, q);
   const nameOf = sku => (map.get(sku) || { name: sku }).name, handled = new Set();
   for (const q of queue) {
@@ -385,6 +386,11 @@ function live() {
         v.lines.forEach((l, k) => { if (!l.follow) sale(made, k + 1, l.sku, l.qty, v.date, l.cost, q); });
         break;
       }
+      case 'deliver': { const [v, l] = lineOf(q); if (l) { Object.assign(l, { status: DELIVERED, cost: q.cost, delivered: q.date }); v.w = q; sale(v, l.line, l.sku, l.qty, q.date, q.cost, q); } break; }
+      case 'follow': { const [v, l] = lineOf(q); if (l) { l.expected = q.expected || ''; l.orderLine = q.orderLine || ''; v.w = q; } break; }
+      case 'pay': { const v = find(invs, q.invId); if (v) { v.paid = Math.min(q.paid, v.total); v.balance = r2(v.total - v.paid); v.w = q; } break; }
+      // The line's amount comes off the total, and the refund off what was paid.
+      case 'lineCancel': { const [v, l] = lineOf(q); if (l) { l.status = CANCELLED; v.total = r2(v.total - l.qty * l.price); v.paid = r2(v.paid - Math.min(q.refund || 0, v.paid)); v.balance = r2(v.total - v.paid); v.w = q; } break; }
       case 'ship': { const v = find(invs, q.invId); if (v) { v.ship = q.ship; v.w = q; } break; }
       case 'ret': {
         const r = q.ret, v = find(invs, r.invId);
@@ -477,6 +483,16 @@ function custFor(name, contact) {
 const contactOf = d => { const c = live().custs.get(d.custId); return (c && c.contact) || d.contact || ''; };
 /** How many of a toy on an invoice can still be returned: only delivered lines take returns. */
 function returnable(v, sku) { return v.lines.filter(l => l.sku === sku && l.status === DELIVERED).reduce((s, l) => s + l.qty, 0) - live().rets.filter(r => r.invId === v.id && r.sku === sku).reduce((s, r) => s + r.qty, 0); }
+/** To-follow lines the stock on hand covers, taken oldest invoice first, as { v, l } (invoice and line). */
+function readyLines() {
+  const left = new Map(), out = [];
+  live().invs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.no - b.no)).forEach(v => v.lines.forEach(l => {
+    if (l.status !== FOLLOW) return;
+    const have = left.has(l.sku) ? left.get(l.sku) : Math.max(stockOf(l.sku), 0);
+    if (have >= l.qty) { out.push({ v, l }); left.set(l.sku, have - l.qty); } else left.set(l.sku, have);
+  }));
+  return out;
+}
 /** Open supplier-order lines of a product, in sheet order: what a to-follow line can wait for. */
 const openLines = sku => live().orders.filter(o => o.sku === sku && o.status === 'Ordered');
 const olText = o => [o.expected ? fmtDay(o.expected) : 'No date yet', o.sup].filter(Boolean).join(' · ');
@@ -497,6 +513,7 @@ const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
 /** The records in an entry that carry a SKU. */
 const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? [q.order] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
+const invNoOf = id => { const v = live().invs.find(x => x.id === id); return v ? ' on invoice no. ' + v.no : ''; };
 function describe(q) {
   switch (q.kind) {
     case 'item': return `New product “${q.item.name}”`;
@@ -506,6 +523,10 @@ function describe(q) {
     case 'receive': return 'Receiving a supplier order';
     case 'orderCancel': return 'Cancelling a supplier order';
     case 'invoice': return `Invoice no. ${q.invoice.no}`;
+    case 'deliver': return 'Shipping a to-follow line' + invNoOf(q.invId);
+    case 'follow': return 'Expected date of a to-follow line' + invNoOf(q.invId);
+    case 'pay': return 'Payment' + invNoOf(q.invId);
+    case 'lineCancel': return 'Cancelling a to-follow line' + invNoOf(q.invId);
     case 'ship': return 'Shipping status';
     case 'ret': return `Return of ${itemName(q.ret.sku)}`;
     case 'inboxDone': return 'Clearing rows from Claude';
@@ -1143,10 +1164,10 @@ function renderInvList() {
 }
 function openInv(id) {
   const L = live(), v = L.invs.find(x => x.id === id); if (!v) return closeSheet();
-  const contact = contactOf(v), margin = marginOf(v);
+  const contact = contactOf(v), margin = marginOf(v), ready = new Set(readyLines().filter(x => x.v.id === id).map(x => x.l.line));
   const myRets = L.rets.filter(r => r.invId === v.id), canReturn = v.lines.some(l => returnable(v, l.sku) > 0);
-  const s = ui.sub && ui.sub.id === id ? ui.sub : null;
-  let retForm = '';
+  const s = ui.sub && ui.sub.id === id ? ui.sub : null, sl = s && s.line ? v.lines.find(l => l.line === s.line && l.status === FOLLOW) : null;
+  let retForm = '', lineForm = '', payForm = '';
   if (s && s.mode === 'ret') {
     const opts = v.lines.filter((l, k) => returnable(v, l.sku) > 0 && v.lines.findIndex(x => x.sku === l.sku) === k);
     if (!opts.some(l => l.sku === s.sku)) s.sku = opts[0] ? opts[0].sku : '';
@@ -1157,22 +1178,61 @@ function openInv(id) {
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
       <div class="links"><button class="btn primary" style="flex:1" data-act="retSave">Record return</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   }
-  // A to-follow line says when it is expected; a line shipped after the invoice date says when.
+  if (sl && s.mode === 'follow') lineForm = sec(`Expected arrival · ${esc(sl.name)}`, `${expHtml('sub', s, 'S')}
+      <div class="links"><button class="btn primary" style="flex:1" data-act="followSave">Save</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
+  if (sl && s.mode === 'lineCancel') {
+    // A refund defaults to what was paid beyond the new total.
+    const amt = r2(sl.qty * sl.price), over = Math.max(0, r2(v.paid - (v.total - amt)));
+    lineForm = sec(`Cancel ${esc(sl.name)} × ${sl.qty}`, `<p class="hint">The total drops by ${money(amt)}. Paid so far ${money(v.paid)}.</p>
+      <div><label for="sRefund">Refunded (${esc(prefs.cur)})</label><input id="sRefund" type="number" inputmode="decimal" min="0" step="any" data-b="sub.refund" value="${esc(s.refund)}" placeholder="${over ? 'Leave blank for ' + money(over) : 'Leave blank for none'}"></div>
+      <div class="links"><button class="tbtn danger" data-act="lineCancelSave">Cancel this line</button><button class="tbtn" data-act="subOff">Back</button></div>`, '', 'pad');
+  }
+  if (s && s.mode === 'pay' && v.balance > 0) payForm = sec('Payment', `<div><label for="sPaid">Amount received now (${esc(prefs.cur)})</label><input id="sPaid" type="number" inputmode="decimal" min="0" step="any" data-b="sub.paid" value="${esc(s.paid)}" placeholder="Leave blank for the full ${money(v.balance)}"></div>
+      <div class="links"><button class="btn primary" style="flex:1" data-act="paySave">Save payment</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
+  // A to-follow line says when it is expected and ships once stock covers it; a line shipped after the invoice date says when.
   const lineRow = l => {
-    const st = l.status === FOLLOW ? 'To follow' + (lineExp(l) ? ' · expected ' + esc(fmtDay(lineExp(l))) : '') : l.status === DELIVERED && l.delivered && l.delivered !== v.date ? 'Delivered ' + esc(fmtDay(l.delivered)) : '';
-    return `<div class="item"><div class="main"><div class="name">${esc(l.name)}${l.status === CANCELLED ? '<span class="tag">cancelled</span>' : ''}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div>${st ? `<div class="sub">${st}</div>` : ''}</div><span class="amt">${l.status === CANCELLED ? '' : money(r2(l.qty * l.price))}</span></div>`;
+    const st = l.status === FOLLOW ? 'To follow' + (lineExp(l) ? ' · expected ' + esc(fmtDay(lineExp(l))) : '') + (ready.has(l.line) ? ' · ready to ship' : '') : l.status === DELIVERED && l.delivered && l.delivered !== v.date ? 'Delivered ' + esc(fmtDay(l.delivered)) : '';
+    const at = `data-id="${esc(id)}" data-line="${l.line}"`;
+    const acts = l.status === FOLLOW ? `<div class="links">${ready.has(l.line) ? `<button class="btn sm primary" data-act="lineShip" ${at}>Ship</button>` : ''}<button class="tbtn" data-act="invSub" data-m="follow" ${at}>Change expected date</button><button class="tbtn danger" data-act="invSub" data-m="lineCancel" ${at}>Cancel</button></div>` : '';
+    return `<div class="item"><div class="main"><div class="name">${esc(l.name)}${l.status === CANCELLED ? '<span class="tag">cancelled</span>' : ''}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div>${st ? `<div class="sub">${st}</div>` : ''}${acts}</div><span class="amt">${l.status === CANCELLED ? '' : money(r2(l.qty * l.price))}</span></div>`;
   };
   const im = prepImg(v);
   openSheet(`
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(lineRow).join('')}</div>
+    ${lineForm}
     <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${v.balance > 0 ? `<p class="hint">Paid ${money(v.paid)} · balance ${money(v.balance)}</p>` : ''}<p class="hint">${margin != null ? 'Margin ' + money(margin) : hasFollow(v) ? 'Margin known once the to-follow lines ship' : 'Margin unknown: a product has no cost'}</p></div>
+    ${payForm || (v.balance > 0 ? `<button class="btn" data-act="invSub" data-m="pay" data-id="${esc(id)}">Add a payment</button>` : '')}
     <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg && im.n === 1 ? `<button class="btn" data-act="imgCopy" data-id="${esc(id)}">Copy image</button>` : ''}</div>
     <label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>
     ${myRets.length ? sec('Returns', `<div class="list">${myRets.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.name)} × ${r.qty} · ${esc(r.outcome)}${waitTag(r)}</div><div class="sub">${esc(fmtDay(r.date))}${r.refund ? ' · refunded ' + money(r.refund) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div></div>${r.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(r.q.id)}" data-stay="1">Delete</button>` : ''}</div>`).join('')}</div>`) : ''}
     ${retForm || (canReturn ? `<button class="btn" data-act="retOpen" data-id="${esc(id)}">Record a return</button>` : '')}
     ${v.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(v.q.id)}">Delete this invoice</button><p class="hint">It has not reached the sheet yet, so it can still be deleted. After that, a mistake is fixed with a return, or by reversing its stock movement in Activity.</p>` : ''}`, 'inv:' + id, () => openInv(id));
+}
+/** Ship a to-follow line: it leaves stock now, at the FIFO cost of the units it takes, under the same invoice number. */
+function shipLine(v, l) {
+  qAdd('deliver', { invId: v.id, line: l.line, date: todayISO(), cost: costOut(l.sku, l.qty) });
+  commit(); toast(`${l.name} × ${l.qty} shipped. Stock updated.`);
+}
+function savePayment() {
+  const s = ui.sub, v = s && live().invs.find(x => x.id === s.id); if (!v) return;
+  const got = s.paid === '' ? v.balance : Number(s.paid);
+  if (isNaN(got) || got <= 0) return toast('Type the amount received.');
+  if (got > v.balance) return toast(`That is more than the balance of ${money(v.balance)}.`);
+  qAdd('pay', { invId: v.id, paid: r2(v.paid + got) }); ui.sub = null; commit(); toast('Payment saved');
+}
+function saveLineCancel() {
+  const s = ui.sub, v = s && live().invs.find(x => x.id === s.id), l = v && v.lines.find(x => x.line === s.line && x.status === FOLLOW); if (!l) return;
+  const refund = s.refund === '' ? Math.max(0, r2(v.paid - (v.total - l.qty * l.price))) : Number(s.refund);
+  if (isNaN(refund) || refund < 0) return toast('Refund must be zero or more.');
+  if (refund > v.paid) return toast(`That is more than the ${money(v.paid)} paid.`);
+  qAdd('lineCancel', { invId: v.id, line: l.line, refund: r2(refund) }); ui.sub = null; commit(); toast(`${l.name} taken off invoice no. ${v.no}`);
+}
+function saveFollow() {
+  const s = ui.sub, v = s && live().invs.find(x => x.id === s.id), l = v && v.lines.find(x => x.line === s.line && x.status === FOLLOW); if (!l) return;
+  const x = expOf(s); if (x.exp == null) return toast('Check the expected date.');
+  qAdd('follow', { invId: v.id, line: l.line, expected: x.exp, orderLine: x.ol }); ui.sub = null; commit(); toast('Expected date saved');
 }
 function saveReturn() {
   const s = ui.sub, v = s && live().invs.find(x => x.id === s.id); if (!v) return;
@@ -1903,6 +1963,7 @@ document.addEventListener('click', async ev => {
     case 'dropQ': {
       const gone = queue.find(x => x.id === d.qid); queue = queue.filter(x => x.id !== d.qid);
       if (gone && gone.kind === 'item') queue = queue.filter(x => x.kind === 'item' || !entrySkus(x).includes(gone.item.sku));
+      if (gone && gone.kind === 'invoice') queue = queue.filter(x => x.invId !== gone.invoice.id);   // its payments, shipping and line changes go with it
       if (!d.stay) closeSheet(); commit(); toast('Deleted'); break;
     }
     case 'retryOne': { const q = queue.find(x => x.id === d.qid); if (q) { q.status = 'pending'; delete q.error; } closeSheet(); commit(); break; }
@@ -1944,6 +2005,14 @@ document.addEventListener('click', async ev => {
     case 'invDelLine': ui.inv.lines.splice(+d.i, 1); renderSell(); break;
     case 'invIssue': issueInvoice(); break;
     case 'inv': ui.sub = null; openInv(d.id); break;
+    case 'invSub': {   // a payment, or a change to a to-follow line, in the invoice sheet
+      const v = live().invs.find(x => x.id === d.id), l = v && v.lines.find(x => x.line === +d.line);
+      ui.sub = { id: d.id, mode: d.m, line: l ? l.line : 0, paid: '', refund: '', sku: l ? l.sku : '', ol: l ? l.orderLine || (l.expected ? '' : undefined) : '', exp: l ? l.expected : '' }; rerender(); break;
+    }
+    case 'lineShip': { const v = live().invs.find(x => x.id === d.id), l = v && v.lines.find(x => x.line === +d.line && x.status === FOLLOW); if (l) shipLine(v, l); break; }
+    case 'paySave': savePayment(); break;
+    case 'lineCancelSave': saveLineCancel(); break;
+    case 'followSave': saveFollow(); break;
     case 'imgSave': saveImg(d.id); break;
     case 'imgCopy': copyImg(d.id); break;
     case 'ship': {
