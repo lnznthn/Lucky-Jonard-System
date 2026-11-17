@@ -119,13 +119,16 @@ r = add([order('so1', 'T0100', 6), order('so2', 'T0100', 2, { expected: '' }), o
 assert.ok(res(r).oso1.ok && res(r).oso2.ok); assert.match(res(r).oso3.error, /Unknown item/); assert.match(res(r).oso4.error, /Expected arrival/);
 assert.deepEqual(r.sync.orders.map(o => o.status), ['Ordered', 'Ordered']);
 let rowsBefore = full().rows;
-r = add([{ id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-14', qty: 5, cost: 1300 }, { id: 'oc2', kind: 'orderCancel', orderId: 'so2' }, { id: 'rc2', kind: 'receive', orderId: 'so2', date: '2026-11-14', qty: 2, cost: 1 }, { id: 'oc1', kind: 'orderCancel', orderId: 'so1' }]);
+r = add([{ id: 'rc0', kind: 'receive', orderId: 'so1', date: '2026-11-14', qty: 5, costs: [1300, -5, 1300, 1300, 1300] },
+  { id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-14', qty: 5, costs: [1300, 1300, 1250, null, 1300] }, { id: 'oc2', kind: 'orderCancel', orderId: 'so2' },
+  { id: 'rc2', kind: 'receive', orderId: 'so2', date: '2026-11-14', qty: 2, costs: [1, 1] }, { id: 'oc1', kind: 'orderCancel', orderId: 'so1' }]);
+assert.match(res(r).rc0.error, /Unit cost/, 'one bad cost refuses the whole receipt');
 assert.ok(res(r).rc1.ok && res(r).oc2.ok); assert.match(res(r).rc2.error, /cancelled/); assert.match(res(r).oc1.error, /already received/);
-let rcv = full().moves.find(m => m.id === 'rcv-so1');
-assert.deepEqual([rcv.sku, rcv.dir, rcv.qty, rcv.reason, rcv.ref, rcv.cost], ['T0100', 'In', 5, 'Restock', 'so1', 1300]);
+let rcv = full().moves.filter(m => m.ref === 'so1');
+assert.deepEqual(rcv.map(m => [m.id, m.sku, m.dir, m.qty, m.reason, m.cost]), [1300, 1300, 1250, null, 1300].map((c, k) => ['rcv-so1-' + (k + 1), 'T0100', 'In', 1, 'Restock', c]), 'one row per unit, each with its cost; blank allowed');
 assert.deepEqual(full().orders.map(o => [o.status, o.recQty, o.recDate]), [['Received', 5, '2026-11-14'], ['Cancelled', null, '']]);
-r = add([{ id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-15', qty: 9, cost: 1 }, order('so1', 'T0100', 6)]);
-assert.ok(r.results.every(x => x.ok)); assert.equal(full().rows, rowsBefore + 1, 'receiving twice adds one movement');
+r = add([{ id: 'rc1', kind: 'receive', orderId: 'so1', date: '2026-11-15', qty: 9, costs: [1] }, order('so1', 'T0100', 6)]);
+assert.ok(r.results.every(x => x.ok)); assert.equal(full().rows, rowsBefore + 5, 'receiving twice adds nothing more');
 
 // 13. pre-orders: receipt numbered 1, no movement, partial payment, validation
 const pre = (id, extra = {}) => ({ id: 'p' + id, kind: 'pre', pre: { id, date: '2026-11-12', custId: 'c-ana', sku: 'T0100', qty: 2, price: 1700, paid: 1000, note: '', invId: 'rcpt-' + id, no: 1, ...extra } });
@@ -438,4 +441,17 @@ r = U.add([move('a5', 'U4', 'Out', 1, 'Correction', { ref: 'a2' })]);
 assert.deepEqual(brU('U4'), [1, 0, 0, 1, '30', 30, 0]);
 r = U.add([move('a6', 'U4', 'In', 2, 'Restock', { cost: 5 }), move('a7', 'U4', 'Out', 3, 'Correction', { ref: 'a6' })]);
 assert.deepEqual([onHandU('U4'), brU('U4')[4]], [0, ''], 'a read In of Qty 2 is two units; the third unit of the Correction comes from the front');
+
+// (k) four units received at four costs, then two sales: each line keeps the cost the app sent, the two newest units stay, oldest first
+const saleU = (id, no, lines) => ({ id: 'v' + id, kind: 'invoice', invoice: { id, no, date: '2026-11-16', custId: 'cu', lines } });
+r = U.add([{ id: 'uo', kind: 'order', order: { id: 'uo1', date: '2026-11-10', sku: 'U1', qty: 4, expected: '', note: '' } },
+  { id: 'ur', kind: 'receive', orderId: 'uo1', date: '2026-11-14', qty: 4, costs: [100, 200, 300, 400] }]);
+assert.ok(r.results.every(x => x.ok));
+assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'uo1').map(x => [x[0], x[5], x[9]]), [['rcv-uo1-1', 1, 100], ['rcv-uo1-2', 1, 200], ['rcv-uo1-3', 1, 300], ['rcv-uo1-4', 1, 400]]);
+assert.deepEqual(brU('U1'), [4, 0, 0, 4, '100, 200, 300, 400', 1000, 0]);
+r = U.add([saleU('us1', 1, [{ sku: 'U1', qty: 1, price: 500, cost: 100 }]), saleU('us2', 2, [{ sku: 'U1', qty: 1, price: 500, cost: 150 }])]);
+assert.ok(r.results.every(x => x.ok));
+assert.deepEqual(U.sheet('Invoice lines').rowsOf().map(x => [x[0], x[7]]), [[1, 100], [2, 150]], 'the line cost is written as the app sent it');
+assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[6] === 'Sale' && x[2] === 'U1').map(x => [x[0], x[9]]), [['us1-1', 100], ['us2-1', 150]], 'and the same on the Sale movement');
+assert.deepEqual([onHandU('U1'), brU('U1')], [2, [2, 0, 0, 2, '300, 400', 700, 0]], 'the two oldest units left');
 console.log('backend tests passed');

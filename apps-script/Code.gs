@@ -409,7 +409,8 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * move        move { id, date, sku, dir, qty, reason, ref, note, cost } one stock movement
  * cust        cust { id, name, contact }                               new customer, or new details for one
  * order       order { id, date, sku, qty, expected, note }             supplier order (status Ordered)
- * receive     orderId, date, qty, cost                                 order Received + In/Restock movement, Ref = order ID
+ * receive     orderId, date, qty, costs                                order Received + one In/Restock movement per unit, rcv-<orderId>-1 ...,
+ *                                                                      Ref = order ID, Unit cost costs[k-1] (a number, or null for blank)
  * orderCancel orderId                                                  order Cancelled
  * pre         pre { id, date, custId, sku, qty, price, paid, note, invId, no }  pre-order (Open) + receipt; no movement
  * prePay      preId, paid                                              new total paid on an open pre-order
@@ -707,8 +708,10 @@ function plan_(entries, skip) {
         if (!ro) throw new Error('Unknown supplier order');
         if (ro.status === 'Cancelled') throw new Error('That supplier order was cancelled');
         if (ro.status !== 'Received') {
-          var rq = qty_(e.qty), rd = date_(e.date), rc = moneyOrNull_(e.cost, 'Unit cost');
-          pushMove_('rcv-' + ro.id, rd, toy_(ro.sku), 'In', rq, 'Restock', ro.id, '', rc);
+          // One movement per unit with its own cost; a blank cost is allowed and can be typed later.
+          var rq = qty_(e.qty), rd = date_(e.date), rcit = toy_(ro.sku), rcs = [];
+          for (var j = 0; j < rq; j++) rcs.push(moneyOrNull_((e.costs || [])[j], 'Unit cost'));
+          rcs.forEach(function (c, j) { pushMove_('rcv-' + ro.id + '-' + (j + 1), rd, rcit, 'In', 1, 'Restock', ro.id, '', c); });
           ro.status = 'Received'; ro.recQty = rq; ro.recDate = rd; touch_(ro);
         }
 
