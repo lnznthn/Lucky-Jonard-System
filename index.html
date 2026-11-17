@@ -194,7 +194,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl td .hint,.tbl td .tbtn,.tbl td.empty{font-size:13px}
   .tbl td .tbtn{min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-weight:400}
   .tbl td input[type=checkbox]{width:16px;height:16px;vertical-align:middle}
-  .tbl td input[data-rcost]{min-height:0;height:24px;margin:-3px 0;padding:0 6px;font-size:13px;text-align:right}
+  .tbl td input[data-rcost],.tbl td input[data-rprice]{min-height:0;height:24px;margin:-3px 0;padding:0 6px;font-size:13px;text-align:right}
   .tbl tr.off td{color:var(--muted)}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
@@ -240,7 +240,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.4.0';
+const VERSION = '2.4.1';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -1646,12 +1646,16 @@ function impTable(imp, idx, k) {
   const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
     return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
       : `<input type="number" inputmode="decimal" min="0" step="any" data-rcost="${i}" value="${c[0] == null ? '' : c[0]}" aria-label="Cost each of ${esc(r.name)}">`; };
+  // The selling price, typed in place (setRowPrice()); a product on file shows its price until one is typed.
+  const price = i => { const r = R(i); if (!r.src) return r.price == null ? '' : money(r.price);
+    return `<input type="number" inputmode="decimal" min="0" step="any" data-rprice="${i}" value="${r.price == null ? '' : r.price}" placeholder="${r.match && r.match.price != null ? r.match.price : ''}" aria-label="Price of ${esc(r.name)}">`; };
   return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`, 'tick'],
     ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? ` <span class="hint">recorded as “${esc(r.match.name)}”</span>` : ''); }, 'name'],
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
       + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
     ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'],
+    ['Price', i => R(i).price != null ? R(i).price : R(i).match ? R(i).match.price : null, price, 'money'],
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
 }
@@ -1661,6 +1665,13 @@ function setRowCost(t) {
   if (t.value.trim() && parsePrice(t.value) == null) { t.value = r.costs[0] == null ? '' : r.costs[0]; return toast('Cost must be zero or more.'); }
   const fix = { ...r.src.fix, cost: t.value.trim() }; delete fix.costs;
   r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);   // the field already shows the value, so nothing is redrawn and a click elsewhere still lands
+}
+/** The price typed in a review row overwrites the product's price on Apply, as in Correct this row; cleared, it leaves the product alone. */
+function setRowPrice(t) {
+  const imp = ui.imp, i = +t.dataset.rprice, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  if (t.value.trim() && parsePrice(t.value) == null) { t.value = r.price == null ? '' : r.price; return toast('Price must be zero or more.'); }
+  const fix = { ...r.src.fix }; if (t.value.trim()) fix.price = t.value.trim(); else delete fix.price;
+  r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);
 }
 /** What a folded Ready group holds, for example "172 new products, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
@@ -2065,6 +2076,7 @@ document.addEventListener('change', ev => {
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
   if (t.dataset.rcost) setRowCost(t);
+  if (t.dataset.rprice) setRowPrice(t);
   if (t.dataset.tfv) { ui.tf[t.dataset.tfv] = [...$('#pop').querySelectorAll('[data-tfv]:checked')].map(x => x.value); renderStockList(); }
   if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);

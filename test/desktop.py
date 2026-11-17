@@ -35,7 +35,7 @@ with sync_playwright() as pw:
     p.set_viewport_size({'width': 1280, 'height': 800}); p.click('#navTog'); p.wait_for_timeout(200)
     # Update inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
     tab(p, 'Update inventory')
-    check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update inventory shows each group as a table: {heads('imp.ready')}")
+    check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Price', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update inventory shows each group as a table: {heads('imp.ready')}")
     p.click('#impOut details[data-grp="check"] summary'); folded = p.is_hidden('[data-tbl="imp.check"]'); p.click('#impOut details[data-grp="check"] summary')
     check(folded and p.is_visible('[data-tbl="imp.check"]'), 'Check these folds like Needs a name')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") td:nth-child(2)')
@@ -97,10 +97,12 @@ with sync_playwright() as pw:
     A = '[data-tbl="imp.ready"] tbody tr:has-text("alpha Plush")'
     p.click(f'{A} input[data-rcost]'); check(p.is_hidden('#layer'), 'a click in the cost field of a review row does not open the row')
     p.fill(f'{A} input[data-rcost]', '300'); p.press(f'{A} input[data-rcost]', 'Tab')
+    p.fill(f'{A} input[data-rprice]', '650'); p.press(f'{A} input[data-rprice]', 'Tab')
     p.click(f'{A} td:nth-child(2)'); costs = [p.input_value(f'#sheet [data-cost="f.c"][data-k="{k}"]') for k in (0, 1)]
     p.fill('#sheet [data-cost="f.c"][data-k="1"]', '400'); p.click('#sheet button:has-text("Save")'); rng = p.inner_text(f'{A} td:nth-child(5)'); p.click(f'{A} td:nth-child(5) button')
     check(costs == ['300', '300'] and rng == '₱300 to 400' and p.inner_text('#sheet h2') == 'Correct this row', f'the cost typed in a review row goes to every unit; different costs show the range, which opens Correct this row: {costs} {rng}')
     p.fill('#sheet [data-cost="f.c"][data-k="1"]', '300'); p.click('#sheet button:has-text("Save")'); apply(p, 'Apply 4 changes'); synced(p)
+    check(any(r[1].lower() == 'alpha plush' and str(r[2]) == '650' for r in rows('Products')), 'a price typed in a review row reaches the product')
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
     # Inventory: a read-only table of every field; a header sorts and a second click reverses; filters open from the headers.
     tab(p, 'Inventory'); T = '[data-tbl="stock"]'; cols = heads('stock')
