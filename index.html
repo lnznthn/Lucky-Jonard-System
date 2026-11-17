@@ -261,6 +261,7 @@ const fmtNum = n => Number(n).toLocaleString(undefined, { maximumFractionDigits:
 const money = n => prefs.cur + fmtNum(n);
 const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
 const r2 = n => Math.round(n * 100) / 100;
+const blank = v => v == null || v === '';
 const getPath = p => p.split('.').reduce((o, k) => (o == null ? o : o[k]), ui);
 function setPath(p, v) { const ks = p.split('.'), last = ks.pop(), o = ks.reduce((o, k) => (o == null ? o : o[k]), ui); if (o) o[last] = v; }
 
@@ -446,6 +447,8 @@ function custFor(name, contact) {
   const id = 'c' + uid(); qAdd('cust', { cust: { id, name, contact } }); dirty(); return id;
 }
 const contactOf = d => { const c = live().custs.get(d.custId); return (c && c.contact) || d.contact || ''; };
+/** The pre-order behind a receipt, a sale invoice or the New sale form, if any. */
+const preOf = d => d.preId && live().pres.find(p => p.id === d.preId);
 /** How many of a toy on an invoice can still be returned. */
 function returnable(v, sku) { return v.lines.filter(l => l.sku === sku).reduce((s, l) => s + l.qty, 0) - live().rets.filter(r => r.invId === v.id && r.sku === sku).reduce((s, r) => s + r.qty, 0); }
 /** Open pre-orders the stock on hand can cover, oldest first. */
@@ -643,10 +646,10 @@ const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
  * attrs(row) gives a row its data-act, so a click opens its sheet; head adds rows under the header; max caps the rows shown.
  */
 function table(id, cols, rows, attrs, head, max) {
-  const s = ui.sort[id], blank = v => v == null || v === '';
+  const s = ui.sort[id];
   if (s) { const v = cols[s.k][1]; rows = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
   return `<div class="tbl" data-tbl="${id}"><table><thead><tr>${cols.map(([h, v, , c], k) => `<th class="${c || ''}" ${s && s.k === k ? `aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}>${v ? `<button data-act="sort" data-t="${id}" data-k="${k}">${h}${s && s.k === k ? icon('chev', 14, s.d > 0 ? 'up' : '') : ''}</button>` : h}</th>`).join('')}</tr>${head || ''}</thead>
-    <tbody>${rows.length ? rows.slice(0, max || rows.length).map(r => { const a = attrs(r); return `<tr ${a ? 'tabindex="0" ' + a : ''}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
+    <tbody>${rows.length ? rows.slice(0, max).map(r => { const a = attrs(r); return `<tr ${a ? 'tabindex="0" ' + a : ''}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
 }
 /** Rebuilds part of the page while every table keeps its scroll position (a sort, a filter or a sync must not jump it back). */
 function keepScroll(fn) { const at = [...document.querySelectorAll('[data-tbl]')].map(e => [e.dataset.tbl, e.scrollLeft, e.scrollTop]); fn(); at.forEach(([id, l, t]) => { const e = $(`[data-tbl="${id}"]`); if (e) { e.scrollLeft = l; e.scrollTop = t; } }); }
@@ -1003,7 +1006,7 @@ function invNoCost(l) {
   return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this item has' : n + ' units of this item have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
 }
 function renderInvForm() {
-  const f = ui.inv, L = live(), pre = f.preId && L.pres.find(p => p.id === f.preId), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
+  const f = ui.inv, L = live(), pre = preOf(f), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
   const box = $('#sellBody'); if (!box) return;
   // Nothing to sell yet: say so and offer the one step that fixes it.
@@ -1100,7 +1103,7 @@ function renderInvList() {
 }
 function openInv(id) {
   const L = live(), v = L.invs.find(x => x.id === id); if (!v) return closeSheet();
-  const sale = v.type === SALE, pre = v.preId && L.pres.find(p => p.id === v.preId), contact = contactOf(v), margin = marginOf(v);
+  const sale = v.type === SALE, pre = preOf(v), contact = contactOf(v), margin = marginOf(v);
   const myRets = L.rets.filter(r => r.invId === v.id), canReturn = sale && v.lines.some(l => returnable(v, l.sku) > 0);
   const s = ui.sub && ui.sub.id === id ? ui.sub : null;
   let retForm = '';
@@ -1242,8 +1245,7 @@ const loadImg = src => new Promise(res => { const im = new Image(); im.onload = 
  *  Synchronous, so the number of images is known during a tap: the logo gets a fixed box and is drawn by docPngs(). */
 function drawDoc(v) {
   const W = 595, H = 1024, M = 48, S = 2, R = W - M, sale = v.type === SALE, shop = prefs.shop;
-  const pre = v.preId && live().pres.find(p => p.id === v.preId), contact = contactOf(v);
-  const pages = [], ends = []; let x, y;
+  const pre = preOf(v), contact = contactOf(v), pages = [], ends = []; let x, y;
   const font = (size, bold) => { x.font = `${bold ? '700' : '400'} ${size}px Helvetica, Arial, sans-serif`; };
   const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#1d1b20'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
   const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
@@ -1297,8 +1299,7 @@ const imgName = (v, i, n) => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no 
 /** Makes the images as soon as the document is opened, so the Save or Copy tap itself has nothing to wait for.
  *  Returns { n: number of images, p: promise of the PNGs }. */
 function prepImg(v) {
-  const pre = v.preId && live().pres.find(p => p.id === v.preId);
-  const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
+  const pre = preOf(v), sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
   if (!ui.img || ui.img.sig !== sig) { const cs = drawDoc(v); ui.img = { sig, n: cs.length, p: docPngs(cs) }; }
   return ui.img;
 }
@@ -1344,7 +1345,7 @@ function readDetails(r, mfr, brand, line, chr, rel, verify) {
  * Correct this row (a key of src.fix) overwrites what is on file; one cleared there leaves the item alone.
  */
 function detailPatch(it, r) {
-  const p = {}, t = (r.src && r.src.fix) || {}, blank = v => v == null || v === '';
+  const p = {}, t = (r.src && r.src.fix) || {};
   DETAILS.forEach(([k]) => { if (!blank(r[k]) && r[k] !== it[k] && (blank(it[k]) || k in t)) p[k] = r[k]; });
   if ('rel' in t || 'verify' in t ? r.rel && r.relCheck !== !!it.relCheck : p.rel && r.relCheck) p.relCheck = r.relCheck;
   return p;
@@ -1486,11 +1487,11 @@ function inboxLoad() {
     });
     groups.forEach(g => { if (g.n != null) g.qty = g.n; });
   }
-  const mode = type === 'count' ? 'count' : 'receive', c = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+  const mode = type === 'count' ? 'count' : 'receive';
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
   ui.rdate = todayISO();
   ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
-    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(c);
+    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
@@ -1785,7 +1786,8 @@ function parseCode(s) {
   s = String(s || '').trim(); const i = s.lastIndexOf('#');
   return i > 0 ? { url: s.slice(0, i).trim(), key: s.slice(i + 1).trim() } : { url: s, key: '' };
 }
-const tsv = rows => rows.map(r => r.map(v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+const cell = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
+const tsv = rows => rows.map(r => r.map(cell).join('\t')).join('\n');
 
 /* ---------- events ---------- */
 /** Opens a page: kept as the current tab on this device, with any sheet closed and the page at the top. */
