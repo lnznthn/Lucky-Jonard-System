@@ -319,7 +319,7 @@ with sync_playwright() as pw:
     bg = lambda pg: pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toUpperCase()")
     check(p.query_selector('header [data-act="theme"]') is None and p.evaluate("document.documentElement.getAttribute('data-theme')") is None, 'no theme control in the header; Device leaves data-theme unset')
     tab(p, 'Home'); p.click('button[aria-label="Settings"]'); no_toy(p, 'Settings')
-    check([h.inner_text() for h in p.query_selector_all('#sheet .sec > h2')] == ['Connection', 'Invoice image', 'Preferences', 'Data'], 'Settings is grouped under four headings')
+    check([h.inner_text() for h in p.query_selector_all('#sheet .sec > h2')] == ['Connection', 'Shop', 'Preferences', 'Data'], 'Settings is grouped under four headings')
     p.click('#sheet button[data-act="theme"][data-v="dark"]')
     check(p.evaluate("document.documentElement.getAttribute('data-theme')") == 'dark' and bg(p) == '#0D0D0D', 'Dark sets data-theme and the dark tokens')
     p.reload(); p.wait_for_selector('#tabs button')
