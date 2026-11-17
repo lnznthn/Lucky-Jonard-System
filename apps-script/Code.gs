@@ -14,11 +14,13 @@
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
  */
-var VERSION_ = '2.5.0';
+var VERSION_ = '2.6.0';
 var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'];
 // A unit's condition, in this order; CONDITIONS in index.html is the same list. Blank means not recorded.
 var CONDITIONS_ = ['MISB', 'MIB', 'MOC', 'CIB', 'Box damage', 'Loose complete', 'Loose'];
+// Payment details: typed by the owner in the sheet and sent to the app for the invoice image. The app never writes it.
+var PAY_HEAD_ = ['Method', 'Number', 'Name'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
 var OUT_ONLY_ = ['Sale', 'Damaged', 'Lost'];
 var EITHER_ = ['Count', 'Correction', 'Other'];
@@ -63,10 +65,10 @@ var T_ = {
   order: { name: 'Supplier orders', col: 1, head: ['ID', 'Order ID', 'Date', 'Supplier ID', 'Supplier', 'Product ID', 'Product', 'Qty', 'Cost each', 'Expected', 'Received qty', 'Status', 'Note'], text: ['A:G', 'J:J', 'L:M'],
     from: function (v) { return { id: s_(v[0]), orderId: s_(v[1]), date: dateStr_(v[2]), supId: s_(v[3]), sup: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), cost: num_(v[8]), expected: dateStr_(v[9]), recQty: Number(v[10]) || 0, status: s_(v[11]), note: String(v[12]) }; },
     to: function (o) { return [o.id, o.orderId, o.date, o.supId, o.sup, o.sku, o.name, o.qty, blank_(o.cost), o.expected, o.recQty, o.status, o.note]; } },
-  // Balance is Total less Paid.
-  inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Total', 'Paid', 'Balance', 'Shipping'], text: ['B:F', 'J:J'],
-    from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), custId: s_(v[3]), cust: s_(v[4]), contact: s_(v[5]), total: Number(v[6]), paid: Number(v[7]), balance: Number(v[8]), ship: s_(v[9]) }; },
-    to: function (o) { return [o.no, o.id, o.date, o.custId, o.cust, o.contact, o.total, o.paid, o.balance, o.ship]; } },
+  // Total is the subtotal less Discount (never below zero) plus Shipping fee, see total_(); Balance is Total less Paid. A blank Discount or fee reads as 0.
+  inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Total', 'Paid', 'Balance', 'Shipping', 'Discount', 'Shipping fee'], text: ['B:F', 'J:J'],
+    from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), custId: s_(v[3]), cust: s_(v[4]), contact: s_(v[5]), total: Number(v[6]), paid: Number(v[7]), balance: Number(v[8]), ship: s_(v[9]), disc: Number(v[10]) || 0, fee: Number(v[11]) || 0 }; },
+    to: function (o) { return [o.no, o.id, o.date, o.custId, o.cust, o.contact, o.total, o.paid, o.balance, o.ship, o.disc, o.fee]; } },
   // Line is 1..n within the invoice. Status is Delivered (left stock), To follow (owed: no movement and no cost yet) or Cancelled.
   // Expected and Order line say when a to-follow line should arrive; Delivered on is the day it left stock. Condition is that of the units it took.
   line: { name: 'Invoice lines', col: 2, keys: 2, key: function (o) { return o.invId + ' line ' + o.line; },
@@ -85,7 +87,8 @@ var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k
  * Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data.
  * It also brings a 2.3 sheet to 2.4: Items becomes Products without Category and Reorder at, In rows get their unit SKU,
  * and Browse is made again when its header is not the current one. And a 2.4 sheet to 2.5, see upgrade25_().
- * A 2.5 sheet becomes 2.6 by the header rows alone: Movements and Invoice lines gain Condition, a new last column that reads blank on older rows.
+ * A 2.5 sheet becomes 2.6 by the header rows alone: Movements gains Condition, Invoices Discount and Shipping fee, Invoice lines
+ * Condition, each a new last column that reads blank on older rows; and the Payment details tab is made.
  */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
@@ -95,6 +98,9 @@ function setup() {
   asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:L']).getRange('J:J').setNumberFormat('#,##0.00');
   locked_(function () { upgrade25_(ss); });
   Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
+  sheet_('Invoices').getRange('K:L').setNumberFormat('#,##0.00');
+  // Not protected and not wiped: the owner types these rows.
+  asText_(ensureSheet_(ss, 'Payment details', PAY_HEAD_), ['A:C']);
   asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:O']);
   var br = ss.getSheetByName('Browse');
   if (br && br.getRange(1, 1, 1, BROWSE_HEAD_.length).getValues()[0].join('|') !== BROWSE_HEAD_.join('|')) ss.deleteSheet(br);
@@ -367,6 +373,12 @@ function readInbox_() {
   return out;
 }
 function readTab_(k) { return readRows_(T_[k].name, T_[k].head, T_[k].from); }
+/** Payment details rows that have a Method, in sheet order. A missing tab (setup() not run since 2.5) reads as none rather than failing the sync. */
+function readPay_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Payment details'), last = sh ? sh.getLastRow() : 0;
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, PAY_HEAD_.length).getValues().filter(function (v) { return s_(v[0]); }).map(function (v) { return { method: s_(v[0]), number: s_(v[1]), name: s_(v[2]) }; });
+}
 
 // ---------- reading ----------
 
@@ -378,7 +390,8 @@ function raiseRev_() { PropertiesService.getScriptProperties().setProperty('move
  * Returns every item and document plus the movement rows the app does not have yet.
  * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
- * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns and waiting Inbox rows are always sent whole.
+ * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns, waiting Inbox rows and the payment
+ * details are always sent whole.
  * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
@@ -399,7 +412,7 @@ function snapshot_(have) {
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ line: l.line, sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost, status: l.status, expected: l.expected, orderLine: l.orderLine, delivered: l.delivered, cond: l.cond }); });
   invs.forEach(function (x) { x.lines.sort(function (a, b) { return a.line - b.line; }); });
   return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
+    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), warnings: warnings };
 }
 
 // ---------- validation ----------
@@ -429,6 +442,8 @@ function cond_(v, many) {
   if (c && (many ? c.split(' / ') : [c]).some(function (x) { return CONDITIONS_.indexOf(x) < 0; })) throw new Error('Condition must be one of ' + CONDITIONS_.join(', '));
   return c;
 }
+// An invoice's total from its subtotal (the sum of qty x price), discount and shipping fee. index.html works it out the same way.
+function total_(sub, disc, fee) { return r2_(Math.max(0, r2_(sub) - disc) + fee); }
 function id_(v, what) {
   var id = s_(v);
   if (!id || id.length > 60) throw new Error(what + ' needs an ID');
@@ -498,13 +513,15 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  *                                                                      for blank), Condition conds[k-1] ('' when missing); Received qty = max(it,
  *                                                                      from + n), Received when it reaches Qty
  * orderCancel lineId                                                   line Cancelled; what was received stays
- * invoice     invoice { id, no, date, custId, paid, lines: [{ sku, qty, price, cost, cond, follow, expected, orderLine }] }
+ * invoice     invoice { id, no, date, custId, paid, disc, fee, lines: [{ sku, qty, price, cost, cond, follow, expected, orderLine }] }
  *                                                                      invoice + lines 1..n; a line with follow: true is To follow (no movement,
  *                                                                      blank cost and condition), any other is Delivered with an Out/Sale movement
- *                                                                      <id>-<line>, Ref = invoice no, carrying its cost and cond; paid blank = paid in full
+ *                                                                      <id>-<line>, Ref = invoice no, carrying its cost and cond; Total per total_()
+ *                                                                      (disc, fee blank = 0; disc at most the subtotal); paid blank = paid in full
  * deliver     invId, line, date, cost, cond                            To follow line Delivered + its Out/Sale movement <invId>-<line>
  * pay         invId, paid                                              new total paid on an invoice
- * lineCancel  invId, line, refund                                      To follow line Cancelled; Total less its amount, Paid less the refund
+ * lineCancel  invId, line, refund                                      To follow line Cancelled; Total per total_() over the lines not Cancelled,
+ *                                                                      Paid less the refund
  * follow      invId, line, expected, orderLine                         new expected date or order line on a To follow line
  * ship        invId, ship ('Delivered' or '')                          delivered mark on an invoice
  * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return of Delivered units + movements per RETURN_STOCK_: for Restock one
@@ -845,17 +862,18 @@ function plan_(entries, skip) {
         var vc = cust_(v.custId), vdate = date_(v.date);
         if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one product');
         if (v.lines.length > 50) throw new Error('An invoice can hold 50 lines at most');
-        var total = 0, vlines = v.lines.map(function (l) {
+        var sub = 0, vlines = v.lines.map(function (l) {
           var lit = toy_(l.sku), f = l.follow === true, lq = qty_(l.qty), lp = money_(l.price, 'Price');
-          total += lq * lp;
+          sub += lq * lp;
           return { it: lit, qty: lq, price: lp, cost: f ? null : moneyOrNull_(l.cost, 'Unit cost'), cond: f ? '' : cond_(l.cond, true), follow: f,
             expected: f && s_(l.expected) ? date_(l.expected, 'Expected arrival') : '', orderLine: f ? orderLine_(l.orderLine) : '' };
         });
         if (!vc.contact && vlines.some(function (l) { return l.follow; })) throw new Error('A to-follow line needs the customer\'s phone or Messenger');
-        total = r2_(total);
-        var paid = v.paid === '' || v.paid == null ? total : money_(v.paid, 'Amount paid');
+        var disc = moneyOrNull_(v.disc, 'Discount') || 0, fee = moneyOrNull_(v.fee, 'Shipping fee') || 0;
+        if (disc > r2_(sub)) throw new Error('The discount is more than the subtotal');
+        var total = total_(sub, disc, fee), paid = v.paid === '' || v.paid == null ? total : money_(v.paid, 'Amount paid');
         if (paid > total) throw new Error('Amount paid is more than the total');
-        var inv = { no: docNo_(v.no), id: vid, date: vdate, custId: vc.id, cust: vc.name, contact: vc.contact, total: total, paid: paid, balance: r2_(total - paid), ship: '' };
+        var inv = { no: docNo_(v.no), id: vid, date: vdate, custId: vc.id, cust: vc.name, contact: vc.contact, total: total, paid: paid, balance: r2_(total - paid), ship: '', disc: disc, fee: fee };
         invs.push(made_(inv)); invById[vid] = inv; invByNo[inv.no] = inv;
         vlines.forEach(function (l, i) {
           lines.push(made_({ invNo: inv.no, invId: vid, line: i + 1, sku: l.it.sku, name: l.it.name, qty: l.qty, list: l.it.price, price: l.price, cost: l.cost,
@@ -882,14 +900,15 @@ function plan_(entries, skip) {
         if (np !== pi.paid) { pi.paid = np; pi.balance = r2_(pi.total - np); touch_(pi); }
 
       } else if (e.kind === 'lineCancel') {
-        // The line's amount leaves the total and the refund leaves Paid. A Cancelled line is left as it is.
+        // The total is worked out again from the lines left, with the invoice's discount and fee; the refund leaves Paid. A Cancelled line is left as it is.
         var cl = line_(e.invId, e.line), ci = invById[cl.invId];
         if (cl.status === 'Delivered') throw new Error('That line was already delivered; record a return instead');
         if (cl.status === 'To follow') {
-          var refund = moneyOrNull_(e.refund, 'Refund') || 0;
+          var refund = moneyOrNull_(e.refund, 'Refund') || 0, lsub = 0;
           if (refund > ci.paid) throw new Error('The refund is more than what was paid');
-          ci.total = r2_(ci.total - cl.qty * cl.price); ci.paid = r2_(ci.paid - refund); ci.balance = r2_(ci.total - ci.paid);
           cl.status = 'Cancelled'; touch_(cl); touch_(ci);
+          lines.forEach(function (l) { if (l.invId === ci.id && l.status !== 'Cancelled') lsub += l.qty * l.price; });
+          ci.total = total_(lsub, ci.disc, ci.fee); ci.paid = r2_(ci.paid - refund); ci.balance = r2_(ci.total - ci.paid);
         }
 
       } else if (e.kind === 'follow') {
