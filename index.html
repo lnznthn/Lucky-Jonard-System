@@ -1368,17 +1368,9 @@ function countRow(c) {
   if (!r.match) r.similar = similarItem(r.name);
   return r;
 }
-function parseCount(text) {
-  const rows = [];
-  cleanLines(text).forEach((line, idx) => {
-    const c = splitLine(line);
-    if (!c) { rows.push({ line, status: 'bad', msg: 'Columns must be separated by tabs (or |).', on: false, name: line.slice(0, 40) }); return; }
-    if (idx === 0 && /^(count|qty|quantity|stock|on hand)/i.test((c[2] || '').trim())) return;
-    rows.push(countRow(c));
-  });
-  settleCount(rows);
-  return rows;
-}
+/** The rows of a pasted block, each made from its columns by row(); a first line that head() takes for a header is left out. */
+const pasted = (text, head, row) => cleanLines(text).flatMap((line, idx) => { const c = splitLine(line); return !c ? [{ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }] : idx === 0 && head(c) ? [] : [row(c)]; });
+function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[2] || '').trim()), countRow); settleCount(rows); return rows; }
 /** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
 const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
@@ -1416,17 +1408,7 @@ function recvRow(c) {
   if (!r.match) r.similar = similarItem(r.name);
   return r;
 }
-function parseReceive(text) {
-  const rows = [];
-  cleanLines(text).forEach((line, idx) => {
-    const c = splitLine(line);
-    if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
-    if (idx === 0 && /^(qty|quantity)/i.test((c[1] || '').trim())) return;
-    rows.push(recvRow(c));
-  });
-  settleReceive(rows);
-  return rows;
-}
+function parseReceive(text) { const rows = pasted(text, c => /^(qty|quantity)/i.test((c[1] || '').trim()), recvRow); settleReceive(rows); return rows; }
 function settleReceive(rows) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
@@ -1445,17 +1427,14 @@ function settleReceive(rows) {
   });
 }
 function parseMoves(text) {
-  const rows = [], L = live(), run = new Map();
+  const L = live(), run = new Map();
   // An In written one unit per row (<id>-1 ... <id>-N) counts as one movement of N units.
   const one = new Map(); L.all.forEach(m => { const k = m.dir === 'In' ? m.id.replace(/-\d+$/, '') : m.id, g = one.get(k); if (g) g.qty += m.qty; else one.set(k, { ...m }); });
   const seenKey = new Set([...one.values()].map(m => [m.date, m.sku, m.dir, m.qty, m.reason].join('|')));
-  cleanLines(text).forEach((line, idx) => {
-    const c = splitLine(line);
-    if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
+  return pasted(text, c => /^date/i.test(c[0]), c => {
     const [d = '', nm = '', dr = '', q = '', rs = '', note = '', cost = ''] = c;
-    if (idx === 0 && /^date/i.test(d)) return;
     const r = { date: parseDate(d), name: nm.trim(), dir: /^(in|\+)$/i.test(dr.trim()) ? 'In' : /^(out|-|−)$/i.test(dr.trim()) ? 'Out' : '', qty: /^\d+$/.test(q.trim()) ? Number(q) : 0, reason: '', note: note.trim(), cost: null, on: false, status: 'ok', msg: '' };
-    const fail = m => { r.status = 'bad'; r.msg = m; rows.push(r); };
+    const fail = m => Object.assign(r, { status: 'bad', msg: m });
     if (!r.date) return fail(`Date “${d}” not understood. Use 2026-11-15 or 11/15/26.`);
     r.item = findItem(nm);
     if (!r.item) { const s = similarItem(nm); return fail(`No item matches “${nm}”.` + (s ? ` Did you mean “${s.name}”?` : '')); }
@@ -1471,9 +1450,8 @@ function parseMoves(text) {
     run.set(r.item.sku, bal);
     if (dup) { r.status = 'dup'; r.msg = 'Same date, item, direction, quantity and reason already exist. Tick to add anyway.'; }
     else { r.on = true; if (bal < 0) { r.status = 'warn'; r.msg = `Stock would drop to ${bal}.`; } }
-    rows.push(r);
+    return r;
   });
-  return rows;
 }
 const STATUS_LABEL = { new: 'New item', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
 const IMP = {
