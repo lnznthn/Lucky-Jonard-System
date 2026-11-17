@@ -482,6 +482,9 @@ assert.deepEqual([s1.reset, s1.moves.length], [false, 0], 'and then syncs increm
 r = U.add([costE('cc1', 'rcv-uo1-4', 450), costE('cc2', 'rcv-uo1-3', null)]);
 assert.ok(r.results.every(x => x.ok)); assert.equal(r.sync.moveRev, s0.moveRev + 2, 'a retry writes nothing; clearing a cost is a write');
 assert.equal(mvRow(U, 'rcv-uo1-3')[9], ''); assert.deepEqual(brU('U1'), [2, 0, 0, 2, '?, 450', 450, 1]);
+r = U.add([move('nx', 'U2', 'In', 1, 'Restock', { cost: 5 }), costE('cc3', 'nx', 6)]);
+assert.ok(r.results.every(x => x.ok)); assert.equal(mvRow(U, 'nx')[9], 6, 'a movement written earlier in the same request takes the cost');
+assert.equal(r.sync.moveRev, s0.moveRev + 2, 'a new row needs no reset');
 
 // (n) refused: a unit that left stock (also earlier in the same request), an Out, an unknown ID, a bad value; nothing changes
 const LEFT = 'That unit has already left stock, so its cost can no longer be changed.';
@@ -495,7 +498,7 @@ assert.deepEqual(tabsN(), beforeN, 'no movement and no invoice changed'); assert
 r = U.add([saleU('us4', 4, [{ sku: 'U1', qty: 1, price: 500, cost: null }]), costE('cn7', 'rcv-uo1-3', 310), costE('cn8', 'n4', 75)]);
 zn = res(r);
 assert.ok(zn.vus4.ok && zn.cn8.ok); assert.equal(zn.cn7.error, LEFT, 'the sale earlier in the request took that unit');
-assert.deepEqual([mvRow(U, 'rcv-uo1-3')[9], brU('U1')[4], brU('U2')[4]], ['', '450', '75']);
+assert.deepEqual([mvRow(U, 'rcv-uo1-3')[9], brU('U1')[4], brU('U2')[4]], ['', '450', '75, 6']);
 
 // (o) the Movements key check: a sorted tab still gets the cost on the right row; a duplicated or deleted row refuses the entry
 const K = bench();
