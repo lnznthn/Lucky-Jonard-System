@@ -3,7 +3,9 @@
 import datetime, json, os, re, subprocess, sys, urllib.request
 from playwright.sync_api import sync_playwright
 
-APP, API = 'http://localhost:8765/index.html', 'http://localhost:8766'
+import os
+APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
+APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots2'
 os.makedirs(SHOTS, exist_ok=True)
 fails = []
