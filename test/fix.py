@@ -20,7 +20,7 @@ def units(p, name):
     tab(p, 'Inventory'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
     out = [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]; close(p); return out
 def moves(name, reason): return [r for r in rows('Movements') if r[3] == name and r[6] == reason]
-def item(name): return next(r for r in rows('Items') if r[1] == name)
+def item(name): return next(r for r in rows('Products') if r[1] == name)
 def inbox(): return [r[:12] for r in rows('Inbox')]   # every column Claude wrote, without Status
 FIELDS = ['Price (₱)', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release date still needs checking', 'Note']
 
@@ -47,7 +47,7 @@ with sync_playwright() as pw:
     cost(p, 1, 20); cost(p, 2, 30); save(p)
     apply(p, 'Apply 2 changes'); synced(p)
     check([r[9] for r in moves('Fix Alpha', 'Opening')] == [100, 150] and [r[9] for r in moves('Fix Bravo', 'Opening')] == [10, 20, 30], 'the opening units carry the costs typed in the modal')
-    check(item('Fix Alpha')[3] == 500 and item('Fix Alpha')[8:10] == ['Old Brand', 'Line A'], f"the new item has the typed price and Claude's details: {item('Fix Alpha')}")
+    check(item('Fix Alpha')[2] == 500 and item('Fix Alpha')[6:8] == ['Old Brand', 'Line A'], f"the new item has the typed price and Claude's details: {item('Fix Alpha')}")
 
     # ---- items on file: a count that raises stock adds units at the typed costs; one that lowers it has no cost fields
     post_inbox([{'type': 'Count', 'name': 'Fix Alpha', 'qty': 5, 'cost': 300, 'mfr': 'Maker', 'brand': 'New Brand', 'line': 'Line B', 'rel': '2022', 'verify': 'Y'},
@@ -76,8 +76,8 @@ with sync_playwright() as pw:
     check([r[4:6] for r in cnt] == [['In', 1]] * 3 and [r[9] for r in cnt] == [310, 310, 330], f'one In row per unit added, at the typed costs: {[(r[4], r[5], r[9]) for r in cnt]}')
     check([r[4:6] for r in moves('Fix Bravo', 'Count')] == [['Out', 2]], 'the lower count is one Out row of 2')
     a = item('Fix Alpha')
-    check(a[3] == 650 and a[9] == 'Line Typed', f'typed values overwrite the item on file: {a}')
-    check(a[8] == 'Old Brand' and a[7] == 'Maker' and a[11] == '2022' and a[12] == '', f"Claude's values only fill blanks, and the unticked check is kept: {a}")
+    check(a[2] == 650 and a[7] == 'Line Typed', f'typed values overwrite the item on file: {a}')
+    check(a[6] == 'Old Brand' and a[5] == 'Maker' and a[9] == '2022' and a[10] == '', f"Claude's values only fill blanks, and the unticked check is kept: {a}")
     check(units(p, 'Fix Alpha') == ['100', '150', '310', '310', '330'], 'the added units join the back of the queue')
     check(units(p, 'Fix Bravo') == ['30'], 'the lower count removed the two oldest units')
     check(inbox() == before and [r[12] for r in rows('Inbox')][2:] == ['Done', 'Done', ''], 'after Apply the Inbox rows keep what Claude wrote; only the recorded ones are Done')

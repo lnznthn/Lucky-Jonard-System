@@ -112,13 +112,13 @@ with sync_playwright() as pw:
     check(p.inner_text('#syncTxt').endswith('saved here'), 'pill counts items saved on the device')
     connect(p); synced(p)
     d = dump()
-    check(len(d['Items']['rows']) - 1 == 4, f"sheet has 4 items: {len(d['Items']['rows']) - 1}")
+    check(len(d['Products']['rows']) - 1 == 4, f"sheet has 4 products: {len(d['Products']['rows']) - 1}")
     mv_rows = d['Movements']['rows'][1:]
     check(len(mv_rows) == 27, f'sheet has movement rows, one per unit stocked in: {len(mv_rows)}')
     check(stock_map(p) == before, 'stock unchanged by sync')
     check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
-    check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
-    onh = {r[1]: r[6] for r in d['Items']['rows'][1:]}
+    check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, Product ID and product name')
+    onh = {r[1]: r[4] for r in d['Products']['rows'][1:]}
     check(onh == before, f'On hand in the sheet is a written number per item: {onh}')
     p.screenshot(path=f'{SHOTS}/08-synced.png')
 
@@ -168,13 +168,13 @@ with sync_playwright() as pw:
 
     # ---- two phones invent the same next Product ID: the second is renumbered, nobody is credited wrongly
     add_toy(p, 'Dino Figure', 2); synced(p)
-    sku_dino = [r[0] for r in dump()['Items']['rows'][1:] if r[1] == 'Dino Figure'][0]
+    sku_dino = [r[0] for r in dump()['Products']['rows'][1:] if r[1] == 'Dino Figure'][0]
     ctx2.set_offline(True)
     add_toy(p2, 'Robot Kit', 3)
     local_sku = p2.evaluate("live().list.find(i => i.name === 'Robot Kit').sku")
     check(sku_dino in local_sku, f'both phones picked the same SKU {sku_dino} ({local_sku})')
     ctx2.set_offline(False); p2.click('#syncBtn'); synced(p2); p.click('#syncBtn'); synced(p)
-    items = {r[1]: r[0] for r in dump()['Items']['rows'][1:]}
+    items = {r[1]: r[0] for r in dump()['Products']['rows'][1:]}
     check(items['Dino Figure'] == sku_dino and items['Robot Kit'] != sku_dino, f'Robot Kit renumbered: {items}')
     check(stock_map(p2)['Dino Figure'] == 2 and stock_map(p2)['Robot Kit'] == 3, f'no cross-credit on device 2: {stock_map(p2)}')
     check(stock_map(p) == stock_map(p2), 'devices agree after renumbering')
@@ -188,7 +188,7 @@ with sync_playwright() as pw:
     tab(p2, 'Home'); check('Fix 5 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries: the item and its four units')
     p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
     check(f'New product “{long_name}” was refused: Name is too long.' in p2.inner_text('#view'), 'activity says which product was refused and why, with no Product ID')
-    check(not any(r[1] == long_name for r in dump()['Items']['rows']) and not any(r[3] == long_name for r in dump()['Movements']['rows']), 'sheet has neither the product nor its stock entries')
+    check(not any(r[1] == long_name for r in dump()['Products']['rows']) and not any(r[3] == long_name for r in dump()['Movements']['rows']), 'sheet has neither the product nor its stock entries')
     p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
     check(stock_map(p2)['Lego Castle'] == 7 and long_name not in stock_map(p2), f"after Delete, Lego Castle stays at 7 and the refused product is gone: {stock_map(p2)}")
 
@@ -224,8 +224,8 @@ with sync_playwright() as pw:
     check(p.evaluate('live().inbox.length') == 2, 'the waiting count drops at once')
     synced(p); inbox = dump()['Inbox']['rows'][1:]
     check([r[12] for r in inbox] == ['Done', 'Done', 'Done', '', ''], f'applied rows are marked Done in the sheet: {[r[12] for r in inbox]}')
-    it = {r[1]: r for r in dump()['Items']['rows'][1:]}
-    check(it['Hot Wheels 5-Pack'][8:10] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][7] == 'Bandai' and it['Inbox Robot'][11:13] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
+    it = {r[1]: r for r in dump()['Products']['rows'][1:]}
+    check(it['Hot Wheels 5-Pack'][6:8] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][5] == 'Bandai' and it['Inbox Robot'][9:11] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
     sm = stock_map(p); check(sm['Hot Wheels 5-Pack'] == 20 and sm['Inbox Robot'] == 3 and sm['Lego Castle'] == 9, f'counts from Claude recorded: {sm}')
     update_stock(p); apply(p, 'Apply 2 changes')
     check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class'), 'after the last group from Claude the app goes to Inventory')
@@ -237,13 +237,13 @@ with sync_playwright() as pw:
     check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
     update_stock(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Update inventory is back to the other ways; with a connection the paste box is folded')
     # Dismiss records nothing
-    n_items, n_moves = len(dump()['Items']['rows']), len(dump()['Movements']['rows'])
+    n_items, n_moves = len(dump()['Products']['rows']), len(dump()['Movements']['rows'])
     post_inbox([{'type': 'Count', 'name': 'Dismiss Me', 'qty': 5}, {'type': 'count', 'name': 'Hot Wheels 5-Pack', 'qty': 1}])
     p.click('#syncBtn'); synced(p); update_stock(p)
     check('Claude read 2 rows' in p.inner_text('#view'), 'new rows from Claude show')
     p.click('#view button[data-act="inboxDismiss"]'); synced(p)
     check('Other ways to change stock' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], f"Dismiss marks the rows Dismissed: {[r[12] for r in dump()['Inbox']['rows'][1:]]} {p.inner_text('#view')[:200]!r}")
-    check(len(dump()['Items']['rows']) == n_items and len(dump()['Movements']['rows']) == n_moves and stock_map(p)['Hot Wheels 5-Pack'] == 20, 'Dismiss records nothing')
+    check(len(dump()['Products']['rows']) == n_items and len(dump()['Movements']['rows']) == n_moves and stock_map(p)['Hot Wheels 5-Pack'] == 20, 'Dismiss records nothing')
 
     # the same item counted in three photos is added into one count; the '?' row stays apart and keeps waiting
     post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 12}, {'type': 'Count', 'name': 'hot wheels 5 pack', 'qty': 9, 'note': 'second shelf'}, {'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': '?'}])
@@ -300,19 +300,19 @@ with sync_playwright() as pw:
     p.click('#sheet .btn[data-act="close"]')
     st = {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}
     check(st == {'Fresh Box': 'Done', 'Unidentified figure, blue': '', 'Mystery': 'Done', 'Keep Me': '', 'Hot Wheels 5-Pack': 'Done', **{f'Bulk {i}': 'Done' for i in range(1, 11)}}, f'only the recorded rows are Done in the Inbox: {st}')
-    it = {r[1]: r for r in dump()['Items']['rows'][1:]}
-    check(it['Fresh Box'][6] == 4 and it['Mystery Robot'][11] == '2023' and 'Mystery' not in it and it['Bulk 1'][6] == 7 and 'Keep Me' not in it, 'the corrected values are what was recorded')
+    it = {r[1]: r for r in dump()['Products']['rows'][1:]}
+    check(it['Fresh Box'][4] == 4 and it['Mystery Robot'][9] == '2023' and 'Mystery' not in it and it['Bulk 1'][4] == 7 and 'Keep Me' not in it, 'the corrected values are what was recorded')
     check(any(r[2] == 'Mystery' and r[3] == '?' for r in dump()['Inbox']['rows']), 'the correction was not written back to the Inbox tab')
     check('Claude read 2 rows' in p.inner_text('#view'), 'the rows left in the Inbox show again')
     p.click('#view button[data-act="inboxDismiss"]'); synced(p)
     check([v for k, v in {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}.items() if k in ('Keep Me', 'Unidentified figure, blue')] == ['Dismissed', 'Dismissed'], 'Dismiss these rows marks everything shown')
     # warnings from the sheet: a banner on Home under the buttons, gone once fixed
-    items_rows = dump()['Items']['rows'][1:]
-    post_rows('Items', items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
-    warn = f'Items: SKU {items_rows[0][0]} appears on 2 rows. The first is used.'
+    items_rows = dump()['Products']['rows'][1:]
+    post_rows('Products', items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
+    warn = f'Products: Product ID {items_rows[0][0]} appears on 2 rows. The first is used.'
     check(p.inner_text('#view .banner.danger') == warn and p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).color") == p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).borderTopColor"), 'a warning from the sheet shows on Home in the danger colour')
     check(p.evaluate("document.querySelector('.banner.danger').previousElementSibling.classList.contains('actions')"), 'the banner sits under the buttons'); p.screenshot(path=f'{SHOTS}/14-warning.png')
-    post_rows('Items', items_rows); p.click('#syncBtn'); synced(p)
+    post_rows('Products', items_rows); p.click('#syncBtn'); synced(p)
     check(p.query_selector('#view .banner.danger') is None, 'no banner when the sheet reports no warnings')
 
     # ---- theme: Device, Light or Dark, set in Settings only, kept on the device

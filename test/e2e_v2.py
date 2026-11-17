@@ -41,9 +41,9 @@ with sync_playwright() as pw:
     check('Banpresto / Grandista / Son Goku · released 2019-06 (to verify)' in txt, 'preview shows brand, line, character and the verify flag')
     check('Release date “sometime” not understood' in txt and 'Apply 3 changes' in txt, 'an unreadable release date is left blank, row still applies')
     apply(p, 'Apply 3 changes'); synced(p)
-    it = {r[1]: r for r in rows('Items')}
-    check(it['Grandista Son Goku'][7:13] == ['Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Verify'], f"details reached the sheet: {it['Grandista Son Goku'][7:13]}")
-    check(it['Maximatic Luffy'][11:13] == ['', ''], 'no release date, no flag')
+    it = {r[1]: r for r in rows('Products')}
+    check(it['Grandista Son Goku'][5:11] == ['Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Verify'], f"details reached the sheet: {it['Grandista Son Goku'][5:11]}")
+    check(it['Maximatic Luffy'][9:11] == ['', ''], 'no release date, no flag')
     h = home(p); p.screenshot(path=f'{SHOTS}/01a-home.png')
     titles = [e.inner_text() for e in p.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
     check(titles == ['Price 3 products', 'Add the cost of 4 units', 'Check 1 release date'] and p.inner_text('#view .badge') == '3', f'Home: Needs you rows in their fixed order, badge counts rows: {titles}')
@@ -62,16 +62,16 @@ with sync_playwright() as pw:
     check('Banpresto' in sheet and 'to verify' in sheet and '2 units have no cost yet.' in sheet, 'toy sheet shows details, flag and the units with no cost')
     p.screenshot(path=f'{SHOTS}/02-toy-sheet.png')
     p.click('button:has-text("Edit")'); p.fill('#fPrice', '1800'); p.uncheck('#fRelCheck'); p.fill('#fRel', '2019-06-20'); p.click('#sheet button.primary:has-text("Save")'); synced(p)
-    it = {r[1]: r for r in rows('Items')}
-    check(it['Grandista Son Goku'][3] == 1800 and it['Grandista Son Goku'][11:13] == ['2019-06-20', ''], 'edit clears the flag and sets the verified date')
+    it = {r[1]: r for r in rows('Products')}
+    check(it['Grandista Son Goku'][2] == 1800 and it['Grandista Son Goku'][9:11] == ['2019-06-20', ''], 'edit clears the flag and sets the verified date')
 
     # ---- a later paste fills blank details only, and never overwrites what is on file
     paste_import(p, 'count', T.join(['Plain Toy', '1', '', '', 'Sega', 'Gigo', '', 'Zoro', '2023', '']) + '\n' + T.join(['Grandista Son Goku', '2', '', '', 'Other Maker', '', '', '', '', '']))
     txt = p.inner_text('#impOut')
     check('Details' in txt and 'adds manufacturer, brand, character, release date' in txt and 'Apply 1 change' in txt, 'blank details are offered, existing ones are not')
     apply(p, 'Apply 1 change'); synced(p)
-    it = {r[1]: r for r in rows('Items')}
-    check(it['Plain Toy'][7:9] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][7] == 'Bandai Spirits', 'details filled without overwriting')
+    it = {r[1]: r for r in rows('Products')}
+    check(it['Plain Toy'][5:7] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][5] == 'Bandai Spirits', 'details filled without overwriting')
 
     # ---- receive mode: supplier paperwork adds stock at its cost, one unit per row
     paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')

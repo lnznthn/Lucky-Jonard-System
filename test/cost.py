@@ -114,7 +114,7 @@ with sync_playwright() as pw:
     open_item(p, 'Cost Charlie'); check('Below zero by 1. Units that arrive next cover this first.' in p.inner_text('#sheet') and not units(p), 'the item sheet says what is owed to the next units'); close(p)
     stock_in(p, 'Cost Charlie', [700, 750]); synced(p)
     open_item(p, 'Cost Charlie'); check(units(p) == ['750'] and p.inner_text('#sheet .onhand') == '1', f'the ₱700 unit covered the deficit; one unit at ₱750 is on hand: {units(p)}'); close(p)
-    check(stock_map(p)['Cost Charlie'] == 1 and [r[6] for r in rows('Items') if r[1] == 'Cost Charlie'] == [1] and [r[7] for r in rows('Invoice lines') if r[3] == 'Cost Charlie'] == [''], 'stock is 1 here and in the sheet; the sale line stays without a cost')
+    check(stock_map(p)['Cost Charlie'] == 1 and [r[4] for r in rows('Products') if r[1] == 'Cost Charlie'] == [1] and [r[7] for r in rows('Invoice lines') if r[3] == 'Cost Charlie'] == [''], 'stock is 1 here and in the sheet; the sale line stays without a cost')
 
     # ---- a Restock return comes back at the invoice line's cost, at the back of the queue
     ctx.set_offline(True)
