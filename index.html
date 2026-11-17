@@ -1285,6 +1285,8 @@ function parseCount(text) {
   settleCount(rows);
   return rows;
 }
+/** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
+const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
 function settleCount(rows) {
   const used = new Set();
@@ -1296,22 +1298,22 @@ function settleCount(rows) {
     used.add(key);
     if (r.match) {
       const have = stockOf(r.match.sku), d = r.count - have;
-      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = Array(Math.max(d, 0)).fill(r.cost);   // one per unit the row adds
+      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = unitCosts(r, d);   // one per unit the row adds
       r.status = d !== 0 ? 'count' : r.adds ? 'details' : 'same';
       r.on = d !== 0 || !r.match.active || !!r.adds;
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
-      r.status = 'new'; r.on = !r.similar; r.costs = Array(r.count).fill(r.cost);
+      r.status = 'new'; r.on = !r.similar; r.costs = unitCosts(r, r.count);
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
 /** Supplier paperwork: Name, Qty, Cost each, then the optional toy details and a note. */
-/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note. */
+/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note, then the Price typed in Correct this row. */
 function recvRow(c) {
   const [name = '', q = '', cost = '', cat = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: null, note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
+  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[11]), note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
   readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
@@ -1336,7 +1338,7 @@ function settleReceive(rows) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null; r.costs = Array(r.qty).fill(r.cost);   // one per unit the row adds
+    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty);   // one per unit the row adds
     if (r.match) {
       r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1425,12 +1427,13 @@ function inboxLoad() {
   resettle(ui.imp);
   return true;
 }
+// The columns of a Count and a Receive row by field (Count is the quantity in both). Receive has no Price column, so a typed price goes last.
+const ROW_COLS = { count: ['name', 'cat', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'cat', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
+/** A row's columns with what was typed in Correct this row (src.fix holds only the fields changed there). */
+const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 12) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
 /** A review row from its source columns with the owner's correction and "Use" choice applied. */
 function impRow(mode, src) {
-  const c = src.cols.slice(), f = src.fix, at = mode === 'count' ? [0, 2, 9] : [0, 1, 8];
-  while (c.length < 11) c.push('');
-  if (f) { c[at[0]] = f.name; c[at[1]] = f.count; c[at[2]] = f.rel; }
-  const r = (mode === 'count' ? countRow : recvRow)(c), use = src.use && live().map.get(src.use);
+  const r = (mode === 'count' ? countRow : recvRow)(fixedCols(mode, src)), use = src.use && live().map.get(src.use);
   if (use && r.match !== use && (r.count != null || r.qty)) { r.match = use; r.similar = null; }
   r.src = src;
   return r;
@@ -1523,27 +1526,42 @@ function prowHtml(imp, i) {
     ? `<button class="name fix" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
     : `<label class="name" for="imp${i}">${name}</label>${sub ? `<div class="sub">${sub}</div>` : ''}`}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
-/** The small sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
+/** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
 function openFix(i) {
   const imp = ui.imp, r = imp && imp.rows[i]; if (!r || !r.src) return;
-  const src = r.src, c = src.cols, cnt = imp.mode === 'count' ? 2 : 1, rel = imp.mode === 'count' ? 9 : 8;
-  const f = src.fix || { name: c[0] || '', count: c[cnt] || '', rel: c[rel] || '' }, sim = src.use ? live().map.get(src.use) : r.similar;
+  const src = r.src, c = fixedCols(imp.mode, src), at = k => c[ROW_COLS[imp.mode].indexOf(k)] || '', sim = src.use ? live().map.get(src.use) : r.similar;
+  // A count is absolute, so an item on file gets cost fields only for the units above its stock.
+  const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, t = (src.fix && src.fix.costs) || (r.cost != null ? [r.cost] : []);
+  ui.f = { c: { v: t.map(x => x == null ? '' : String(x)), open: new Set(t).size > 1 } };
+  const fld = (k, label, more = '') => { const id = 'fx' + k[0].toUpperCase() + k.slice(1); return `<div><label for="${id}">${label}</label><input id="${id}" data-fx="${k}" value="${esc(at(k))}" autocomplete="off"${more}></div>`; };
   openSheet(`<div class="top"><h2>Correct this row</h2>${closeBtn}</div>
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
-    <div><label for="fxName">Name</label><input id="fxName" value="${esc(f.name)}" autocomplete="off"></div>
-    <div class="row2"><div><label for="fxCount">${imp.mode === 'count' ? 'Count' : 'Qty'}</label><input id="fxCount" inputmode="numeric" value="${esc(f.count)}"></div>
-    <div><label for="fxRel">Release date</label><input id="fxRel" value="${esc(f.rel)}" placeholder="2024-07"></div></div>
-    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
+    ${fld('name', 'Name')}
+    ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
+    ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
+    <div class="row2">${fld('cat', 'Category', ' placeholder="General"')}${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}</div>
+    <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
+    <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
+    ${fld('rel', 'Release date', ' placeholder="2024-07-15, 2024-07 or 2024"')}
+    <label class="check"><input id="fxRelCheck" type="checkbox" ${r.relCheck ? 'checked' : ''}> Release date still needs checking</label>
+    ${fld('note', 'Note', ' placeholder="Optional"')}
+    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" data-have="${stockOf(sim.sku)}" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
     <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
 }
 function saveFix(i, simSku) {
   const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
-  const name = $('#fxName').value.replace(/\s+/g, ' ').trim(), count = $('#fxCount').value.trim(), rel = $('#fxRel').value.trim();
-  if (!name) { toast('Type a name.'); return; }
-  if (count && count !== '?' && !/^\d+$/.test(count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
-  if (rel && !parseRel(rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
-  const src = r.src; src.fix = { name, count, rel };
-  src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
+  const sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}; document.querySelectorAll('#sheet [data-fx]').forEach(e => { v[e.dataset.fx] = sp(e.value); });
+  if (!v.name) { toast('Type a name.'); return; }
+  if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
+  if (v.price && parsePrice(v.price) == null) { toast('Price must be zero or more.'); return; }
+  if (v.rel && !parseRel(v.rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
+  const costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
+  if (!costs) { toast('Cost must be zero or more.'); return; }
+  // Only the fields changed here count as typed: they overwrite the item on file, while the others keep the rule for Claude's values.
+  const src = r.src, c = fixedCols(imp.mode, src), fix = { ...src.fix, costs };
+  Object.keys(v).forEach(k => { if (v[k] !== sp(c[ROW_COLS[imp.mode].indexOf(k)])) fix[k] = v[k]; });
+  if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
+  src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
   imp.rows[i] = impRow(imp.mode, src);
   resettle(imp); closeSheet(); renderImpOut();
 }
@@ -1580,8 +1598,8 @@ function applyCount(rows) {
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
     if (d !== 0) {
       const m = { id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null };
-      // Stock can move between the review and Apply (a sync); the row's costs are then used as far as they go.
-      if (d > 0) qIns(m, Array.from({ length: d }, (_, k) => k < r.costs.length ? r.costs[k] : r.cost)); else qMove(m);
+      // Stock can move between the review and Apply (a sync); the typed costs are then used as far as they go.
+      if (d > 0) qIns(m, unitCosts(r, d)); else qMove(m);
       out.nMove++; if (!fresh) out.nCount++;
     }
     dirty();
@@ -1859,7 +1877,7 @@ function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(in
 document.addEventListener('input', ev => {
   const t = ev.target;
   if (t.dataset.cost) { costInput(t); return; }
-  if (t.dataset.units) redrawCosts(t.dataset.units, t.value);   // a quantity sets how many cost fields show
+  if (t.dataset.units) redrawCosts(t.dataset.units, t.value - (t.dataset.have || 0));   // a quantity sets how many cost fields show (a count: the units above the stock on hand)
   if (t.dataset.b) {
     setPath(t.dataset.b, t.value);
     if (t.dataset.redraw) rerender();
@@ -1886,6 +1904,7 @@ document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
   // A known customer's name brings their contact with it.
   if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
