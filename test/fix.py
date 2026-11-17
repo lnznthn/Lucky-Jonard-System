@@ -17,12 +17,12 @@ def costs(p): return [e.input_value() for e in p.query_selector_all('#sheet [dat
 def cost(p, k, v): p.fill(f'#sheet [data-cost="f.c"][data-k="{k}"]', str(v))
 def save(p): p.click('#sheet button:has-text("Save")')
 def units(p, name):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
+    tab(p, 'Inventory'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
     out = [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]; close(p); return out
 def moves(name, reason): return [r for r in rows('Movements') if r[3] == name and r[6] == reason]
-def item(name): return next(r for r in rows('Items') if r[1] == name)
+def item(name): return next(r for r in rows('Products') if r[1] == name)
 def inbox(): return [r[:12] for r in rows('Inbox')]   # every column Claude wrote, without Status
-FIELDS = ['Category', 'Price (₱)', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release date still needs checking', 'Note']
+FIELDS = ['Price (₱)', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release date still needs checking', 'Note']
 
 with sync_playwright() as pw:
     b = launch(pw)
@@ -47,7 +47,7 @@ with sync_playwright() as pw:
     cost(p, 1, 20); cost(p, 2, 30); save(p)
     apply(p, 'Apply 2 changes'); synced(p)
     check([r[9] for r in moves('Fix Alpha', 'Opening')] == [100, 150] and [r[9] for r in moves('Fix Bravo', 'Opening')] == [10, 20, 30], 'the opening units carry the costs typed in the modal')
-    check(item('Fix Alpha')[3] == 500 and item('Fix Alpha')[8:10] == ['Old Brand', 'Line A'], f"the new item has the typed price and Claude's details: {item('Fix Alpha')}")
+    check(item('Fix Alpha')[2] == 500 and item('Fix Alpha')[6:8] == ['Old Brand', 'Line A'], f"the new item has the typed price and Claude's details: {item('Fix Alpha')}")
 
     # ---- items on file: a count that raises stock adds units at the typed costs; one that lowers it has no cost fields
     post_inbox([{'type': 'Count', 'name': 'Fix Alpha', 'qty': 5, 'cost': 300, 'mfr': 'Maker', 'brand': 'New Brand', 'line': 'Line B', 'rel': '2022', 'verify': 'Y'},
@@ -76,27 +76,27 @@ with sync_playwright() as pw:
     check([r[4:6] for r in cnt] == [['In', 1]] * 3 and [r[9] for r in cnt] == [310, 310, 330], f'one In row per unit added, at the typed costs: {[(r[4], r[5], r[9]) for r in cnt]}')
     check([r[4:6] for r in moves('Fix Bravo', 'Count')] == [['Out', 2]], 'the lower count is one Out row of 2')
     a = item('Fix Alpha')
-    check(a[3] == 650 and a[9] == 'Line Typed', f'typed values overwrite the item on file: {a}')
-    check(a[8] == 'Old Brand' and a[7] == 'Maker' and a[11] == '2022' and a[12] == '', f"Claude's values only fill blanks, and the unticked check is kept: {a}")
+    check(a[2] == 650 and a[7] == 'Line Typed', f'typed values overwrite the item on file: {a}')
+    check(a[6] == 'Old Brand' and a[5] == 'Maker' and a[9] == '2022' and a[10] == '', f"Claude's values only fill blanks, and the unticked check is kept: {a}")
     check(units(p, 'Fix Alpha') == ['100', '150', '310', '310', '330'], 'the added units join the back of the queue')
     check(units(p, 'Fix Bravo') == ['30'], 'the lower count removed the two oldest units')
     check(inbox() == before and [r[12] for r in rows('Inbox')][2:] == ['Done', 'Done', ''], 'after Apply the Inbox rows keep what Claude wrote; only the recorded ones are Done')
     update_stock(p); p.click('#view button[data-act="inboxDismiss"]'); synced(p)
 
-    # ---- a Receive row: Qty in place of Count; a typed price and category make the new item
+    # ---- a Receive row: Qty in place of Count; a typed price makes the new product
     post_inbox([{'type': 'Receive', 'name': 'Fix Alpha', 'qty': 2, 'cost': 400}, {'type': 'Receive', 'name': 'Fix Delta', 'qty': 1}])
     review(p)
-    check('Fix Alpha: +2 at ₱400 each' in line(p, 'Fix Alpha') and 'New · General · +1 · no cost yet' in line(p, 'Fix Delta'), f"receive rows show their cost: {line(p, 'Fix Delta')!r}")
+    check('Fix Alpha: +2 at ₱400 each' in line(p, 'Fix Alpha') and 'New · +1 · no cost yet' in line(p, 'Fix Delta'), f"receive rows show their cost: {line(p, 'Fix Delta')!r}")
     fix(p, 'Fix Alpha')
     check(labels(p) == ['Name', 'Qty', 'Unit 1 cost', 'Unit 2 cost'] + FIELDS and costs(p) == ['400', '400'], f'a Receive row shows Qty in place of Count: {labels(p)}')
     p.screenshot(path=f'{SHOTS}/03-receive.png', full_page=True); close(p)
-    fix(p, 'Fix Delta'); p.fill('#fxCat', 'Figures'); p.fill('#fxPrice', 'abc'); save(p)
+    fix(p, 'Fix Delta'); p.fill('#fxPrice', 'abc'); save(p)
     check('Price must be zero or more.' in p.inner_text('#toast'), 'a price that is not a number is refused')
     p.fill('#fxPrice', '900'); cost(p, 0, 50); save(p)
-    check('New · Figures · +1 at ₱50 each' in line(p, 'Fix Delta'), f"the typed category and cost show on the row: {line(p, 'Fix Delta')!r}")
+    check('New · +1 at ₱50 each' in line(p, 'Fix Delta'), f"the typed cost shows on the row: {line(p, 'Fix Delta')!r}")
     apply(p, 'Apply 2 changes'); synced(p)
     d = item('Fix Delta')
-    check(d[2:4] == ['Figures', 900] and [r[9] for r in moves('Fix Delta', 'Restock')] == [50] and [r[9] for r in moves('Fix Alpha', 'Restock')] == [400, 400], f'the receipt records the typed price, category and costs: {d}')
+    check(d[2] == 900 and [r[9] for r in moves('Fix Delta', 'Restock')] == [50] and [r[9] for r in moves('Fix Alpha', 'Restock')] == [400, 400], f'the receipt records the typed price and costs: {d}')
 
     check(not errors, f'no page errors: {errors}')
     b.close()
