@@ -1,4 +1,4 @@
-# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Update inventory) with
+# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Add inventory) with
 # their sort and filters in the header cells, the cost typed in a review row, and no page that scrolls sideways.
 # python3 test/desktop.py  (needs static server on 8765, mock backend on 8766, Chrome)
 import os, re
@@ -21,21 +21,21 @@ with sync_playwright() as pw:
     side = p.eval_on_selector('nav.tabs', 'e => { const r = e.getBoundingClientRect(); return [r.left, r.width, r.height, innerHeight]; }')
     check(side[0] == 0 and 200 < side[1] < 260 and side[2] == side[3], f'navigation is a full-height side bar: {side}')
     labels = [x.inner_text().strip() for x in p.query_selector_all('#tabs button')]
-    check(labels == ['Home', 'Inventory', 'Sales', 'Orders', 'Update inventory · 3', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Inventory, Sales, Orders, Update inventory with its count, Activity: {labels}")
+    check(labels == ['Home', 'Inventory · 3', 'Sales', 'Orders', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Inventory with the waiting count, Sales, Orders, Activity: {labels}")
     check(p.eval_on_selector('#tabs button.on', 'e => getComputedStyle(e).color') == p.evaluate("getComputedStyle(document.body).color"), 'the current page in the side bar is in the text colour')
     # Side bar collapses to icons (kept on the device); the phone layout is untouched.
     full = p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width')
     p.click('#navTog'); mini = p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width'); main_l = p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left')
-    check(mini < 80 and main_l == mini and p.inner_text('#tabs .on').strip() == '' and p.get_attribute('#tabs button[data-t="stock"]', 'title') == 'Inventory' and p.get_attribute('#tabs button[data-t="import"]', 'aria-label') == 'Update inventory · 3' and p.inner_text('#tabs .bd') == '3' and fits(), f'the toggle collapses the side bar to icons with tooltips and a count badge: {full} -> {mini}')
+    check(mini < 80 and main_l == mini and p.inner_text('#tabs .on').strip() == '' and p.get_attribute('#tabs button[data-t="stock"]', 'title') == 'Inventory' and p.get_attribute('#tabs button[data-t="stock"]', 'aria-label') == 'Inventory · 3' and p.inner_text('#tabs .bd') == '3' and fits(), f'the toggle collapses the side bar to icons with tooltips and a count badge: {full} -> {mini}')
     p.reload(); p.wait_for_selector('#tabs button')
     check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == mini, 'the collapsed side bar survives a reload')
-    p.click('#navTog'); check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == full and 'Update inventory · 3' in p.inner_text('#tabs'), 'the toggle expands the side bar again')
+    p.click('#navTog'); check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == full and 'Inventory · 3' in p.inner_text('#tabs'), 'the toggle expands the side bar again')
     p.click('#navTog'); p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
     check(p.is_hidden('#navTog') and p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left') == 0 and p.inner_text('#tabs').split() == ['Home', 'Inventory', 'Sales', 'Orders'], 'a collapsed side bar leaves the phone layout unchanged')
     p.set_viewport_size({'width': 1280, 'height': 800}); p.click('#navTog'); p.wait_for_timeout(200)
-    # Update inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
-    tab(p, 'Update inventory')
-    check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Price', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update inventory shows each group as a table: {heads('imp.ready')}")
+    # Add inventory, the last status tab of Inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
+    tab(p, 'Inventory'); p.click('#view [data-f="add"]:has-text("Add inventory · 3")')   # no products yet: the button under "No products yet"
+    check(p.inner_text('#view .seg button.on') == 'Add inventory · 3' and not p.is_visible('#q') and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Price', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Add inventory shows each group as a table, with no search box: {heads('imp.ready')}")
     p.click('#impOut details[data-grp="check"] summary'); folded = p.is_hidden('[data-tbl="imp.check"]'); p.click('#impOut details[data-grp="check"] summary')
     check(folded and p.is_visible('[data-tbl="imp.check"]'), 'Check these folds like Needs a name')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") td:nth-child(2)')
@@ -92,7 +92,7 @@ with sync_playwright() as pw:
                 {'type': 'Count', 'name': 'Beta Figure', 'qty': 1, 'brand': 'banpresto', 'rel': '2024-07'},
                 {'type': 'Count', 'name': 'Delta Bust', 'qty': 3, 'cost': 250, 'mfr': 'Bandai', 'chr': 'Son Goku', 'rel': '2024-07-15'},
                 {'type': 'Count', 'name': 'Epsilon Statue', 'qty': 1, 'cost': 100, 'rel': '2023-12-31'}])
-    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update inventory · 4')"); tab(p, 'Update inventory')
+    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Inventory · 4')"); add_inventory(p)
     # The cost each of a review row is typed in place for every unit it adds; units with different costs show the range, which opens Correct this row.
     A = '[data-tbl="imp.ready"] tbody tr:has-text("alpha Plush")'
     p.click(f'{A} input[data-rcost]'); check(p.is_hidden('#layer'), 'a click in the cost field of a review row does not open the row')
@@ -177,7 +177,7 @@ with sync_playwright() as pw:
     nrows = p.eval_on_selector_all('.cols > div:nth-child(2) .list > *', 'els => els.length'); badge = p.inner_text('.cols > div:nth-child(2)')
     check(nrows >= 3 and 'See ' not in badge and p.query_selector('[data-act="homeMore"]') is None and all(p.is_visible(f'.cols > div:nth-child(2) .list > *:nth-child({i + 1})') for i in range(nrows)), f'Home on a 1280px window shows all {nrows} Needs-you rows with no See more')
     no_toy(p, 'desktop Home')
-    tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); tab(p, 'Update inventory'); no_toy(p, 'Update inventory')
+    tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); add_inventory(p); no_toy(p, 'Add inventory')
     tab(p, 'Activity'); no_toy(p, 'Activity'); check(p.inner_text('header.top h1') == 'Activity' and 'Sale' in p.inner_text('#actList') and fits(), 'Activity opens from the side bar')
     check(heads('moves') == ['Date', 'Product', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
     p.click('[data-tbl="moves"] tbody tr:has-text("Sale")'); check('Grandista Son Goku' in p.inner_text('#sheet h2') and p.is_visible('#sheet button:has-text("Reverse this movement")'), 'clicking a movement row opens the movement'); p.click('#sheet button[aria-label="Close"]')
@@ -185,8 +185,8 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/activity.png')
     for w in (1280, 900):
         p.set_viewport_size({'width': w, 'height': 800}); p.wait_for_timeout(200); bad = []
-        for pg in ['Home', 'Inventory', 'Sales', 'Orders', 'Update inventory', 'Activity']:
-            tab(p, pg); bad += [] if fits() else [pg]
+        for pg in ['Home', 'Inventory', 'Sales', 'Orders', 'Add inventory', 'Activity']:
+            add_inventory(p) if pg == 'Add inventory' else tab(p, pg); bad += [] if fits() else [pg]
         check(not bad, f'no page scrolls sideways at {w} px wide, only the tables in their own boxes: {bad}')
     p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
     check(p.inner_text('header.top h1') == 'Activity' and [x.inner_text().strip() for x in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Orders'] and p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().top') > 600, 'narrowing the window returns to the phone layout with four tabs')

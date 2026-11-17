@@ -32,7 +32,7 @@ h1,h2,h3,p{margin:0;font-weight:400}
 header.top{display:flex;align-items:center;gap:2px;min-height:68px;padding:12px 8px 12px 16px;position:sticky;top:env(safe-area-inset-top);background:var(--bg);z-index:5}
 header.top h1{flex:1;min-width:0;font:400 28px/1 var(--display);letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 main{flex:1;padding:6px 16px calc(96px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:20px}
-main>:empty{display:none}
+main>:empty,#addInv>:empty{display:none}
 button{font:inherit;color:inherit;cursor:pointer}
 svg{flex:none;display:block}
 .icon{width:44px;height:44px;border:0;padding:0;background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;flex:none}
@@ -240,7 +240,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.4.1';
+const VERSION = '2.4.2';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -292,7 +292,6 @@ const ICON = {
   stock: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
   sell: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   orders: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  import: '<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 20h16"/>',
   activity: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><path d="M13 4v6h4V4zM7 14v6h4v-6z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
@@ -333,6 +332,7 @@ let meta = store.get('meta', {});
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
 if (prefs.tab === 'move') prefs.tab = 'home';
+else if (prefs.tab === 'import') prefs.tab = 'stock';   // 2.4.1 had Update inventory as its own page
 prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
@@ -573,7 +573,7 @@ async function syncNow(manual) {
     if (!pushed) applySnapshot(await api('sync', { have: meta }));
     const waitNow = (dirty(), live().inbox.length);
     if (note) toast(note);
-    else if (waitNow > waitBefore && prefs.tab !== 'import') toast(`${plural(waitNow, 'row')} from Claude to review`);
+    else if (waitNow > waitBefore && !addOn()) toast(`${plural(waitNow, 'row')} from Claude to review`);
     else if (manual) toast('Synced');
   } catch (e) {
     ui.err = e.message; if (manual || !e.network) toast(e.message);
@@ -639,8 +639,10 @@ const custList = () => `<datalist id="custList">${[...live().custs.values()].map
 /* ---------- rendering ---------- */
 const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Orders']];
 // Routes with no phone tab, and the tab that stays lit while they show.
-const ROUTE_TAB = { import: 'home', move: 'stock', activity: 'stock' };
-const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Orders', import: 'Update inventory', move: 'Stock in and out', activity: 'Activity' };
+const ROUTE_TAB = { move: 'stock', activity: 'stock' };
+const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Orders', move: 'Stock in and out', activity: 'Activity' };
+// Add inventory is the last status tab of Inventory (ui.filter 'add'): the review of the Inbox rows, or the other ways in.
+const addOn = () => prefs.tab === 'stock' && ui.filter === 'add';
 function pageTitle() {
   if (prefs.tab === 'home') return prefs.shop.name || APP_NAME;
   if (prefs.tab === 'sell' && !wide() && ui.sellSeg === 'new') return 'New sale';
@@ -656,12 +658,12 @@ function render() {
   $('#backBtn').setAttribute('aria-label', 'Close ' + pageTitle());
   view().className = 'v-' + prefs.tab;
   const lit = w ? prefs.tab : ROUTE_TAB[prefs.tab] || prefs.tab;
-  const tabs = w ? [...TABS, ['import', 'Update inventory', waiting], ['activity', 'Activity']] : TABS;
+  const tabs = w ? [...TABS.map(([k, n]) => [k, n, k === 'stock' ? waiting : 0]), ['activity', 'Activity']] : TABS;
   document.documentElement.toggleAttribute('data-mini', w && !!prefs.navMini);
   $('#navTog').innerHTML = icon(prefs.navMini ? 'sidebarOpen' : 'sidebarShut', 20);
   $('#navTog').setAttribute('aria-label', prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'); $('#navTog').title = prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'; $('#navTog').setAttribute('aria-expanded', String(!prefs.navMini));
   $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n, c]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}${w ? ` title="${esc(n)}" aria-label="${esc(n + (c ? ' · ' + c : ''))}"` : ''}>${icon(k, 20)}<span class="lb">${esc(n)}${c ? ' · ' + c : ''}</span>${c ? `<span class="bd">${c}</span>` : ''}</button>`).join('');
-  keepScroll(({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]);
+  keepScroll(({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity })[prefs.tab]);
   if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn();
   renderSync();
 }
@@ -730,7 +732,7 @@ function needsRows() {
     const by = new Map(); ready.forEach(p => { const k = p.custId || p.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(p); });
     by.forEach(ps => { const p = ps[0]; out.push(row(`Ship ${esc(p.cust)}’s pre-order`, `${esc(p.name)} × ${p.qty}${p.balance > 0 ? ' · balance ' + money(p.balance) : ''}${ps.length > 1 ? ' · ' + (ps.length - 1) + ' more ready' : ''}`, `data-act="fulfil" data-id="${esc(p.id)}"`)); });
   }
-  if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="tab" data-t="import"'));
+  if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="homeGo" data-to="add"'));
   if (short.length) out.push(row(`Order stock for ${plural(short.length, 'product')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
   if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
   if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, p) => s + p.balance, 0)))} on ${plural(owing.length, 'pre-order')}`, 'Balances still open', 'data-act="homeGo" data-to="pre"'));
@@ -741,7 +743,7 @@ function needsRows() {
 }
 function renderHome() {
   const L = live(), today = todayISO(), month = today.slice(0, 7), act = L.list.filter(i => i.active), waiting = L.inbox.length;
-  const upd = 'Update inventory' + (waiting ? ' · ' + waiting : '');
+  const upd = 'Add inventory' + (waiting ? ' · ' + waiting : '');
   const sales = L.invs.filter(v => v.type === SALE), tS = sales.filter(v => v.date === today), mS = sales.filter(v => v.date.slice(0, 7) === month);
   const sum = list => Math.round(list.reduce((s, v) => s + v.total, 0));
   let margin = 0, known = true, some = false; mS.forEach(v => v.lines.forEach(l => { if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } }));
@@ -754,25 +756,28 @@ function renderHome() {
   view().innerHTML = `<div class="cols"><div>
     ${sec(`${new Date().toLocaleDateString(undefined, { month: 'long' })} so far`, `<button class="strip" data-act="homeGo" data-to="invs" aria-label="Open the invoice list"><span class="cell"><small>Today</small><b>${money(sum(tS))}</b></span><span class="cell"><small>Month</small><b>${money(sum(mS))}</b></span><span class="cell"><small>Margin</small><b>${some ? money(Math.round(margin)) + (known ? '' : '*') : '–'}</b></span></button>`)}
     ${say ? `<p class="hint" style="margin-top:-12px">${say}</p>` : ''}
-    <div class="actions"><button class="btn primary" data-act="homeGo" data-to="sale">New sale</button><button class="btn" data-act="tab" data-t="import">${upd}</button></div>
+    <div class="actions"><button class="btn primary" data-act="homeGo" data-to="sale">New sale</button><button class="btn" data-act="homeGo" data-to="add">${upd}</button></div>
     ${ui.warn.map(w => `<p class="banner danger" role="alert"><span>${esc(w)}</span></p>`).join('')}
     </div><div>${needs}</div></div>`;
 }
 
 /* Inventory */
 function renderStock() {
-  const L = live(), act = L.list.filter(i => i.active);
+  const L = live(), act = L.list.filter(i => i.active), waiting = L.inbox.length;
+  const seg = `<div class="seg">${[['all', 'All'], ['out', 'Out'], ['arch', 'Archived'], ['add', 'Add inventory' + (waiting ? ' · ' + waiting : '')]].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>`;
+  // Add inventory takes the place of the list, without the search box or a Home filter.
+  if (ui.filter === 'add') { view().innerHTML = `${seg}<div id="addInv" class="stack" style="gap:20px"></div>`; renderImport(); return; }
   let units = 0, value = 0;
   act.forEach(i => { const n = Math.max(stockOf(i.sku), 0); units += n; if (i.price != null) value += n * i.price; });
   if (!L.list.length) {
-    view().innerHTML = `<div class="empty"><h3>No products yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Update inventory.</p>
-      <div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="tab" data-t="import">Update inventory</button></div></div>`;
+    view().innerHTML = `<div class="empty"><h3>No products yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Add inventory.</p>
+      <div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="filter" data-f="add">Add inventory${waiting ? ' · ' + waiting : ''}</button></div></div>`;
     return;
   }
   view().innerHTML = `
     <div><label for="q">Search</label><div style="display:flex;gap:12px;align-items:flex-start"><input id="q" type="search" placeholder="Name, brand or character" value="${esc(ui.q)}" autocomplete="off"><button class="btn sm" data-act="newItem">Add product</button></div></div>
     <div class="stack">
-    <div class="seg">${[['all', 'All'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
+    ${seg}
     <div class="links"><p class="hint" style="flex:1">${STOCK_FILTERS[ui.filter] ? 'Showing only: ' + STOCK_FILTERS[ui.filter] : `${plural(act.length, 'product')} · ${plural(units, 'unit')}${value ? ' · ' + money(Math.round(value)) + ' at retail' : ''}`}</p>${STOCK_FILTERS[ui.filter] ? '<button class="tbtn" data-act="filter" data-f="all">Show all</button>' : ''}<button class="tbtn" data-act="tab" data-t="activity">Activity</button></div>
     <div id="stockList"></div></div>`;
   renderStockList();
@@ -1076,7 +1081,7 @@ function renderInvForm() {
   const f = ui.inv, L = live(), pre = preOf(f), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
   // Nothing to sell yet: say so and offer the one step that fixes it.
-  if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No products to sell yet</h3><p>Add a product with its price, or send Claude photos and review them under Update inventory.</p><div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="tab" data-t="import">Update inventory</button></div></div>`; return; }
+  if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No products to sell yet</h3><p>Add a product with its price, or send Claude photos and review them under Add inventory.</p><div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="homeGo" data-to="add">Add inventory${L.inbox.length ? ' · ' + L.inbox.length : ''}</button></div></div>`; return; }
   const banner = pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : '';
   const notes = l => `${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}`;
   const add = pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another product</button>';
@@ -1592,16 +1597,18 @@ function impGroup(r) {
   const twice = r.src && r.src.parts && r.src.parts.length > 1 && !r.match;
   return (r.similar && !r.match) || twice || relToCheck(r) || ['dup', 'warn'].includes(r.status) ? 'check' : 'ready';
 }
+/** The Add inventory tab of Inventory, drawn into #addInv. */
 function renderImport() {
+  const box = $('#addInv'); if (!box) return;
   // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
   if (!(ui.imp && ui.imp.src === 'paste') && inboxLoad()) {
     const n = ui.imp.refs.length, more = live().inbox.length - n;
-    view().innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
+    box.innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
     renderImpOut(); return;
   }
   const m = IMP[ui.mode], L = live(), onWay = L.orders.filter(o => o.status === 'Ordered').length;
   const open = ui.manual == null ? !cfg.url : ui.manual;
-  view().innerHTML = `
+  box.innerHTML = `
     <p>Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
     ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
@@ -1884,7 +1891,7 @@ document.addEventListener('click', async ev => {
   switch (a) {
     case 'navMini': prefs.navMini = !prefs.navMini; savePrefs(); render(); break;
     case 'tab':
-      if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
+      if (STOCK_FILTERS[ui.filter] || ui.filter === 'add') ui.filter = 'all';   // the Inventory tab opens on the list
       if (d.t === 'home') ui.homeMore = false;
       if (d.t === 'sell') ui.sellSeg = ui.inv.lines.some(l => l.sku) ? 'new' : 'list';   // a draft in progress reopens; otherwise the invoice list
       go(d.t); break;
@@ -2022,7 +2029,7 @@ document.addEventListener('click', async ev => {
         ui.impResult = x;
       }
       ui.text = ''; ui.imp = null; dirty();
-      if (!live().inbox.length) { prefs.tab = 'stock'; savePrefs(); }
+      if (!live().inbox.length) ui.filter = 'all';
       commit(); openImpResult(); break;
     }
 

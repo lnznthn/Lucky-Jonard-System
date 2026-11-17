@@ -8,7 +8,7 @@ from common import *
 
 SHOTS = '/tmp/shots-fix'
 os.makedirs(SHOTS, exist_ok=True)
-def review(p): p.click('#syncBtn'); synced(p); update_stock(p)
+def review(p): p.click('#syncBtn'); synced(p); add_inventory(p)
 def idx(p, name): return p.evaluate(f"ui.imp.rows.findIndex(r => r.name === {json.dumps(name)})")
 def line(p, name): return p.inner_text(f'.prow:has(#imp{idx(p, name)})')
 def fix(p, name): p.click(f'#impOut [data-act="impFix"][data-i="{idx(p, name)}"]')
@@ -81,7 +81,7 @@ with sync_playwright() as pw:
     check(units(p, 'Fix Alpha') == ['100', '150', '310', '310', '330'], 'the added units join the back of the queue')
     check(units(p, 'Fix Bravo') == ['30'], 'the lower count removed the two oldest units')
     check(inbox() == before and [r[12] for r in rows('Inbox')][2:] == ['Done', 'Done', ''], 'after Apply the Inbox rows keep what Claude wrote; only the recorded ones are Done')
-    update_stock(p); p.click('#view button[data-act="inboxDismiss"]'); synced(p)
+    add_inventory(p); p.click('#view button[data-act="inboxDismiss"]'); synced(p)
 
     # ---- a Receive row: Qty in place of Count; a typed price makes the new product
     post_inbox([{'type': 'Receive', 'name': 'Fix Alpha', 'qty': 2, 'cost': 400}, {'type': 'Receive', 'name': 'Fix Delta', 'qty': 1}])

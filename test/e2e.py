@@ -6,7 +6,7 @@ from common import *
 SHOTS = '/tmp/shots'
 os.makedirs(SHOTS, exist_ok=True)
 def activity(p): tab(p, 'Inventory'); p.click('#view button[data-t="activity"]')
-def update_label(p): tab(p, 'Home'); return p.inner_text('#view button[data-t="import"]')
+def add_label(p): tab(p, 'Home'); return p.inner_text('#view .actions button[data-to="add"]')
 def post_rows(name, rs): urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': name, 'rows': rs}).encode(), method='POST')).read()   # rows 2 onward of a tab, as typed in the sheet
 
 with sync_playwright() as pw:
@@ -14,7 +14,7 @@ with sync_playwright() as pw:
     ctx1 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
     p = page(ctx1)
     p.goto(APP)
-    check(p.is_visible('#view button.primary:has-text("New sale")') and p.is_visible('#view button[data-t="import"]:has-text("Update inventory")') and 'Nothing needs you.' in p.inner_text('#view'), 'empty Home still shows New sale and Update inventory')
+    check(p.is_visible('#view button.primary:has-text("New sale")') and p.is_visible('#view .actions button[data-to="add"]:has-text("Add inventory")') and 'Nothing needs you.' in p.inner_text('#view'), 'empty Home still shows New sale and Add inventory')
     p.click('#view button.primary:has-text("New sale")'); p.wait_for_timeout(200)
     check('No products to sell yet' in p.inner_text('#view') and p.is_visible('#view button.primary:has-text("Add a product")'), 'New sale with no products offers Add a product')
     p.click('nav button[data-t="home"]'); p.wait_for_timeout(200)
@@ -23,13 +23,13 @@ with sync_playwright() as pw:
     check('on' in p.get_attribute('#tabs button[data-t="home"]', 'class') and [b.inner_text().strip() for b in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Orders'], 'first launch opens Home; the bar is Home, Inventory, Sales, Orders')
     check(all(b.query_selector('svg') for b in p.query_selector_all('#tabs button')), 'each tab has a stroke icon')
     no_toy(p, 'Home (empty)')
-    update_stock(p); v = p.inner_text('#view')
-    check(p.inner_text('#title') == 'Update inventory' and 'Other ways to change stock' in v and 'One product by hand' in v and 'Add a new product' in v and 'Receive a supplier order' not in v, 'Update inventory with nothing waiting lists the other ways to change stock')
+    add_inventory(p); v = p.inner_text('#view')
+    check(p.inner_text('#title') == 'Inventory' and 'on' in p.get_attribute('#view .seg button[data-f="add"]', 'class') and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and not p.is_visible('#q') and 'Other ways to change stock' in v and 'One product by hand' in v and 'Add a new product' in v and 'Receive a supplier order' not in v, 'Add inventory opens Inventory on its Add inventory tab, with no search box, and with nothing waiting lists the other ways to change stock')
     check(p.is_visible('#impText'), 'with no connection code the paste box is open')
-    no_toy(p, 'Update inventory')
+    no_toy(p, 'Add inventory')
     p.click('#view .item:has-text("One product by hand")')
     check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('[data-pk="mv"]'), 'One product by hand opens the Move screen with a picker')
-    p.click('#backBtn'); check(p.inner_text('#title') == 'Bodega', 'the close button leaves the Move screen')
+    p.click('#backBtn'); check(p.inner_text('#title') == 'Inventory' and 'on' in p.get_attribute('#view .seg button[data-f="add"]', 'class'), 'the close button leaves the Move screen for Add inventory')
     check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
     p.screenshot(path=f'{SHOTS}/01-empty.png')
 
@@ -203,11 +203,11 @@ with sync_playwright() as pw:
     ])
     tab(p, 'Inventory'); p.click('#syncBtn'); synced(p)
     check(p.inner_text('#toast') == '5 rows from Claude to review', f"a toast says rows arrived: {p.inner_text('#toast')!r}")
-    check(update_label(p) == 'Update inventory · 5', 'the Home button shows the waiting count')
+    check(add_label(p) == 'Add inventory · 5', 'the Home button shows the waiting count')
     check('Review 5 rows from Claude\nRead from your photos, not recorded yet' in p.inner_text('#view'), 'Home lists the rows from Claude')
     p.click('#view .item:has-text("Review 5 rows from Claude")')
     txt = p.inner_text('#view'); p.screenshot(path=f'{SHOTS}/11-inbox.png')
-    check('Claude read 3 rows' in txt and '2 more after these' in txt and not p.is_visible('#impText') and [h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 2', 'Ready · 1'], 'Update inventory opens on the count rows from Claude, receive rows after them, grouped')
+    check('Claude read 3 rows' in txt and '2 more after these' in txt and not p.is_visible('#impText') and [h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 2', 'Ready · 1'], 'Add inventory opens on the count rows from Claude, receive rows after them, grouped')
     check(p.inner_text('#impOut .grp-check') .count('Inbox Robot') == 1 and 'Lego Castle Big' in p.inner_text('#impOut .grp-check') and 'Hot Wheels 5-Pack' in p.inner_text('#impOut .grp-ready'), 'a release date to verify and a similar name are under Check these')
     check(f"stock {before['Hot Wheels 5-Pack']} → counted 20" in txt and 'adds brand, product line' in txt, 'existing toy: count difference and the details it adds')
     check('Inbox Robot' in txt and 'opening stock 3' in txt and 'released 2024-05 (to verify)' in txt, 'new toy from Claude with its details')
@@ -220,26 +220,26 @@ with sync_playwright() as pw:
     check('Apply 2 changes' in p.inner_text('#impOut') and not p.is_checked('.prow:has-text("Inbox Robot") input[type=checkbox]'), 'ticks survive a sync that redraws the screen')
     p.click('.prow:has-text("Inbox Robot") input[type=checkbox]'); apply(p, 'Apply 3 changes')
     txt = p.inner_text('#view')
-    check(p.inner_text('#title') == 'Update inventory' and 'Claude read 2 rows' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
+    check(p.inner_text('#view .seg button.on') == 'Add inventory · 2' and 'Claude read 2 rows' in txt and 'Dino Figure: +2 at ₱150 each' in txt and 'Inbox Car' in txt and 'Apply 2 changes' in txt, 'the receive rows from Claude come up next')
     check(p.evaluate('live().inbox.length') == 2, 'the waiting count drops at once')
     synced(p); inbox = dump()['Inbox']['rows'][1:]
     check([r[12] for r in inbox] == ['Done', 'Done', 'Done', '', ''], f'applied rows are marked Done in the sheet: {[r[12] for r in inbox]}')
     it = {r[1]: r for r in dump()['Products']['rows'][1:]}
     check(it['Hot Wheels 5-Pack'][6:8] == ['Mattel', 'Hot Wheels'] and it['Inbox Robot'][5] == 'Bandai' and it['Inbox Robot'][9:11] == ['2024-05', 'Verify'], 'details from Claude reached the sheet')
     sm = stock_map(p); check(sm['Hot Wheels 5-Pack'] == 20 and sm['Inbox Robot'] == 3 and sm['Lego Castle'] == 9, f'counts from Claude recorded: {sm}')
-    update_stock(p); apply(p, 'Apply 2 changes')
-    check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class'), 'after the last group from Claude the app goes to Inventory')
-    check(update_label(p) == 'Update inventory', 'nothing left waiting')
+    add_inventory(p); apply(p, 'Apply 2 changes')
+    check('on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and 'on' in p.get_attribute('#view .seg button[data-f="all"]', 'class') and p.is_visible('#q'), 'after the last group from Claude Inventory shows its All tab')
+    check(add_label(p) == 'Add inventory', 'nothing left waiting')
     synced(p); sm = stock_map(p)
     check(sm['Dino Figure'] == before['Dino Figure'] + 2 and sm['Inbox Car'] == 1, f'received stock recorded: {sm}')
     mv = dump()['Movements']['rows'][1:]
     check(sorted(r[9] for r in mv if r[6] == 'Restock' and r[3] in ('Dino Figure', 'Inbox Car')) == [80, 150, 150], 'receive rows carry their cost, one row per unit')
     check([r[12] for r in dump()['Inbox']['rows'][1:]] == ['Done'] * 5, 'all rows Done in the sheet')
-    update_stock(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Update inventory is back to the other ways; with a connection the paste box is folded')
+    add_inventory(p); check('Other ways to change stock' in p.inner_text('#view') and not p.is_visible('#impText'), 'Add inventory is back to the other ways; with a connection the paste box is folded')
     # Dismiss records nothing
     n_items, n_moves = len(dump()['Products']['rows']), len(dump()['Movements']['rows'])
     post_inbox([{'type': 'Count', 'name': 'Dismiss Me', 'qty': 5}, {'type': 'count', 'name': 'Hot Wheels 5-Pack', 'qty': 1}])
-    p.click('#syncBtn'); synced(p); update_stock(p)
+    p.click('#syncBtn'); synced(p); add_inventory(p)
     check('Claude read 2 rows' in p.inner_text('#view'), 'new rows from Claude show')
     p.click('#view button[data-act="inboxDismiss"]'); synced(p)
     check('Other ways to change stock' in p.inner_text('#view') and [r[12] for r in dump()['Inbox']['rows'][1:]][-2:] == ['Dismissed', 'Dismissed'], f"Dismiss marks the rows Dismissed: {[r[12] for r in dump()['Inbox']['rows'][1:]]} {p.inner_text('#view')[:200]!r}")
@@ -247,7 +247,7 @@ with sync_playwright() as pw:
 
     # the same item counted in three photos is added into one count; the '?' row stays apart and keeps waiting
     post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 12}, {'type': 'Count', 'name': 'hot wheels 5 pack', 'qty': 9, 'note': 'second shelf'}, {'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': '?'}])
-    p.click('#syncBtn'); synced(p); update_stock(p); txt = p.inner_text('#impOut')
+    p.click('#syncBtn'); synced(p); add_inventory(p); txt = p.inner_text('#impOut')
     check('stock 20 → counted 21 (+1)' in txt and 'Apply 1 change' in txt and 'Listed twice' not in txt, f'rows for one toy are summed: {txt[:120]}')
     apply(p, 'Apply 1 change'); synced(p)
     check(stock_map(p)['Hot Wheels 5-Pack'] == 21 and [r[12] for r in dump()['Inbox']['rows'][1:]][-3:] == ['Done', 'Done', ''], 'summed count applied; the two counted rows are Done and the ? row still waits')
@@ -257,7 +257,7 @@ with sync_playwright() as pw:
     check(p.inner_text('#title') == 'Activity' and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and p.is_visible('#actList .sec'), 'the Activity link on Inventory opens the movement log, grouped by day')
     no_toy(p, 'Activity'); p.click('#backBtn'); check(p.inner_text('#title') == 'Inventory', 'closing Activity returns to Inventory')
     p.click('.item:has-text("Hot Wheels 5-Pack")'); no_toy(p, 'a product sheet'); p.click('button[aria-label="Close"]')
-    post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 22}]); p.click('#syncBtn'); synced(p); update_stock(p); no_toy(p, 'Update inventory with rows')
+    post_inbox([{'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 22}]); p.click('#syncBtn'); synced(p); add_inventory(p); no_toy(p, 'Add inventory with rows')
     p.click('#view button[data-act="inboxDismiss"]'); synced(p)
 
     # ---- 2.2 review: groups, corrections, only recorded rows leave the Inbox, result sheet, fresh content, warnings
@@ -265,7 +265,7 @@ with sync_playwright() as pw:
                  {'added': '2026-11-16', 'type': 'Count', 'name': 'Unidentified figure, blue', 'qty': 1}, {'added': '2026-11-16', 'type': 'Count', 'name': 'Mystery', 'qty': '?'},
                  {'added': '2026-11-16', 'type': 'Count', 'name': 'Keep Me', 'qty': 4}, {'added': '2026-11-16', 'type': 'Count', 'name': 'Hot Wheels 5-Pack', 'qty': 21}]
     post_inbox(rows_post + [{'added': '2026-11-16', 'type': 'Count', 'name': f'Bulk {i}', 'qty': 1} for i in range(1, 11)])
-    p.click('#syncBtn'); synced(p); update_stock(p); txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/12-review-groups.png')
+    p.click('#syncBtn'); synced(p); add_inventory(p); txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/12-review-groups.png')
     check([h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 1', 'Ready · 12', 'Needs a name · 2'], 'review grouped: Check these, Ready, Needs a name, each with its row count')
     first = dump()['Inbox']['rows'].index(next(r for r in dump()['Inbox']['rows'] if r[2] == 'Fresh Box')) + 1
     check(f'Possibly the same box in two photos: 5 in all, row {first} has 2, row {first + 1} has 3' in txt, 'the same new name on two rows is summed and shows each source row')
