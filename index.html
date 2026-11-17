@@ -93,7 +93,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}input[type=num
 input:focus,select:focus,textarea:focus{outline:2px solid var(--text);outline-offset:-2px}
 input[type=checkbox]{accent-color:var(--accent)}
 label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
-.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.row2:empty{display:none}
 .step{display:flex;gap:8px}.step .btn{min-width:52px;min-height:48px;padding:0}
 .step input{text-align:center}
 .sug{display:flex;flex-direction:column;border:1px solid var(--line);border-top:0;background:var(--field)}
@@ -704,15 +704,39 @@ function openItem(sku) {
     ${recent.length ? `<button class="tbtn" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : ''}`, 'item:' + sku, () => openItem(sku));
 }
 
+/* Cost fields: one per unit when stock comes in, on every screen that takes stock in */
+// State c = { v, open } at a ui path: v[k] is what was typed in field k (unset until typed in); open shows a field per unit past 12.
+const newCosts = () => ({ v: [], open: false });
+const costAt = (c, k) => String(c.v[k] != null ? c.v[k] : c.v[0] || '');   // a field not typed in shows what the first one holds
+/** The fields for n units, "Unit 1 cost" ...; more than 12 units get one "Cost each" field until "Different costs per unit" opens them. */
+function costFields(path, n) {
+  const c = getPath(path); n = Math.max(parseInt(n, 10) || 0, 0);
+  const field = (k, label) => `<div><label for="${path}.${k}">${label}</label><input id="${path}.${k}" type="number" inputmode="decimal" min="0" step="any" data-cost="${path}" data-k="${k}" value="${esc(costAt(c, k))}" placeholder="Optional"></div>`;
+  return `<div class="row2" data-costbox="${path}">${n > 12 && !c.open ? field(0, 'Cost each') + `<div style="display:flex;align-items:flex-end"><button class="tbtn" data-act="costOpen" data-p="${path}" data-n="${n}">Different costs per unit</button></div>`
+    : Array.from({ length: n }, (_, k) => field(k, `Unit ${k + 1} cost`)).join('')}</div>`;
+}
+const redrawCosts = (path, n) => { const b = $(`[data-costbox="${path}"]`); if (b) b.outerHTML = costFields(path, n); };
+/** Typing in a cost field. Typing in the first one fills every field not typed in yet. */
+function costInput(t) {
+  const c = getPath(t.dataset.cost), k = +t.dataset.k; c.v[k] = t.value;
+  if (!k) document.querySelectorAll(`[data-cost="${t.dataset.cost}"]`).forEach(e => { if (+e.dataset.k && c.v[+e.dataset.k] == null) e.value = t.value; });
+}
+/** The n costs, a number each or null when blank; undefined when one is not a number of zero or more. */
+function readCosts(path, n) {
+  const c = getPath(path), out = Array.from({ length: n }, (_, k) => costAt(c, k).trim() === '' ? null : Number(costAt(c, k)));
+  return out.some(x => x != null && (isNaN(x) || x < 0)) ? undefined : out;
+}
+
 /* Item editor */
 function openItemEditor(sku) {
   const i = sku ? live().map.get(sku) : null, v = k => esc(i && i[k] ? i[k] : '');
+  if (!i) ui.f = { c: newCosts() };
   openSheet(`
     <div class="top"><h2>${i ? 'Edit item' : 'New item'}</h2>${closeBtn}</div>
     <div><label for="fName">Name</label><input id="fName" value="${esc(i ? i.name : '')}" autocomplete="off"></div>
     <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
       <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
-    ${i ? '' : `<div class="row2"><div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0"></div><div><label for="fCost">Cost each (${esc(prefs.cur)})</label><input id="fCost" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional"></div></div>`}
+    ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0" data-units="f.c"></div>${costFields('f.c', 0)}`}
     <details ${i && (i.mfr || i.brand || i.line || i.chr || i.rel) ? 'open' : ''}>${summary('Item details')}<div class="stack">
       <div class="row2"><div><label for="fMfr">Manufacturer</label><input id="fMfr" value="${v('mfr')}" autocomplete="off"></div><div><label for="fBrand">Brand</label><input id="fBrand" value="${v('brand')}" autocomplete="off"></div></div>
       <div class="row2"><div><label for="fLine">Product line</label><input id="fLine" value="${v('line')}" autocomplete="off"></div><div><label for="fChr">Character</label><input id="fChr" value="${v('chr')}" autocomplete="off"></div></div>
@@ -748,16 +772,15 @@ function saveItem(sku) {
     if (live().map.has(nsku)) return toast('That SKU is already used.');
     const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
     if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
-    const cost = $('#fCost').value === '' ? null : Number($('#fCost').value);
-    if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
+    const costs = readCosts('f.c', start); if (!costs) return toast('Cost must be zero or more.');
     qItem(Object.assign({ sku: nsku, name, cat, price, min: null, active: true }, det), nsku === $('#fSku').dataset.sug);
-    qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, Array(start).fill(cost));
+    qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs);
     closeSheet(); commit(); toast(`${name} added`);
   }
 }
 
 /* Move */
-const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason: defaultReason(dir || 'In'), date: todayISO(), note: '', cost: '' });
+const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason: defaultReason(dir || 'In'), date: todayISO(), note: '', c: newCosts() });
 function renderMove() {
   const m = ui.mv || (ui.mv = newMv());
   const it = m.sku && live().map.get(m.sku);
@@ -767,10 +790,10 @@ function renderMove() {
       : `<input id="mvQ" type="search" placeholder="Search by name or SKU" autocomplete="off" aria-label="Item"><div class="sug" id="sug"></div>`}</div></div>
     <div class="seg dir"><button class="${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In: stock arrives</button><button class="${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out: stock leaves</button></div>
     <div class="row2">
-      <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
+      <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}" data-units="mv.c"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
       <div><label for="mvReason">Reason</label><select id="mvReason">${FORM_REASONS[m.dir].map(r => `<option ${r === m.reason ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
     </div>
-    ${m.dir === 'In' ? `<div><label for="mvCost">Cost each (${esc(prefs.cur)}) for this receipt</label><input id="mvCost" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.cost)}" placeholder="Optional"></div>` : ''}
+    ${m.dir === 'In' ? costFields('mv.c', m.qty) : ''}
     <div class="row2"><div><label for="mvDate">Date</label><input id="mvDate" type="date" value="${esc(m.date)}"></div><div><label for="mvNote">Note</label><input id="mvNote" value="${esc(m.note)}" placeholder="Optional" autocomplete="off"></div></div>
     <div class="stack"><p class="hint" id="mvHint"></p>
     <button class="btn primary big" data-act="saveMove">Record ${m.dir === 'In' ? 'stock in' : 'stock out'}</button>
@@ -795,12 +818,11 @@ function saveMove() {
   if (!it) return toast('Pick an item first.');
   const qty = Number(m.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   const date = parseDate(m.date); if (!date) return toast('Check the date.');
-  const cost = m.dir === 'In' && m.cost !== '' ? Number(m.cost) : null;
-  if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
+  const costs = m.dir === 'In' ? readCosts('mv.c', qty) : []; if (!costs) return toast('Cost must be zero or more.');
   const have = stockOf(it.sku);
   if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
-  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost };
-  if (m.dir === 'In') qIns(mv, Array(qty).fill(cost)); else qMove(mv);
+  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost: null };
+  if (m.dir === 'In') qIns(mv, costs); else qMove(mv);
   const after = have + (m.dir === 'In' ? qty : -qty);
   ui.mv = null; prefs.tab = 'stock'; savePrefs();
   commit(); toast(`${signed(m.dir, qty)} ${it.name} → ${after} in stock`);
@@ -1077,13 +1099,13 @@ function saveOrd() {
 function openOrd(id) {
   const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
   const open = o.status === 'Ordered';
-  if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, cost: '' };
+  if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, c: newCosts() };
   const s = ui.sub || {};
   openSheet(`
     <div class="top"><h2>${esc(o.name)}</h2>${closeBtn}</div>
     <p class="hint">Supplier order · ${o.qty} ordered ${esc(fmtDay(o.date))}${o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''} ${waitTag(o)}</p>
     ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
-    ${open ? sec('When it arrives', `<div class="row2"><div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label for="rcCost">Cost each (${esc(prefs.cur)})</label><input id="rcCost" type="number" inputmode="decimal" min="0" step="any" data-b="sub.cost" value="${esc(s.cost)}"></div></div>
+    ${open ? sec('When it arrives', `<div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
       <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') + `<button class="tbtn danger" data-act="ordCancel" data-id="${esc(id)}">Cancel this order</button>`
       : `<dl class="kv"><dt>Status</dt><dd>${esc(o.status)}${o.status === 'Received' ? ', ' + o.recQty + ' on ' + esc(o.recDate) : ''}</dd></dl>`}
     ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
@@ -1091,9 +1113,8 @@ function openOrd(id) {
 function receiveOrd() {
   const s = ui.sub, o = s && live().orders.find(x => x.id === s.id); if (!o) return;
   const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
-  if (s.cost === '') return toast('Type the cost each, so margins can be worked out.');
-  const cost = Number(s.cost); if (isNaN(cost) || cost < 0) return toast('Cost must be zero or more.');
-  qAdd('receive', { orderId: o.id, date: todayISO(), qty, costs: Array(qty).fill(r2(cost)) });
+  const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
+  qAdd('receive', { orderId: o.id, date: todayISO(), qty, costs });
   closeSheet(); commit();
   const waiting = readyPres().filter(p => p.sku === o.sku).length;
   toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
@@ -1418,7 +1439,7 @@ function renderImport() {
   const open = ui.manual == null ? !cfg.url : ui.manual;
   view().innerHTML = `
     <p class="lead">Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
-    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost each when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One item by hand', 'Stock in or out for one item', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new item', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
+    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One item by hand', 'Stock in or out for one item', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new item', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
     <div class="seg">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
     <p class="hint">${m.hint}</p>
@@ -1671,8 +1692,9 @@ document.addEventListener('click', async ev => {
     case 'pick': ui.mv.sku = d.sku; renderMove(); break;
     case 'unpick': ui.mv.sku = ''; renderMove(); break;
     case 'dir': ui.mv.dir = d.d; if (!FORM_REASONS[d.d].includes(ui.mv.reason)) ui.mv.reason = defaultReason(d.d); renderMove(); break;
-    case 'qty': { const q = Math.max(1, (parseInt(ui.mv.qty, 10) || 0) + Number(d.d)); ui.mv.qty = q; $('#mvQty').value = q; updateMvHint(); break; }
+    case 'qty': { const q = Math.max(1, (parseInt(ui.mv.qty, 10) || 0) + Number(d.d)); ui.mv.qty = q; $('#mvQty').value = q; redrawCosts('mv.c', q); updateMvHint(); break; }
     case 'saveMove': saveMove(); break;
+    case 'costOpen': getPath(d.p).open = true; redrawCosts(d.p, d.n); break;
     case 'move': openMove(d.id); break;
     case 'reverse': reverseMove(d.id); break;
     case 'dropQ': {
@@ -1811,6 +1833,8 @@ document.addEventListener('click', async ev => {
 function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); }
 document.addEventListener('input', ev => {
   const t = ev.target;
+  if (t.dataset.cost) { costInput(t); return; }
+  if (t.dataset.units) redrawCosts(t.dataset.units, t.value);   // a quantity sets how many cost fields show
   if (t.dataset.b) {
     setPath(t.dataset.b, t.value);
     if (t.dataset.redraw) rerender();
@@ -1829,7 +1853,6 @@ document.addEventListener('input', ev => {
     case 'mvReason': ui.mv.reason = t.value; break;
     case 'mvDate': ui.mv.date = t.value; break;
     case 'mvNote': ui.mv.note = t.value; break;
-    case 'mvCost': ui.mv.cost = t.value; break;
     case 'impText': ui.text = t.value; break;
     case 'impDate': ui.rdate = t.value; break;
   }
