@@ -63,20 +63,20 @@ nav.tabs button.on{color:var(--text);border-top-color:var(--text)}
 .links .btn{white-space:nowrap}
 /* Sections: a hairline box with its title on the top rule. */
 .sec{position:relative;margin-top:10px;border:1px solid var(--line)}
-.sec>h2{position:absolute;top:-10px;left:10px;margin:0;padding:0 8px;background:var(--sec);display:flex;align-items:center;gap:8px;font:500 13px/20px var(--sans);color:var(--muted)}
+.sec>h2{position:absolute;top:-10px;left:10px;padding:0 8px;background:var(--sec);display:flex;align-items:center;gap:8px;font:500 13px/20px var(--sans);color:var(--muted)}
 .sec.pad{padding:22px 14px 14px;display:flex;flex-direction:column;gap:16px}
 .badge{padding:0 8px;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:600;line-height:20px}
 .list{border:1px solid var(--line)}
 .sec>.list{border:0}
 .item{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:10px 14px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);text-align:left}
 .item:last-child{border-bottom:0}
-.item .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.item .main,.picked .main,.prow .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .item .name{font-size:15px;font-weight:500;overflow-wrap:anywhere}
 .item .sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .chev{color:var(--muted);transform:rotate(-90deg)}
 .qty,.delta{min-width:36px;text-align:right;font:400 28px/1 var(--display);letter-spacing:.02em;white-space:nowrap}
-.qty.out{color:var(--attn)}.qty.neg{color:var(--danger)}
 .amt{font:400 22px/1 var(--display);letter-spacing:.02em;white-space:nowrap}
+.out{color:var(--attn)}.neg{color:var(--danger)}
 .more{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:44px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--muted);font-size:13px;font-weight:500}
 .more.up svg{transform:rotate(180deg)}
 .tag{margin-left:6px;font-size:13px;font-weight:500;color:var(--muted)}
@@ -91,7 +91,7 @@ textarea{padding:10px 12px;resize:vertical;line-height:1.4}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
 input[type=number]{-moz-appearance:textfield;appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--text);outline-offset:-2px}
-input[type=checkbox]{accent-color:var(--accent)}
+input[type=checkbox]{accent-color:var(--accent);width:22px;height:22px;min-height:0;margin:0}
 label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.row2:empty{display:none}
 .units input{width:136px;flex:none}
@@ -103,11 +103,9 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .sug button:last-child{border-bottom:0}
 .sug button[disabled]{color:var(--muted)}
 .picked{display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 14px;border:1px solid var(--line);background:var(--field)}
-.picked .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .picked .name{font-size:15px;font-weight:500}
 .hint{color:var(--muted);font-size:13px}
 .hint b{color:var(--text);font-weight:500}
-.lead{font-size:15px}
 .banner{border:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;column-gap:12px;flex-wrap:wrap;font-size:15px}
 .banner.bad{border-color:var(--danger)}.banner.warn{border-color:var(--attn)}.banner.danger{border-color:var(--danger);color:var(--danger)}
 .banner>span{flex:1;min-width:180px;padding:6px 0}
@@ -121,7 +119,6 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .cell:last-child{border-right:0}
 .cell small{font-size:13px;color:var(--muted)}
 .cell b{font:400 28px/1 var(--display);letter-spacing:.02em;overflow-wrap:anywhere}
-.cell.out b{color:var(--attn)}.cell.neg b{color:var(--danger)}
 .tot{display:flex;flex-direction:column;gap:8px;padding-top:14px;border-top:1px solid var(--line)}
 .tot>div{display:flex;align-items:baseline;gap:12px}
 .tot span{flex:1;font-size:13px;color:var(--muted)}
@@ -133,12 +130,11 @@ details>summary::-webkit-details-marker{display:none}
 details>summary span{text-decoration:underline;text-underline-offset:4px}
 details[open]>summary svg{transform:rotate(180deg)}
 details>.stack{padding-top:8px}
-.check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--text);margin:0;cursor:pointer}.check input{width:22px;height:22px;min-height:0;margin:0}
+.check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--text);margin:0;cursor:pointer}
 .logo{max-height:48px;max-width:120px;border:1px solid var(--line);flex:none}
 .prow{display:flex;align-items:flex-start;gap:12px;min-height:60px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .prow:last-child{border-bottom:0}
-.prow input[type=checkbox]{width:22px;height:22px;min-height:0;margin:1px 0 0;flex:none}
-.prow .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.prow input[type=checkbox]{margin:1px 0 0;flex:none}
 .prow .name{font-size:15px;font-weight:500;color:var(--text);margin:0;cursor:pointer}
 .prow button.name{border:0;background:none;padding:0;text-align:left;font:inherit;font-weight:500;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:4px}
 details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font-weight:500}
@@ -184,11 +180,9 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl .w{white-space:normal;min-width:14em}
   .tbl .st .tag{margin-left:0}
   .tbl tr.off td{color:var(--muted)}
-  .tbl input[type=checkbox]{width:22px;height:22px;min-height:0;margin:0}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
   .tbl tr:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
-  .tbl .out{color:var(--attn)}.tbl .neg{color:var(--danger)}
   .tbl .filt th{padding:0 6px 8px}
   .tbl .filt select,.tbl .filt input{min-height:40px;padding:0 8px}
   .tbl .rng{display:flex;gap:6px}.tbl .rng input{width:6.5em}
@@ -1573,13 +1567,13 @@ function renderImport() {
   // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
   if (!(ui.imp && ui.imp.src === 'paste') && inboxLoad()) {
     const n = ui.imp.refs.length, more = live().inbox.length - n;
-    view().innerHTML = `<p class="lead">Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
+    view().innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
     renderImpOut(); return;
   }
   const m = IMP[ui.mode], L = live(), onWay = L.orders.filter(o => o.status === 'Ordered').length;
   const open = ui.manual == null ? !cfg.url : ui.manual;
   view().innerHTML = `
-    <p class="lead">Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
+    <p>Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
     ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One item by hand', 'Stock in or out for one item', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new item', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
     <div class="seg">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
@@ -1699,8 +1693,8 @@ function openImpResult() {
   const pend = queue.filter(q => q.status === 'pending').length;
   const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
   openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
-    <p class="lead" id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new item')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'item')} with new details`}.</p>
-    ${x.inbox ? `<p class="lead" id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
+    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new item')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'item')} with new details`}.</p>
+    ${x.inbox ? `<p id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
 }
