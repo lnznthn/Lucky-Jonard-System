@@ -644,13 +644,13 @@ const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
  * A desktop table. cols are [header, sort value, cell html (default: the value as text), class ('n' numbers, 'w' wraps)];
  * a column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
  * text ignores case, numbers sort as numbers, ISO dates as text (2024, then 2024-07, then 2024-07-15), blanks last either way.
- * attrs(row) gives a row its data-act, so a click opens its sheet; head adds rows under the header; max caps the rows shown.
+ * attrs(row) gives a row its data-act, so a click opens its sheet (only those rows take focus); head adds rows under the header; max caps the rows shown.
  */
 function table(id, cols, rows, attrs, head, max) {
   const s = ui.sort[id];
   if (s) { const v = cols[s.k][1]; rows = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
   return `<div class="tbl" data-tbl="${id}"><table><thead><tr>${cols.map(([h, v, , c], k) => `<th class="${c || ''}" ${s && s.k === k ? `aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}>${v ? `<button data-act="sort" data-t="${id}" data-k="${k}">${h}${s && s.k === k ? icon('chev', 14, s.d > 0 ? 'up' : '') : ''}</button>` : h}</th>`).join('')}</tr>${head || ''}</thead>
-    <tbody>${rows.length ? rows.slice(0, max).map(r => { const a = attrs(r); return `<tr ${a ? 'tabindex="0" ' + a : ''}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
+    <tbody>${rows.length ? rows.slice(0, max).map(r => { const a = attrs(r); return `<tr ${/data-act/.test(a) ? 'tabindex="0" ' : ''}${a}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
 }
 /** Rebuilds part of the page while every table keeps its scroll position (a sort, a filter or a sync must not jump it back). */
 function keepScroll(fn) { const at = [...document.querySelectorAll('[data-tbl]')].map(e => [e.dataset.tbl, e.scrollLeft, e.scrollTop]); fn(); at.forEach(([id, l, t]) => { const e = $(`[data-tbl="${id}"]`); if (e) { e.scrollLeft = l; e.scrollTop = t; } }); }
