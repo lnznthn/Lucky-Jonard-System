@@ -45,13 +45,17 @@ with sync_playwright() as pw:
     kept = bb.evaluate("async () => { const rev = meta.logoRev; saveShop(); applySnapshot(await api('sync', { have: meta })); return [prefs.shop.name, meta.logoRev === rev]; }")
     check(kept == ['Typed here', True], f'a snapshot taken while the entry waits keeps the typed name: {kept}')
     close(bb); synced(bb); check(shop_tab()['Shop name'] == 'Typed here', 'then the name reaches the sheet')
+    # a sync that changes the name while Settings is open is not undone by saving another field
+    settings(bb); bb.evaluate("prefs.shop.name = 'From another device'"); bb.fill('#sFoot', 'Thanks!'); bb.click('#sheet [data-act="saveShop"]')
+    check([q['shop'] for q in bb.evaluate('queue')] == [{'foot': 'Thanks!'}] and bb.evaluate('prefs.shop.name') == 'From another device', f"saving sends only the field typed: {bb.evaluate('queue')}")
+    bb.evaluate("queue = []; saveQueue(); Object.assign(prefs.shop, { name: 'Typed here', foot: '' }); savePrefs(); dirty()")   # undone here, so the sheet keeps Notes blank for device C
 
     # ---- device C still holds its details from 2.6 (kept per device then): they move up once with fill, which sets only blank fields
     c = page(b.new_context(**phone), 'C '); c.goto(APP)
     c.evaluate("() => { const x = document.createElement('canvas'); x.width = x.height = 40; x.getContext('2d').fillRect(0, 0, 40, 40); localStorage.setItem('toys.prefs', JSON.stringify({ tab: 'home', cur: '€', theme: 'auto', shop: { name: 'Old Name', contact: 'Old Street', foot: 'Old notes', logo: x.toDataURL('image/png') } })); }")
     c.reload(); c.wait_for_selector('#tabs button'); q = c.evaluate('queue')
     check(len(q) == 1 and q[0]['fill'] is True and {k: v for k, v in q[0]['shop'].items() if k != 'logo'} == {'name': 'Old Name', 'contact': 'Old Street', 'foot': 'Old notes', 'cur': '€'} and q[0]['shop']['logo'].startswith('data:image/png'), f"one shop entry with fill carries the device’s details: {[(x['kind'], x.get('fill'), sorted(x['shop'])) for x in q]}")
-    settings(c); check(c.is_visible('#guide') and c.get_attribute('#guide a', 'href') == 'https://github.com/lnznthn/bodega-app/blob/main/apps-script/Code.gs', 'not connected: Settings shows the New shop guide, linking Code.gs'); no_toy(c, 'Settings with the New shop guide'); close(c)
+    settings(c); check(c.is_visible('#guide') and c.get_attribute('#guide a', 'href') == 'https://github.com/lnznthn/Lucky-Jonard-System/blob/main/apps-script/Code.gs', 'not connected: Settings shows the New shop guide, linking Code.gs'); no_toy(c, 'Settings with the New shop guide'); close(c)
     connect(c); synced(c)
     check(shop_tab() == {'Shop name': 'Typed here', 'Address': '12 Main St\nManila', 'Notes': 'Old notes', 'Currency': '$'}, f'fill set only the blank Notes: {shop_tab()}')
     check(shop(c) == [{'name': 'Typed here', 'contact': '12 Main St\nManila', 'foot': 'Old notes', 'logo': logo}, '$'], 'device C now shows the sheet’s details and keeps the stored logo')
@@ -67,7 +71,7 @@ with sync_playwright() as pw:
     settings(a); a.fill('#sFoot', 'Held note'); a.click('#sheet [data-act="saveShop"]')
     a.wait_for_function("document.querySelector('#syncTxt').textContent === 'Sheet out of date'", timeout=8000)
     tab(a, 'Home'); top = a.inner_text('#view .list .item')
-    check(top == 'Update the sheet: it runs back end 2.6.0, this app needs 2.7.0\nPaste the new Code.gs, run Bodega > Set up or upgrade this sheet, publish a new version. 1 entry waits here until then.', f'the top Home row says why entries wait: {top!r}')
+    check(top == 'Update the sheet: it runs back end 2.6.0, this app needs 2.7.0\nPaste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version. 1 entry waits here until then.', f'the top Home row says why entries wait: {top!r}')
     check([x['status'] for x in a.evaluate('queue')] == ['pending'] and shop_tab()['Notes'] == 'Old notes', 'the entry stays queued and the sheet is untouched')
     settings(a); check('This shop’s sheet runs back end 2.6.0; this app needs 2.7.0.' in a.inner_text('#sheet'), 'Settings > Connection gives the reason'); close(a)
     post('/_ver', '"2.7.0"'); a.click('#syncBtn'); synced(a)

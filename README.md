@@ -7,7 +7,7 @@ Offline-first stock, supplier orders and invoicing for a phone, backed by a Goog
 Every shop uses the same app, at the GitHub Pages address of this repository, and keeps its data in a Google Sheet of its own. The sheet and the script inside it are the shop's back end; nobody else's data is in it.
 
 1. Make a copy of the Bodega template sheet (File > Make a copy; the script inside it is copied with it). Without the template: create a blank Google Sheet, open **Extensions > Apps Script**, replace the contents of `Code.gs` with `apps-script/Code.gs` from this repo and save, then reload the sheet.
-2. In the sheet, choose **Bodega > Set up or upgrade this sheet** and approve the permissions. Google warns that the script is not verified, because it is the shop's own script: choose Advanced, then Go to the project. Setup creates the tabs (Products, Movements, Customers, Suppliers, Supplier orders, Invoices, Invoice lines, Returns, Shop, Payment details, Inbox, Browse and Edits) and the shop's own connection key. A copied sheet always gets a new key.
+2. In the sheet, choose **Bodega > Set up or upgrade this sheet** and approve the permissions. Google warns that the script is not verified, because it is the shop's own script: choose Advanced, then Go to the project. Setup creates the tabs (Products, Movements, Customers, Suppliers, Supplier orders, Invoices, Invoice lines, Returns, Shop, Payment details, Inbox, Browse and Edits) and the shop's own connection key. A copy of the template, or of a sheet already set up with 2.7 or later, gets a new key.
 3. Open **Extensions > Apps Script > Deploy > New deployment > Web app**, Execute as **Me**, Who has access **Anyone**, and deploy.
 4. Choose **Bodega > Show connection code** and copy the code.
 5. Open the app on the phone (Safari, then Share > Add to Home Screen), open Settings (the sliders button at the top right), paste the code and tap **Test and save**.
@@ -17,7 +17,7 @@ The app works before step 5. Everything is kept on the device and sent to the sh
 
 ### Making the template
 
-Once per release: create a blank Google Sheet named "Bodega template", paste `apps-script/Code.gs` into its Apps Script and save. Do not run setup in it, so it holds no data and no key. Share it as "Anyone with the link can view" and give shops the link with `/copy` in place of `/edit`, which opens the copy dialog. Put that link in `TEMPLATE_URL` in `index.html` so the app's New shop guide points to it.
+Once: create a blank Google Sheet named "Bodega template", paste `apps-script/Code.gs` into its Apps Script and save. Do not run setup in it, so it holds no data and no key. Share it as "Anyone with the link can view" and give shops the link with `/copy` in place of `/edit`, which opens the copy dialog. Put that link in `TEMPLATE_URL` in `index.html` so the app's New shop guide points to it. At each release, paste the new `Code.gs` into the template, so the link stays the same and new shops start on the current back end.
 
 ### Maintaining a shop's sheet
 

@@ -474,12 +474,13 @@ Each of these was undecided when the release that added it was built. They are l
 | A logo that is not a PNG or JPEG data URL | Refused with `The logo must be a PNG or JPEG picture.` | `cleanShop_()` |
 | A copied sheet | Gets a new key, no logo and `moveRev` 0; its tabs, the Shop values included, keep what was copied | `setup()` |
 | Menu functions | `setupFromMenu()` and `showCode()`, public so the menu can call them; run from the script editor they only log | `onOpen()`, `dialog_()` |
-| Shop details changed on two devices before either syncs | Each device sends only the fields it changed, as absolute values; the last to reach the sheet wins per field | `saveShop()`, `qShop()` |
+| Shop details changed on two devices before either syncs | Each device sends only the fields typed differently from what its Settings showed, as absolute values, so a sync that arrived while Settings was open is not undone; the last to reach the sheet wins per field. Details moved up from 2.6 are cut to the sheet's limits | `saveShop()`, `qShop()`, `shopUp()` |
 | Moving 2.6 details up | Once per device, with fill; a currency other than `₱` counts as a detail to move | `shopUp()` |
 | Logo size | A JPEG at most 480 px a side, made smaller until its data URL fits 120,000 characters | `logoUrl()`, `LOGO_MAX` |
 | A back end older than the app | Entries wait and nothing is pulled; the app asks `ping` again at every sync until the back end is updated | `BACKEND_MIN`, `held()`, `syncNow()` |
 | A new connection code (another URL or key) | Clears `meta`, so the pull starts afresh from that sheet, logo and version included | `saveCfg` |
-| New shop guide | In Settings > Connection only while not connected; with no template yet it says to paste `Code.gs` into a blank sheet | `guideHtml()`, `TEMPLATE_URL`, `CODE_URL` |
+| New shop guide | In Settings > Connection only while not connected; with no template yet it says to paste `Code.gs` into a blank sheet. `CODE_URL` uses the repository's old name, which GitHub forwards after a rename | `guideHtml()`, `TEMPLATE_URL`, `CODE_URL` |
+| The currency symbol | Typed in the app or in the Shop tab, so `money()` escapes it like any other text before it reaches the page | `money()` |
 
 Not built because the brief left them undecided: an ID-confidence field, holds on unpaid units, return windows, refund approval, payment method and reference, voiding an invoice, and exchanges as a return outcome.
 

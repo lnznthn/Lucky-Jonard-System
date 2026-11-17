@@ -253,7 +253,7 @@ const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the h
 const BACKEND_MIN = '2.7.0';
 // The New shop guide in Settings: a template sheet to copy ('' until there is one; the guide then says to paste Code.gs into a blank sheet).
 const TEMPLATE_URL = '';
-const CODE_URL = 'https://github.com/lnznthn/bodega-app/blob/main/apps-script/Code.gs';
+const CODE_URL = 'https://github.com/lnznthn/Lucky-Jonard-System/blob/main/apps-script/Code.gs';   // GitHub forwards the old name after a rename
 const LOGO_MAX = 120000;   // the longest logo data URL the back end keeps (in Script Properties, in chunks)
 // The longest value of each shop field the back end takes, with the name its refusal uses; Settings checks them first.
 const SHOP_MAX = { name: ['Shop name', 120], contact: ['Address', 500], foot: ['Notes', 500], cur: ['Currency', 4] };
@@ -294,7 +294,7 @@ function fmtDay(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: iso.slice(0, 4) === t.slice(0, 4) ? undefined : 'numeric' });
 }
 const fmtNum = n => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const money = n => prefs.cur + fmtNum(n);
+const money = n => esc(prefs.cur) + fmtNum(n);   // the currency comes from the sheet's Shop tab, so it is escaped like any typed text
 const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
 const r2 = n => Math.round(n * 100) / 100;
 const blank = v => v == null || v === '';
@@ -621,7 +621,8 @@ const verLess = (a, b) => { const x = String(a).split('.'), y = String(b).split(
 const sheetOld = () => !!meta.ver && verLess(meta.ver, BACKEND_MIN);
 /** Entries wait on this device while the shop's sheet runs a back end older than this app needs; everything else works as offline. */
 const held = () => !!cfg.url && sheetOld() && queued('pending') > 0;
-const heldText = () => `This shop’s sheet runs back end ${meta.ver}; this app needs ${BACKEND_MIN}. Update the sheet: paste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version.`;
+const UPDATE_STEPS = 'Paste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version.';
+const heldText = () => `This shop’s sheet runs back end ${meta.ver}; this app needs ${BACKEND_MIN}. To update the sheet: ${UPDATE_STEPS}`;
 async function syncNow(manual) {
   if (ui.busy) return;
   if (!cfg.url) { if (manual) toast('Not connected yet. Everything is saved on this device.'); return; }
@@ -631,7 +632,7 @@ async function syncNow(manual) {
   try {
     let batch, pushed = false;
     // Before sending entries to a back end of unknown or older version, ask its version; an older one gets nothing, not even a pull.
-    if (queued('pending') && (!meta.ver || sheetOld())) { meta.ver = String((await api('ping')).version || ''); store.set('meta', meta); }
+    if (queued('pending') && (!meta.ver || sheetOld())) { meta.ver = String((await api('ping')).version || '0'); store.set('meta', meta); }
     if (held()) throw Object.assign(new Error(heldText()), { held: true });
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
       const data = await api('add', { entries: batch.map(wire), have: meta });
@@ -799,7 +800,7 @@ function needsRows() {
   const ready = readyLines(), owing = L.invs.filter(v => v.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
   const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
-  if (held()) out.push(row(`Update the sheet: it runs back end ${esc(meta.ver)}, this app needs ${BACKEND_MIN}`, `Paste the new Code.gs, run Bodega > Set up or upgrade this sheet, publish a new version. ${plural(queued('pending'), 'entry waits', 'entries wait')} here until then.`, 'data-act="settings"'));
+  if (held()) out.push(row(`Update the sheet: it runs back end ${esc(meta.ver)}, this app needs ${BACKEND_MIN}`, `${UPDATE_STEPS} ${plural(queued('pending'), 'entry waits', 'entries wait')} here until then.`, 'data-act="settings"'));
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
   // One row per customer, for their oldest invoice with ready lines; four customers or more make one row that opens the To follow list.
   const by = new Map(); ready.forEach(x => { const k = x.v.custId || x.v.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
@@ -1884,7 +1885,7 @@ function readyLine(imp, idx) {
   return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', k('ord') ? plural(k('ord'), 'order line') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
 /** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
-const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
+const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${esc(prefs.cur)}${costsText(r.costs)} each` : ' · no cost yet';
 function prowHtml(imp, i) {
   const r = imp.rows[i], can = canTick(r), fixable = imp.mode !== 'moves' && r.src;
   let detail = '';
@@ -2110,16 +2111,17 @@ function payHtml() {
       : cfg.url ? 'None yet. Add rows (Method, Number, Name) to the sheet’s Payment details tab and they appear on the invoice image after the next sync.'
       : 'They come from the sheet’s Payment details tab once the sheet is connected, and appear on the invoice image.'}</p></div>`;
 }
-/** Saves the Shop group: the fields that differ from this device's copy go to the sheet in one shop entry (logo: a new picture, or '' to
- *  remove it), and the copy takes them at once. Returns whether anything changed, or null when a field is too long (nothing is saved). */
+/** Saves the Shop group: the fields typed differently from what the group showed go to the sheet in one shop entry (logo: a new picture,
+ *  or '' to remove it), and this device's copy takes them at once. Comparing with what was shown, not with the copy, keeps a sync that
+ *  arrived while Settings was open from being undone. Returns whether anything changed, or null when a field is too long (nothing is saved). */
 function saveShop(logo) {
-  const now = { name: $('#sShop').value.trim(), contact: $('#sContact').value.trim(), foot: $('#sFoot').value.trim(), cur: $('#sCur').value.trim() || '₱' };
-  const long = Object.keys(SHOP_MAX).find(k => now[k].length > SHOP_MAX[k][1]);
+  const box = { name: '#sShop', contact: '#sContact', foot: '#sFoot', cur: '#sCur' }, patch = {};
+  Object.entries(box).forEach(([k, id]) => { const e = $(id), v = e.value.trim(), was = e.defaultValue.trim(); if (v !== was) patch[k] = k === 'cur' ? v || '₱' : v; });
+  const long = Object.keys(patch).find(k => patch[k].length > SHOP_MAX[k][1]);
   if (long) { toast(`${SHOP_MAX[long][0]} is too long: at most ${SHOP_MAX[long][1]} characters.`); return null; }
-  if (logo != null) now.logo = logo;
-  const patch = {}; Object.keys(now).forEach(k => { if (now[k] !== (k === 'cur' ? prefs.cur : prefs.shop[k])) patch[k] = now[k]; });
+  if (logo != null && logo !== prefs.shop.logo) patch.logo = logo;
   if (!Object.keys(patch).length) return false;
-  const { cur, ...shop } = now; Object.assign(prefs.shop, shop); prefs.cur = cur; savePrefs();
+  const { cur, ...shop } = patch; Object.assign(prefs.shop, shop); if (cur != null) prefs.cur = cur; savePrefs();
   qShop(patch); commit(); return true;
 }
 /** A picture as a JPEG data URL on white, at most 480 px a side and smaller until it fits LOGO_MAX; '' when even 120 px does not. */
@@ -2143,7 +2145,7 @@ async function setLogo(file) {
 async function shopUp() {
   if (prefs.shopUp) return;
   const s = prefs.shop, up = {};
-  ['name', 'contact', 'foot'].forEach(k => { if (s[k]) up[k] = s[k]; });
+  ['name', 'contact', 'foot'].forEach(k => { if (s[k]) up[k] = s[k].slice(0, SHOP_MAX[k][1]); });   // 2.6 had no limits; the sheet refuses longer
   if (prefs.cur !== '₱') up.cur = prefs.cur;
   if (s.logo) { let l = s.logo; if (!/^data:image\/(png|jpeg);base64,/.test(l) || l.length > LOGO_MAX) { const im = await loadImg(l); l = im ? logoUrl(im) : ''; } if (l) up.logo = l; }
   if (Object.keys(up).length) { qAdd('shop', { shop: up, fill: true }); saveQueue(); dirty(); }
