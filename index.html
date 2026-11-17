@@ -915,10 +915,10 @@ function saveMove() {
 
 /* Activity */
 const cmpMove = (a, b) => (a.date === b.date ? b._i - a._i : a.date < b.date ? 1 : -1);
+const moveTag = m => m.q ? (m.q.status === 'failed' ? '<span class="tag bad">refused</span>' : '<span class="tag warn">waiting</span>') : '';
 function moveRow(m, withName = true) {
-  const it = live().map.get(m.sku), q = m.q;
-  const tag = q ? (q.status === 'failed' ? '<span class="tag bad">refused</span>' : '<span class="tag warn">waiting</span>') : '';
-  return row(`${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${tag}`, `${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.reason === 'Sale' && m.ref ? ' · invoice ' + esc(m.ref) : ''}${m.note ? ' · ' + esc(m.note) : ''}`, `data-act="move" data-id="${esc(m.id)}"`, `<span class="delta">${signed(m.dir, m.qty)}</span>`);
+  const it = live().map.get(m.sku);
+  return row(`${withName ? esc(it ? it.name : m.sku) : esc(m.reason)}${moveTag(m)}`, `${withName ? esc(m.reason) : esc(fmtDay(m.date))}${m.reason === 'Sale' && m.ref ? ' · invoice ' + esc(m.ref) : ''}${m.note ? ' · ' + esc(m.note) : ''}`, `data-act="move" data-id="${esc(m.id)}"`, `<span class="delta">${signed(m.dir, m.qty)}</span>`);
 }
 function renderActivity() {
   const pend = queue.filter(q => q.status === 'pending').length, failed = queue.filter(q => q.status === 'failed').length;
@@ -928,7 +928,7 @@ function renderActivity() {
     ${pend && !failed ? `<div class="banner warn"><span>${pend} waiting to reach the sheet.</span><button class="tbtn" data-act="sync">Sync</button></div>` : ''}
     <div><label for="aq">Filter</label><input id="aq" type="search" placeholder="Name, reason, note or date" value="${esc(ui.aq)}" autocomplete="off"></div>
     ${ui.aSku ? `<div class="links"><p class="hint" style="flex:1">Showing only: ${esc((live().map.get(ui.aSku) || { name: ui.aSku }).name)}</p><button class="tbtn" data-act="clearSku">Show all</button></div>` : ''}
-    <div id="actList" class="cols"></div>`;
+    <div id="actList" class="${wide() ? '' : 'cols'}"></div>`;
   renderActList();
 }
 function renderActList() {
@@ -939,9 +939,14 @@ function renderActList() {
   if (q) rows = rows.filter(m => norm([m.date, m.sku, (L.map.get(m.sku) || {}).name, m.reason, m.note].join(' ')).includes(q));
   rows.sort(cmpMove);
   if (!rows.length) { box.innerHTML = `<p class="empty">No movements yet.</p>`; return; }
+  const older = rows.length > ui.aN ? `<button class="btn" data-act="more">Show ${rows.length - ui.aN} older</button>` : '';
+  const nm = m => (L.map.get(m.sku) || { name: m.sku }).name;
+  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date))], ['Item', nm, m => esc(nm(m)) + moveTag(m), 'w'],
+    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'n'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'n'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'w']],
+    rows, m => `data-act="move" data-id="${esc(m.id)}"`, '', ui.aN) + older; return; }
   const shown = rows.slice(0, ui.aN); let out = '', day = '';
   shown.forEach(m => { if (m.date !== day) { if (day) out += '</div></section>'; day = m.date; out += `<section class="sec"><h2>${esc(fmtDay(day))}</h2><div class="list">`; } out += moveRow(m); });
-  box.innerHTML = out + '</div></section>' + (rows.length > shown.length ? `<button class="btn" data-act="more">Show ${rows.length - shown.length} older</button>` : '');
+  box.innerHTML = out + '</div></section>' + older;
 }
 function openMove(id) {
   const m = live().all.find(x => x.id === id); if (!m) return;
