@@ -384,6 +384,7 @@ const stockCost = sku => { const u = onHand(sku).units; return { value: r2(u.red
 function costOut(sku, qty) { const u = onHand(sku).units.slice(0, qty); return u.length < qty || u.some(x => x.cost == null) ? null : r2(u.reduce((s, x) => s + x.cost, 0) / qty); }
 /** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
 function nums(sku) { const L = live(), have = stockOf(sku), inc = L.incoming.get(sku) || 0, owed = L.owed.get(sku) || 0; return { have, inc, owed, ltp: have + inc - owed }; }
+const LTP_TEXT = 'Left to promise is on hand, plus incoming supplier orders, minus units owed to open pre-orders. A negative number means more has been promised than supply covers.';
 const fourText = sku => { const n = nums(sku); return `On hand ${n.have} · Incoming ${n.inc} · Owed ${n.owed} · Left to promise ${n.ltp}`; };
 /** Units that can be sold now: on hand (never below zero) less what open pre-orders are owed. Incoming stock does not count. */
 const freeOf = sku => { const n = nums(sku); return Math.max(n.have, 0) - n.owed; };
@@ -698,6 +699,7 @@ function openItem(sku) {
     <div class="top"><h2>${esc(i.name)}</h2>${closeBtn}</div>
     <p class="hint">${esc(catOf(i))} · SKU ${esc(i.sku)} · ${i.price != null ? money(i.price) : 'no price yet'}${i.active ? '' : ' · archived'}</p>
     ${sec('Units', `<div class="strip"><span class="cell ${s}"><small>On hand</small><b class="onhand">${n.have}</b></span><span class="cell"><small>Incoming</small><b>${n.inc}</b></span><span class="cell"><small>Owed</small><b>${n.owed}</b></span><span class="cell ${n.ltp < 0 ? 'neg' : ''}"><small>Left to promise</small><b>${n.ltp}</b></span></div>`)}
+    <p class="hint">${LTP_TEXT}</p>
     ${said ? `<p class="hint">${said}</p>` : ''}
     <div class="actions"><button class="btn primary" data-act="toyGo" data-to="sell" data-sku="${esc(sku)}">Sell</button><button class="btn" data-act="toyGo" data-to="ord" data-sku="${esc(sku)}">Order stock</button></div>
     <div class="actions"><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="In">Stock in</button><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="Out">Stock out</button></div>
