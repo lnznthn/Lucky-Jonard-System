@@ -339,7 +339,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // ol the supplier-order line it waits for ('' for a date typed in exp; unset: the first open one).
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], paid: '' });
 let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
+  sellSeg: 'list', ordSeg: 'pre', iq: '', sf: 'all', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -732,13 +732,21 @@ const STOCK_TEST = { out: i => status(i) !== 'ok', short: i => { const n = nums(
 function needsRows() {
   const L = live(), today = todayISO(), act = L.list.filter(i => i.active), out = [];
   const failed = queued('failed');
-  const due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
+  const ready = readyLines(), owing = L.invs.filter(v => v.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
   const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
+  // One row per customer, for their oldest invoice with ready lines; four customers or more make one row that opens the To follow list.
+  const by = new Map(); ready.forEach(x => { const k = x.v.custId || x.v.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
+  if (by.size >= 4) out.push(row(`Ship to-follow lines to ${by.size} customers`, 'The products have arrived', 'data-act="homeGo" data-to="follow"'));
+  else by.forEach(xs => {
+    const v = xs[0].v, more = new Set(xs.map(x => x.v.id)).size - 1;
+    out.push(row(`Ship ${esc(v.cust)}’s to-follow lines`, `${xs.filter(x => x.v === v).map(x => `${esc(x.l.name)} × ${x.l.qty}`).join(', ')}${v.balance > 0 ? ' · balance ' + money(v.balance) : ''}${more ? ` · ${plural(more, 'more invoice')} ready` : ''}`, `data-act="inv" data-id="${esc(v.id)}"`));
+  });
   if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="homeGo" data-to="add"'));
   if (short.length) out.push(row(`Order stock for ${plural(short.length, 'product')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
   if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
+  if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, v) => s + v.balance, 0)))} on ${plural(owing.length, 'invoice')}`, 'Balances still open', 'data-act="homeGo" data-to="unpaid"'));
   if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'product')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
   if (nocost) out.push(row(`Add the cost of ${plural(nocost, 'unit')}`, 'Without it, the margin on a sale stays unknown', 'data-act="homeGo" data-to="nocost"'));
   if (verify.length) out.push(row(`Check ${plural(verify.length, 'release date')}`, 'Best guesses still to confirm', 'data-act="homeGo" data-to="verify"'));
@@ -1061,7 +1069,7 @@ function invHint() {
   return t[0].toUpperCase() + t.slice(1);
 }
 function renderSell() {
-  const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or product" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
+  const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div id="invSeg"></div><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or product" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
   // Desktop: New sale across the page, the invoice list under it. Phone: the list, or the New sale form in its place.
   view().innerHTML = wide() ? `<section class="sec pad"><h2>New sale</h2>${form}</section>${list}` : ui.sellSeg === 'new' ? form : `<button class="btn primary big" data-act="sellNew">New sale</button>${list}`;
   renderInvForm(); renderInvList();   // each draws only into its own box, if the page has it
@@ -1150,12 +1158,15 @@ const docTitle = v => 'Invoice no. ' + v.no;
 /** An invoice's margin in whole pesos: the total less the cost of its lines, cancelled lines left out; null while a line has no cost (a to-follow line has none yet). */
 const marginOf = v => { const ls = v.lines.filter(l => l.status !== CANCELLED); return ls.every(l => l.cost != null) ? Math.round(v.total - ls.reduce((s, l) => s + l.qty * l.cost, 0)) : null; };
 const hasFollow = v => v.lines.some(l => l.status === FOLLOW);
+// The invoice list's filters: Home's "Collect" row opens Unpaid.
+const SALES_FILTERS = { all: ['All', () => true], unpaid: ['Unpaid', v => v.balance > 0], follow: ['To follow', hasFollow] };
 function renderInvList() {
   const box = $('#invList'); if (!box) return;
-  const q = norm(ui.iq);
-  let rows = live().invs.slice().sort((a, b) => b.no - a.no);
+  const L = live(), q = norm(ui.iq), sg = $('#invSeg');
+  if (sg) sg.innerHTML = `<div class="seg">${Object.entries(SALES_FILTERS).map(([k, [n, t]]) => { const c = k === 'all' ? 0 : L.invs.filter(t).length; return `<button data-act="sf" data-f="${k}" class="${ui.sf === k ? 'on' : ''}">${n}${c ? ' · ' + c : ''}</button>`; }).join('')}</div>`;
+  let rows = L.invs.filter(SALES_FILTERS[ui.sf][1]).sort((a, b) => b.no - a.no);
   if (q) rows = rows.filter(v => norm([v.no, v.cust, v.date, ...v.lines.map(l => l.name)].join(' ')).includes(q));
-  if (!rows.length) { box.innerHTML = `<p class="empty">${q ? 'Nothing matches.' : 'No invoices yet.'}</p>`; return; }
+  if (!rows.length) { box.innerHTML = `<p class="empty">${q ? 'Nothing matches.' : ui.sf === 'unpaid' ? 'Every invoice is paid.' : ui.sf === 'follow' ? 'Nothing is to follow.' : 'No invoices yet.'}</p>`; return; }
   const ls = v => v.lines.filter(l => l.status !== CANCELLED), items = v => (ls(v)[0] ? ls(v)[0].name : '') + (ls(v).length > 1 ? ' and ' + (ls(v).length - 1) + ' more' : '');
   const tag = v => (hasFollow(v) ? '<span class="tag">to follow</span>' : '') + (v.balance > 0 ? `<span class="tag">balance ${money(v.balance)}</span>` : '');
   if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'num'], ['Date', v => v.date, v => esc(fmtDay(v.date)), 'date'], ['Customer', v => v.cust, v => esc(v.cust) + tag(v) + waitTag(v), 'name'], ['Products', items, null, 'name'],
@@ -1994,7 +2005,8 @@ document.addEventListener('click', async ev => {
       break;
     }
     case 'homeGo': {
-      if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
+      if (d.to === 'sale') { ui.sellSeg = 'new'; go('sell'); }
+      else if (d.to === 'invs' || d.to === 'unpaid' || d.to === 'follow') { ui.sellSeg = 'list'; ui.sf = d.to === 'invs' ? 'all' : d.to; go('sell'); }   // the invoice list, filtered
       else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
       else { ui.filter = d.to; ui.q = ''; ui.tf = {}; go('stock'); }
       break;
@@ -2005,6 +2017,7 @@ document.addEventListener('click', async ev => {
     case 'invDelLine': ui.inv.lines.splice(+d.i, 1); renderSell(); break;
     case 'invIssue': issueInvoice(); break;
     case 'inv': ui.sub = null; openInv(d.id); break;
+    case 'sf': ui.sf = d.f; renderInvList(); break;
     case 'invSub': {   // a payment, or a change to a to-follow line, in the invoice sheet
       const v = live().invs.find(x => x.id === d.id), l = v && v.lines.find(x => x.line === +d.line);
       ui.sub = { id: d.id, mode: d.m, line: l ? l.line : 0, paid: '', refund: '', sku: l ? l.sku : '', ol: l ? l.orderLine || (l.expected ? '' : undefined) : '', exp: l ? l.expected : '' }; rerender(); break;
