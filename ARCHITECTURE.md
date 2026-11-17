@@ -165,7 +165,7 @@ A unit's condition sits beside its cost wherever a cost is typed or shown, becau
 - An `Out` of `Qty` q removes units from the front of the queue. A `Correction` whose `Ref` is the ID of an `In` first removes that movement's own units while they are on hand, then takes the rest from the front.
 - What the queue cannot supply is added to the deficit. Stock is units on hand less the deficit, and one of the two is always zero, so stock below zero means a deficit that the next units to arrive cover first.
 
-The cost of a sale line is the sum of the costs of the units the line removes, divided by its quantity and rounded to two decimals. It is blank when any of those units has no cost, or when the line takes stock below zero. The app works it out from `live()` when the invoice is issued (`costOut()`) and sends it as `lines[].cost`; the script writes it unchanged on the invoice line and the `Sale` movement. Nothing rewrites it later, so a cost typed afterwards changes only units still on hand and never an issued invoice. The invoice screen shows margin as total minus cost ("Margin ₱X"), or "Margin unknown: a product has no cost" when a line has none. Margin is not drawn on the image.
+The cost of a sale line is the sum of the costs of the units the line removes, divided by its quantity and rounded to two decimals. It is blank when any of those units has no cost, or when the line takes stock below zero. The app works it out from `live()` when the invoice is issued (`costOut()`) and sends it as `lines[].cost`; the script writes it unchanged on the invoice line and the `Sale` movement. Nothing rewrites it later, so a cost typed afterwards changes only units still on hand and never an issued invoice. The invoice screen shows margin as the total less the shipping fee and the cost of the lines ("Margin ₱X"), or "Margin unknown: a product has no cost" when a line has none. Margin is not drawn on the image.
 
 The condition of a sale line is that of the units it removes: their distinct conditions in FIFO order, leaving out blanks, joined with ` / ` (usually a single value such as `MIB`), and blank when none is known (`condOut()` in the app). The app sends it as `lines[].cond` when the invoice is issued and as `cond` on `deliver` when a to-follow line ships. The script checks that every part is in the list and writes it unchanged on the invoice line and its `Sale` movement. A to-follow line has no condition until it ships.
 
@@ -250,7 +250,7 @@ The header shows the page title. On Home it shows the shop name from Settings wh
 
 `renderHome()` draws, from the top on a phone:
 
-1. The numbers strip, titled "<Month> so far", with three cells: Today, Month and Margin, in whole pesos. Margin adds up each invoice's margin (`marginOf()`: its total less its shipping fee and the cost of its lines, so after its discount) once every line not cancelled has a cost; until then (a line still to follow has no cost yet) it counts the delivered lines that have a cost, at quantity × (price − cost), and leaves out those without one. It shows "–" when no line sold this month has a cost and carries an asterisk when only some do. Tapping the strip opens the invoice list. One muted line follows only when there is something to say: what the asterisk means, that no product sold has a cost, or the refunds this month.
+1. The numbers strip, titled "<Month> so far", with three cells: Today, Month and Margin, in whole pesos. Margin counts the delivered lines that have a cost, at quantity × (price − cost), leaves out those without one, and takes each invoice's discount off once one of its lines counts; the shipping fee never counts. Once every line of an invoice has a cost this equals its `marginOf()` (its total less its shipping fee and the cost of its lines), and a to-follow line shipped later only adds to it. It shows "–" when no line sold this month has a cost and carries an asterisk when only some do. Tapping the strip opens the invoice list. One muted line follows only when there is something to say: what the asterisk means, that no product sold has a cost, or the refunds this month.
 2. Two buttons: **New sale** and **Add inventory** (which reads "Add inventory · N" when N Inbox rows wait). Add inventory opens Inventory with its Add inventory tab chosen.
 3. **Needs you**: one list of jobs in a fixed order, built by `needsRows()`. The badge on the title counts the rows. Each row is phrased as an action and opens the place to do it:
    1. Fix N entries the sheet refused (Activity).
@@ -380,7 +380,7 @@ Each of these was undecided when the release that added it was built. They are l
 | Invoice image wording | Follows the shop's template: title "Invoice" with the number beside it (kept because the sheet can renumber an invoice); no tax lines; dates as M/D/YYYY and amounts with two decimals; Expected arrival shows a to-follow line's date ("To follow" without one) and is blank on every other line; cancelled lines are left out; Paid shows only on a part payment, and the Total box shows what is due | `drawDoc()`, Settings |
 | Invoice taller than 2048 px | Split into several images that download together | `drawDoc()`, `saveImg()` |
 | "Page i of N" | Drawn only when there are two or more images | `drawDoc()` |
-| Logo on the image | Drawn into a fixed 150 × 56 pt box, so the number of images is known during the tap | `drawDoc()`, `docPngs()` |
+| Logo on the image | Drawn into a fixed 150 × 150 pt box at the top right, so the number of images is known during the tap | `drawDoc()`, `docPngs()` |
 | Copy image button | Shown on phone and desktop (the owner's change to a spec that said desktop only), when the browser can write images to the clipboard; hidden for documents with several images | `canCopyImg`, `openInv()` |
 | Supplier orders | One row per line. The cost each is optional and pre-fills the cost field of each unit when received (one field per unit, blank allowed). A line is received with a quantity that defaults to what is still due; a short line stays open, and "Cancel the rest" closes it | `T_.order`, `receive`, `recvSub()` |
 | Receive import | A Receive row takes the oldest open order line of its product, up to what is still due on it; the rest is a plain Restock | `settleReceive()` |
@@ -419,17 +419,17 @@ Each of these was undecided when the release that added it was built. They are l
 | Which unit a write-off removes | The oldest, the same as a sale | `stockOf_()`, `fifo()` |
 | A sale of a unit with no cost | Allowed, with a warning; the margin on that sale stays unknown | `invNoCost()`, `costOut()` |
 | More than 12 units in one stock-in | One "Cost each" field, expandable to one field per unit | `costFields()` |
-| Costs through the sheet | Not supported; a cost is changed in the app | `cost` |
-| A `cost` entry carrying the value the unit already has | Changes nothing and is not refused, even after the unit has left stock, so a retry after a lost response succeeds | `cost` in `plan_()` |
-| A `cost` entry for a movement written earlier in the same request | Written into that new row, without raising `moveRev` | `cost` in `plan_()` |
-| `moveRev` | Raised once per Movements cell written and compared strictly; an app that sends no `have.moveRev` gets every movement | `write_()`, `snapshot_()` |
+| Costs and conditions through the sheet | Not supported; a cost or condition is changed in the app, and a condition typed in the sheet that is not in the list reads as none | `cost`, `cond`, `fifo()` |
+| A `cost` or `cond` entry carrying the value the unit already has | Changes nothing and is not refused, even after the unit has left stock, so a retry after a lost response succeeds | `cost` in `plan_()` |
+| A `cost` or `cond` entry for a movement written earlier in the same request | Written into that new row, without raising `moveRev` | `cost` in `plan_()` |
+| `moveRev` | Raised once per Movements row written in place and compared strictly; an app that sends no `have.moveRev` gets every movement | `write_()`, `snapshot_()` |
 | Inbox on reset | Kept, with an optional function to bring researched rows back for review | `wipeAllData()`, `reopenInbox()` |
 | Browse on reset | Deleted and made again by the next write, not cleared, so no layout from an older release is left | `wipeAllData()`, `browseSheet_()` |
 | Home rows that open Inventory | Reset the search and the column filters | `homeGo` in the click handler |
 | Table rows | Reachable with Tab; Enter opens the row's sheet | `table()`, the `keydown` handler |
 | Subtotal, Discount and Shipping fee rows | Shown on New sale and on the invoice sheet only when there is a discount or a fee; otherwise the Total stands alone | `subRows()` |
 | The two discount fields | Linked; the one typed last decides, so a % follows the subtotal as the lines change | `discShown()`, `invDisc()` |
-| Margin with a discount and a fee | The total less the shipping fee less the cost of the lines; Home counts an invoice's whole margin once every line has a cost | `marginOf()`, `renderHome()` |
+| Margin with a discount and a fee | The total less the shipping fee less the cost of the lines; Home takes the discount off once a line of the invoice counts, so its margin never drops when a to-follow line ships | `marginOf()`, `renderHome()` |
 | A condition picked on a sale line | Saved on the units the line takes (the oldest on hand), never on the invoice alone | `setLineCond()` |
 | Condition of a new unit | MIB unless picked, in every form, for Receive all and for a Movements paste; a Stock out by hand carries none | `NEW_COND`, `saveMove()` |
 

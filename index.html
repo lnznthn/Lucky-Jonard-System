@@ -452,10 +452,11 @@ function live() {
  */
 function fifo(list) {
   const by = new Map();
+  // A unit's condition is one from the list; a value typed in the sheet that is not in it reads as none.
   list.forEach(m => {
     const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
     let n = m.qty;
-    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit, cond: m.cond || '' }); }
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit, cond: oneCond(m.cond) }); }
     else {
       if (m.reason === 'Correction') s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
@@ -790,12 +791,13 @@ function renderHome() {
   const upd = 'Add inventory' + (waiting ? ' · ' + waiting : '');
   const tS = L.invs.filter(v => v.date === today), mS = L.invs.filter(v => v.date.slice(0, 7) === month);
   const sum = list => Math.round(list.reduce((s, v) => s + v.total, 0));
-  // Margin is each invoice's marginOf() (after its discount, without its shipping fee) once every line has a cost; until then (a line still to
-  // follow has none yet) it counts the delivered lines that have one.
+  // Margin counts the delivered lines that have a cost, and takes each invoice's discount off once one of its lines counts; the shipping fee
+  // never counts. Once every line has a cost this is marginOf(), and it does not drop when a to-follow line ships later.
   let margin = 0, known = true, some = false;
   mS.forEach(v => {
-    const m = marginOf(v); if (m != null && v.lines.some(l => l.status === DELIVERED)) { some = true; margin += m; return; }
-    v.lines.forEach(l => { if (l.status !== DELIVERED) return; if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } });
+    let any = false;
+    v.lines.forEach(l => { if (l.status !== DELIVERED) return; if (l.cost == null) known = false; else { some = any = true; margin += l.qty * (l.price - l.cost); } });
+    if (any) margin -= Math.min(v.disc || 0, subOf(v));
   });
   const refunds = r2(L.rets.filter(r => r.date.slice(0, 7) === month).reduce((s, r) => s + (r.refund || 0), 0));
   const say = [known ? '' : some ? '* Leaves out products sold with no cost on file.' : 'No margin yet: the products sold have no cost on file.', refunds ? money(refunds) + ' refunded this month.' : ''].filter(Boolean).join(' ');
@@ -1028,7 +1030,7 @@ function saveMove() {
   const costs = m.dir === 'In' ? readCosts('mv.c', qty) : []; if (!costs) return toast('Cost must be zero or more.');
   const have = stockOf(it.sku);
   if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
-  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost: null, cond: '' };
+  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost: null };
   if (m.dir === 'In') qIns(mv, costs, readConds('mv.c', qty)); else qMove(mv);
   const after = have + (m.dir === 'In' ? qty : -qty);
   ui.mv = null; prefs.tab = 'stock'; savePrefs();
@@ -1083,7 +1085,7 @@ function openMove(id) {
 function reverseMove(id) {
   const m = moves.find(x => x.id === id); if (!m) return;
   // Reversing an Out brings its units back at the cost it left with, and its condition when that is a single one; reversing an In takes that In's units out.
-  const r = { id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})`, cond: '' };
+  const r = { id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` };
   if (m.dir === 'In') qMove(r); else qIns(r, Array(m.qty).fill(m.cost), Array(m.qty).fill(oneCond(m.cond)));
   closeSheet(); commit(); toast('Reversal recorded');
 }
@@ -1111,7 +1113,7 @@ const lineOl = x => { const ols = openLines(x.sku); return x.ol === '' ? '' : ol
 /** What x (sku, ol, exp) records on a to-follow line: the supplier-order line and its date, or the date typed (null when not understood). */
 const expOf = x => { const ol = lineOl(x), o = ol && live().orders.find(y => y.id === ol); return { ol, exp: o ? o.expected || '' : x.exp ? parseDate(x.exp) : '' }; };
 /** What decides the form's shape; when it changes while typing, the form is redrawn. */
-const invSig = () => ui.inv.lines.map((l, i) => l.sku ? [isFollow(i), noCost(l), lineCond(l, i)].join() : '').join('|');
+const invSig = () => ui.inv.lines.map((l, i) => l.sku ? [isFollow(i), noCost(l), condOut(l.sku, lineQty(l))].join() : '').join('|');
 /** How many of the units a sale line takes have no cost yet. */
 const noCost = l => onHand(l.sku).units.slice(0, lineQty(l)).filter(u => u.cost == null).length;
 /** The condition of in-stock line i: a dropdown showing condOut() of the units it takes, where a pick edits those units (setLineCond()).
@@ -1614,7 +1616,7 @@ function settleReceive(rows, ordered) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty); r.conds = unitConds(r, r.qty);   // one per unit the row adds
+    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty); r.conds = ordered ? [] : unitConds(r, r.qty);   // one per unit the row adds; an order line has no units yet
     if (r.match) {
       r.status = ordered ? 'ord' : 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       if (!ordered) r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1820,7 +1822,7 @@ function impTable(imp, idx, k) {
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
       + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'], ['Condition', i => condsText(R(i).conds || []), cond],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'], ...(ordered(imp) ? [] : [['Condition', i => condsText(R(i).conds || []), cond]]),
     ['Price', i => R(i).price != null ? R(i).price : R(i).match ? R(i).match.price : null, price, 'money'],
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
