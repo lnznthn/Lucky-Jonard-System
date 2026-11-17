@@ -1349,21 +1349,24 @@ function splitLine(line) {
 }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
-const DETAILS = [['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
+const DETAILS = [['cat', 'category'], ['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
 /** Reads the toy-detail columns of a pasted row into r. */
 function readDetails(r, mfr, brand, line, chr, rel, verify) {
   r.mfr = (mfr || '').trim(); r.brand = (brand || '').trim(); r.line = (line || '').trim(); r.chr = (chr || '').trim();
   const d = parseRel(rel); r.rel = d || ''; r.relCheck = !!r.rel && /^(y|yes|true|verify|check|x|\?)$/i.test((verify || '').trim());
   r.relMsg = d == null ? `Release date “${rel}” not understood, left blank.` : '';
 }
-/** Details a paste can add to a toy on file. Only blank fields are filled; what the owner typed is never overwritten. */
+/**
+ * Details a row changes on an item on file. Values from Claude or a paste only fill blank fields. A value typed in
+ * Correct this row (a key of src.fix) overwrites what is on file; one cleared there leaves the item alone.
+ */
 function detailPatch(it, r) {
-  const p = {};
-  DETAILS.forEach(([k]) => { if (!it[k] && r[k]) p[k] = r[k]; });
-  if (p.rel && r.relCheck) p.relCheck = true;
+  const p = {}, t = (r.src && r.src.fix) || {}, blank = v => v == null || v === '';
+  DETAILS.forEach(([k]) => { if (!blank(r[k]) && r[k] !== it[k] && (blank(it[k]) || k in t)) p[k] = r[k]; });
+  if ('rel' in t || 'verify' in t ? r.rel && r.relCheck !== !!it.relCheck : p.rel && r.relCheck) p.relCheck = r.relCheck;
   return p;
 }
-const detailNames = p => DETAILS.filter(([k]) => p[k]).map(d => d[1]).join(', ');
+const detailNames = p => DETAILS.filter(([k]) => k in p).map(d => d[1]).join(', ');
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
 const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price == null ? null : r.price, min: null, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
@@ -1393,6 +1396,8 @@ function parseCount(text) {
   settleCount(rows);
   return rows;
 }
+/** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
+const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
 function settleCount(rows) {
   const used = new Set();
@@ -1404,22 +1409,22 @@ function settleCount(rows) {
     used.add(key);
     if (r.match) {
       const have = stockOf(r.match.sku), d = r.count - have;
-      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = Array(Math.max(d, 0)).fill(r.cost);   // one per unit the row adds
+      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = unitCosts(r, d);   // one per unit the row adds
       r.status = d !== 0 ? 'count' : r.adds ? 'details' : 'same';
       r.on = d !== 0 || !r.match.active || !!r.adds;
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
-      r.status = 'new'; r.on = !r.similar; r.costs = Array(r.count).fill(r.cost);
+      r.status = 'new'; r.on = !r.similar; r.costs = unitCosts(r, r.count);
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
 /** Supplier paperwork: Name, Qty, Cost each, then the optional toy details and a note. */
-/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note. */
+/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note, then the Price typed in Correct this row. */
 function recvRow(c) {
   const [name = '', q = '', cost = '', cat = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: null, note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
+  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[11]), note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
   readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
@@ -1444,7 +1449,7 @@ function settleReceive(rows) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null; r.costs = Array(r.qty).fill(r.cost);   // one per unit the row adds
+    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty);   // one per unit the row adds
     if (r.match) {
       r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1533,12 +1538,13 @@ function inboxLoad() {
   resettle(ui.imp);
   return true;
 }
+// The columns of a Count and a Receive row by field (Count is the quantity in both). Receive has no Price column, so a typed price goes last.
+const ROW_COLS = { count: ['name', 'cat', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'cat', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
+/** A row's columns with what was typed in Correct this row (src.fix holds only the fields changed there). */
+const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 12) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
 /** A review row from its source columns with the owner's correction and "Use" choice applied. */
 function impRow(mode, src) {
-  const c = src.cols.slice(), f = src.fix, at = mode === 'count' ? [0, 2, 9] : [0, 1, 8];
-  while (c.length < 11) c.push('');
-  if (f) { c[at[0]] = f.name; c[at[1]] = f.count; c[at[2]] = f.rel; }
-  const r = (mode === 'count' ? countRow : recvRow)(c), use = src.use && live().map.get(src.use);
+  const r = (mode === 'count' ? countRow : recvRow)(fixedCols(mode, src)), use = src.use && live().map.get(src.use);
   if (use && r.match !== use && (r.count != null || r.qty)) { r.match = use; r.similar = null; }
   r.src = src;
   return r;
@@ -1614,7 +1620,7 @@ function impTable(imp, idx, k) {
     ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? `<div class="hint">Recorded as “${esc(r.match.name)}”</div>` : '') + (r.similar && !r.match ? `<div><button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button></div>` : ''); }, 'w'],
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? `<div class="hint">${esc(why(r))}</div>` : ''}`; }, 'w st'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'n'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => !(R(i).costs || []).length ? '' : has(i).length ? esc(prefs.cur + costsText(R(i).costs)) : '<span class="hint">no cost yet</span>', 'n'],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => { const c = costNote(R(i)).replace(/^ (at|·) /, ''); return has(i).length ? esc(c) : `<span class="hint">${c}</span>`; }, 'n'],   // the phone row's wording
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i))], ['Note', i => R(i).note, null, 'w']],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
 }
@@ -1623,17 +1629,19 @@ function readyLine(imp, idx) {
   const rows = idx.map(i => imp.rows[i]), k = st => rows.filter(r => r.status === st).length, det = rows.filter(r => r.match && (r.adds || r.status === 'details')).length;
   return [k('new') ? plural(k('new'), 'new item') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
+/** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
+const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
 function prowHtml(imp, i) {
   const r = imp.rows[i], can = canTick(r), fixable = imp.mode !== 'moves' && r.src;
   let detail = '';
   if (imp.mode === 'count') {
-    if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${costNote(r)}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
     else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
     else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}`;
+    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
   } else if (imp.mode === 'receive') {
-    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${r.cost != null ? ' at ' + money(r.cost) + ' each' : ''}`;
+    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${costNote(r)}`;
   } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
   const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
   const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
@@ -1643,27 +1651,42 @@ function prowHtml(imp, i) {
     ? `<button class="name fix" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
     : `<label class="name" for="imp${i}">${name}</label>${sub ? `<div class="sub">${sub}</div>` : ''}`}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
-/** The small sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
+/** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
 function openFix(i) {
   const imp = ui.imp, r = imp && imp.rows[i]; if (!r || !r.src) return;
-  const src = r.src, c = src.cols, cnt = imp.mode === 'count' ? 2 : 1, rel = imp.mode === 'count' ? 9 : 8;
-  const f = src.fix || { name: c[0] || '', count: c[cnt] || '', rel: c[rel] || '' }, sim = src.use ? live().map.get(src.use) : r.similar;
+  const src = r.src, c = fixedCols(imp.mode, src), at = k => c[ROW_COLS[imp.mode].indexOf(k)] || '', sim = src.use ? live().map.get(src.use) : r.similar;
+  // A count is absolute, so an item on file gets cost fields only for the units above its stock.
+  const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, t = (src.fix && src.fix.costs) || (r.cost != null ? [r.cost] : []);
+  ui.f = { c: { v: t.map(x => x == null ? '' : String(x)), open: new Set(t).size > 1 } };
+  const fld = (k, label, more = '') => { const id = 'fx' + k[0].toUpperCase() + k.slice(1); return `<div><label for="${id}">${label}</label><input id="${id}" data-fx="${k}" value="${esc(at(k))}" autocomplete="off"${more}></div>`; };
   openSheet(`<div class="top"><h2>Correct this row</h2>${closeBtn}</div>
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
-    <div><label for="fxName">Name</label><input id="fxName" value="${esc(f.name)}" autocomplete="off"></div>
-    <div class="row2"><div><label for="fxCount">${imp.mode === 'count' ? 'Count' : 'Qty'}</label><input id="fxCount" inputmode="numeric" value="${esc(f.count)}"></div>
-    <div><label for="fxRel">Release date</label><input id="fxRel" value="${esc(f.rel)}" placeholder="2024-07"></div></div>
-    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
+    ${fld('name', 'Name')}
+    ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
+    ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
+    <div class="row2">${fld('cat', 'Category', ' placeholder="General"')}${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}</div>
+    <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
+    <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
+    ${fld('rel', 'Release date', ' placeholder="2024-07-15, 2024-07 or 2024"')}
+    <label class="check"><input id="fxRelCheck" type="checkbox" ${r.relCheck ? 'checked' : ''}> Release date still needs checking</label>
+    ${fld('note', 'Note', ' placeholder="Optional"')}
+    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" data-have="${stockOf(sim.sku)}" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
     <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
 }
 function saveFix(i, simSku) {
   const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
-  const name = $('#fxName').value.replace(/\s+/g, ' ').trim(), count = $('#fxCount').value.trim(), rel = $('#fxRel').value.trim();
-  if (!name) { toast('Type a name.'); return; }
-  if (count && count !== '?' && !/^\d+$/.test(count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
-  if (rel && !parseRel(rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
-  const src = r.src; src.fix = { name, count, rel };
-  src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
+  const sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}; document.querySelectorAll('#sheet [data-fx]').forEach(e => { v[e.dataset.fx] = sp(e.value); });
+  if (!v.name) { toast('Type a name.'); return; }
+  if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
+  if (v.price && parsePrice(v.price) == null) { toast('Price must be zero or more.'); return; }
+  if (v.rel && !parseRel(v.rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
+  const costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
+  if (!costs) { toast('Cost must be zero or more.'); return; }
+  // Only the fields changed here count as typed: they overwrite the item on file, while the others keep the rule for Claude's values.
+  const src = r.src, c = fixedCols(imp.mode, src), fix = { ...src.fix, costs };
+  Object.keys(v).forEach(k => { if (v[k] !== sp(c[ROW_COLS[imp.mode].indexOf(k)])) fix[k] = v[k]; });
+  if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
+  src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
   imp.rows[i] = impRow(imp.mode, src);
   resettle(imp); closeSheet(); renderImpOut();
 }
@@ -1678,12 +1701,10 @@ function openImpResult() {
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
 }
-/** Fills blank details on an item already on file; restores it when archived. True when it queued a change. */
+/** Changes the details of an item already on file (see detailPatch()); restores it when archived. True when it queued a change. */
 function patchExisting(it, r) {
   const patch = detailPatch(it, r);
   if (!it.active) patch.active = true;
-  if (it.price == null && r.price != null) patch.price = r.price;
-  if (!it.cat && r.cat) patch.cat = r.cat;
   if (Object.keys(patch).length) qEdit(it.sku, patch);
   return Object.keys(patch).length > 0;
 }
@@ -1700,8 +1721,8 @@ function applyCount(rows) {
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
     if (d !== 0) {
       const m = { id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null };
-      // Stock can move between the review and Apply (a sync); the row's costs are then used as far as they go.
-      if (d > 0) qIns(m, Array.from({ length: d }, (_, k) => k < r.costs.length ? r.costs[k] : r.cost)); else qMove(m);
+      // Stock can move between the review and Apply (a sync); the typed costs are then used as far as they go.
+      if (d > 0) qIns(m, unitCosts(r, d)); else qMove(m);
       out.nMove++; if (!fresh) out.nCount++;
     }
     dirty();
@@ -1980,7 +2001,7 @@ function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(in
 document.addEventListener('input', ev => {
   const t = ev.target;
   if (t.dataset.cost) { costInput(t); return; }
-  if (t.dataset.units) redrawCosts(t.dataset.units, t.value);   // a quantity sets how many cost fields show
+  if (t.dataset.units) redrawCosts(t.dataset.units, t.value - (t.dataset.have || 0));   // a quantity sets how many cost fields show (a count: the units above the stock on hand)
   if (t.dataset.b) {
     setPath(t.dataset.b, t.value);
     if (t.dataset.redraw) rerender();
@@ -2009,6 +2030,7 @@ document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
   // A known customer's name brings their contact with it.
   if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
