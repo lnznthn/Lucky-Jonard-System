@@ -136,6 +136,7 @@ details[open]>summary svg{transform:rotate(180deg)}
 details>.stack{padding-top:8px}
 .check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--text);margin:0;cursor:pointer}
 .logo{max-height:48px;max-width:120px;border:1px solid var(--line);flex:none}
+.guide{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}.guide a{color:var(--text);font-weight:500;text-underline-offset:4px}
 .prow{display:flex;align-items:flex-start;gap:12px;min-height:60px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .prow:last-child{border-bottom:0}
 .prow input[type=checkbox]{margin:1px 0 0;flex:none}
@@ -250,6 +251,9 @@ const VERSION = '2.6.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 // One app serves every shop, each with its own sheet and back end: entries go only to a back end (VERSION_ in Code.gs) at this version or later.
 const BACKEND_MIN = '2.7.0';
+// The New shop guide in Settings: a template sheet to copy ('' until there is one; the guide then says to paste Code.gs into a blank sheet).
+const TEMPLATE_URL = '';
+const CODE_URL = 'https://github.com/lnznthn/bodega-app/blob/main/apps-script/Code.gs';
 const LOGO_MAX = 120000;   // the longest logo data URL the back end keeps (in Script Properties, in chunks)
 // The longest value of each shop field the back end takes, with the name its refusal uses; Settings checks them first.
 const SHOP_MAX = { name: ['Shop name', 120], contact: ['Address', 500], foot: ['Notes', 500], cur: ['Currency', 4] };
@@ -2073,7 +2077,8 @@ function openSettings() {
     <div class="top"><h2>Settings</h2>${closeBtn}</div>
     ${sec('Connection', `<div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <p class="hint">${cfg.url ? (held() ? esc(heldText()) : ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
-      <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>`, '', 'pad')}
+      <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>
+      ${cfg.url ? '' : guideHtml()}`, '', 'pad')}
     ${sec('Shop', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" maxlength="${SHOP_MAX.name[1]}" autocomplete="off"></div>
       <div><label for="sContact">Address (one line each)</label><textarea id="sContact" rows="3" maxlength="${SHOP_MAX.contact[1]}">${esc(sh.contact)}</textarea></div>
       <div><label for="sFoot">Notes line</label><input id="sFoot" value="${esc(sh.foot)}" maxlength="${SHOP_MAX.foot[1]}" placeholder="Optional" autocomplete="off"></div>
@@ -2086,6 +2091,16 @@ function openSettings() {
     ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Products and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
       <button class="tbtn danger" data-act="wipe">Erase data on this device</button><p class="hint" style="margin-top:-12px">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p>`, '', 'pad')}
     <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings');
+}
+/** New shop: how a shop gets its own sheet and back end, shown in Connection while this device is not connected. */
+function guideHtml() {
+  const a = (href, t) => `<a href="${esc(href)}" target="_blank" rel="noopener">${t}</a>`;
+  return `<div id="guide"><div class="lbl">New shop</div><ol class="guide">
+    <li>${TEMPLATE_URL ? `Make a copy of the ${a(TEMPLATE_URL, 'Bodega template')}.` : `Create a blank Google Sheet, open Extensions > Apps Script, paste ${a(CODE_URL, 'Code.gs')} in place of what is there, save, and reload the sheet.`}</li>
+    <li>In the sheet, choose Bodega > Set up or upgrade this sheet and approve the permissions. Google warns that the script is not verified: choose Advanced > Go to … (unsafe).</li>
+    <li>In Extensions > Apps Script, choose Deploy > New deployment > Web app, with Execute as Me and Who has access Anyone.</li>
+    <li>Choose Bodega > Show connection code and paste the code above.</li>
+    <li>Fill in the Shop group below and the sheet’s Payment details tab.</li></ol></div>`;
 }
 /** Payment details, read only: the rows of the sheet's Payment details tab, which the invoice image draws. They live only in the sheet (the code is public). */
 function payHtml() {
