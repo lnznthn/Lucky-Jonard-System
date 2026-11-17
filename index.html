@@ -327,7 +327,7 @@ const RETURN_HINT = { 'Restock': 'Goes back into stock.', 'Write-off': 'Does not
 let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
-let docs = Object.assign({ custs: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
+let docs = Object.assign({ custs: [], sups: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
 let meta = store.get('meta', {});
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
@@ -352,7 +352,7 @@ const saveSynced = () => { store.set('items', items); store.set('moves', moves);
 function live() {
   if (_live) return _live;
   const map = new Map(items.map(i => [i.sku, { ...i }]));
-  const custs = new Map(docs.custs.map(c => [c.id, { ...c }]));
+  const custs = new Map(docs.custs.map(c => [c.id, { ...c }])), sups = new Map(docs.sups.map(s => [s.id, { ...s }]));
   const orders = docs.orders.map(o => ({ ...o })), pres = docs.pres.map(p => ({ ...p })), invs = docs.invs.map(v => ({ ...v })), rets = docs.rets.map(r => ({ ...r }));
   const all = moves.map((m, i) => ({ ...m, _i: i }));
   const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, q) => perUnit(m, costs).forEach(x => push(x, q));
@@ -365,9 +365,16 @@ function live() {
       case 'item': if (!map.has(q.item.sku)) map.set(q.item.sku, { ...q.item }); break;
       case 'edit': if (map.has(q.sku)) Object.assign(map.get(q.sku), q.patch); break;
       case 'cust': custs.set(q.cust.id, { ...q.cust }); break;
-      case 'order': orders.push({ ...q.order, name: nameOf(q.order.sku), status: 'Ordered', recQty: null, recDate: '', q }); break;
-      case 'receive': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Received'; o.recQty = q.qty; o.recDate = q.date; o.w = q; units({ id: 'rcv-' + o.id, date: q.date, sku: o.sku, dir: 'In', reason: 'Restock', ref: o.id, note: '' }, q.costs, q); } break; }
-      case 'orderCancel': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
+      case 'supplier': sups.set(q.supplier.id, { ...q.supplier }); break;
+      // A supplier order is one row per line; a line ID already there is skipped.
+      case 'order': { const o = q.order; o.lines.forEach(l => { if (!find(orders, l.id)) orders.push({ id: l.id, orderId: o.id, date: o.date, supId: o.supId, sup: '', sku: l.sku, name: nameOf(l.sku), qty: l.qty, cost: l.cost, expected: o.expected, recQty: 0, status: 'Ordered', note: o.note, q }); }); break; }
+      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost typed for it, skipping IDs already written.
+      case 'receive': {
+        const o = find(orders, q.lineId); if (!o || o.status === 'Cancelled') break;
+        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost }, q); });
+        o.recQty = Math.max(o.recQty || 0, q.from + q.costs.length); if (o.recQty >= o.qty) o.status = 'Received'; o.w = q; break;
+      }
+      case 'orderCancel': { const o = find(orders, q.lineId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
       case 'pre': {
         const p = q.pre, c = custs.get(p.custId) || {}, tot = r2(p.qty * p.price), it = map.get(p.sku) || {};
         pres.push({ id: p.id, date: p.date, custId: p.custId, cust: c.name || '', contact: c.contact || '', sku: p.sku, name: nameOf(p.sku), qty: p.qty, price: p.price, paid: p.paid, balance: r2(tot - p.paid), status: PRE_OPEN, kept: null, recNo: p.no, invNo: null, note: p.note, q });
@@ -407,12 +414,13 @@ function live() {
     else { nos.set(m.sku, n + m.qty); if (m.q && m.qty === 1) m.unit = m.sku + '-' + (n + 1); }
   });
   const incoming = new Map(), owed = new Map();
-  orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
+  // A line shows its supplier's current name; incoming is what its Ordered lines still have due.
+  orders.forEach(o => { o.sup = (sups.get(o.supId) || {}).name || o.sup; if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty - (o.recQty || 0)); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
   const inbox = docs.inbox.filter(r => !handled.has(r.row));
-  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, orders, pres, invs, rets, inbox };
+  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, sups, orders, pres, invs, rets, inbox };
   return _live;
 }
 /**
@@ -503,16 +511,17 @@ const qLast = (kind, k, payload) => { queue = queue.filter(q => !(q.kind === kin
 const perUnit = (move, costs) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost }));
 const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
 /** The records in an entry that carry a SKU. */
-const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? [q.order] : q.kind === 'pre' ? [q.pre] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
+const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? q.order.lines : q.kind === 'pre' ? [q.pre] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
 function describe(q) {
   switch (q.kind) {
     case 'item': return `New product “${q.item.name}”`;
     case 'edit': return `Edit of ${itemName(q.sku)}`;
     case 'cust': return `Customer “${q.cust.name}”`;
-    case 'order': return `Supplier order for ${itemName(q.order.sku)}`;
-    case 'receive': return 'Receiving a supplier order';
-    case 'orderCancel': return 'Cancelling a supplier order';
+    case 'supplier': return `Supplier “${q.supplier.name}”`;
+    case 'order': return `Supplier order of ${plural(q.order.lines.length, 'line')}`;
+    case 'receive': return 'Receiving a supplier order line';
+    case 'orderCancel': return 'Cancelling the rest of a supplier order line';
     case 'pre': return `Pre-order for ${itemName(q.pre.sku)}`;
     case 'prePay': return 'Payment on a pre-order';
     case 'preCancel': return 'Cancelling a pre-order';
@@ -546,7 +555,7 @@ function applySnapshot(s) {
   items = s.items;
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
-  docs = { custs: s.custs, orders: s.orders, pres: s.pres, invs: s.invs, rets: s.rets, inbox: s.inbox };
+  docs = { custs: s.custs, sups: s.sups || [], orders: s.orders, pres: s.pres, invs: s.invs, rets: s.rets, inbox: s.inbox };
   meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev };   // moveRev changes when a cost is rewritten in Movements
   ui.warn = s.warnings;   // problems the sheet found in its tabs, kept in memory until the next sync
   saveSynced(); dirty();
@@ -734,7 +743,7 @@ function needsRows() {
   }
   if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="homeGo" data-to="add"'));
   if (short.length) out.push(row(`Order stock for ${plural(short.length, 'product')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
-  if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
+  if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order line')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
   if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, p) => s + p.balance, 0)))} on ${plural(owing.length, 'pre-order')}`, 'Balances still open', 'data-act="homeGo" data-to="pre"'));
   if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'product')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
   if (nocost) out.push(row(`Add the cost of ${plural(nocost, 'unit')}`, 'Without it, the margin on a sale stays unknown', 'data-act="homeGo" data-to="nocost"'));
