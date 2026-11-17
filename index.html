@@ -94,6 +94,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--text);outline-of
 input[type=checkbox]{accent-color:var(--accent)}
 label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.row2:empty{display:none}
+.units input{width:136px;flex:none}
 .step{display:flex;gap:8px}.step .btn{min-width:52px;min-height:48px;padding:0}
 .step input{text-align:center}
 .sug{display:flex;flex-direction:column;border:1px solid var(--line);border-top:0;background:var(--field)}
@@ -343,6 +344,8 @@ function live() {
       }
     }
   }
+  // A cost typed for a unit shows at once: a pending cost entry changes its movement before the replay.
+  queue.forEach(q => { if (q.kind === 'cost' && q.status === 'pending') all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); });
   const incoming = new Map(), owed = new Map();
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
@@ -449,6 +452,7 @@ function describe(q) {
     case 'ship': return 'Shipping status';
     case 'ret': return `Return of ${nm(q.ret.sku)}`;
     case 'inboxDone': return 'Clearing rows from Claude';
+    case 'cost': { const m = live().all.find(x => x.id === q.moveId); return 'Cost of a unit' + (m ? ' of ' + nm(m.sku) : ''); }
     default: return 'Entry';
   }
 }
@@ -475,7 +479,7 @@ function applySnapshot(s) {
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
   docs = { custs: s.custs || [], orders: s.orders || [], pres: s.pres || [], invs: s.invs || [], rets: s.rets || [], inbox: s.inbox || [] };
-  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt };
+  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev };   // moveRev changes when a cost is rewritten in Movements
   saveSynced(); dirty();
 }
 const wire = q => { const { status, error, ...w } = q; return w; };
@@ -488,7 +492,7 @@ async function syncNow(manual) {
   try {
     let batch, pushed = false, warn = [];
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
-      const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId } });
+      const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId, moveRev: meta.moveRev } });
       warn = (data.sync && data.sync.warnings) || data.warnings || [];
       const res = new Map(data.results.map(r => [r.id, r]));
       data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); if (r.ok && r.fromNo != null) note = `The sheet already had no. ${r.fromNo}, so that document is now no. ${r.no}. Print its PDF again.`; });
@@ -498,7 +502,7 @@ async function syncNow(manual) {
       queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySkus(q).includes(f.item.sku)) { q.status = 'failed'; q.error = 'Its item was refused'; } }));
       applySnapshot(data.sync); saveQueue(); pushed = true;
     }
-    if (!pushed) { const snap = await api('sync', { have: { rows: meta.rows, lastId: meta.lastId } }); warn = snap.warnings || []; applySnapshot(snap); }
+    if (!pushed) { const snap = await api('sync', { have: { rows: meta.rows, lastId: meta.lastId, moveRev: meta.moveRev } }); warn = snap.warnings || []; applySnapshot(snap); }
     ui.warn = Array.isArray(warn) ? warn.map(String) : [];   // problems the sheet found in its tabs this sync (backend 2.2 and later)
     const waitNow = (dirty(), live().inbox.length);
     if (note) toast(note);
@@ -697,7 +701,7 @@ function openItem(sku) {
     <button class="tbtn" data-act="editItem" data-sku="${esc(sku)}">Edit details</button>
     ${det.length || i.rel ? `<dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}</dl>` : ''}
     ${sec('Units on hand', u.deficit ? `<p class="hint" style="padding:22px 14px 14px">Below zero by ${u.deficit}. Units that arrive next cover this first.</p>`
-      : u.units.length ? `<div class="list">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><span class="amt">${x.cost == null ? 'No cost yet' : money(x.cost)}</span></div>`).join('')}</div>`
+      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
       : '<p class="hint" style="padding:22px 14px 14px">None on hand.</p>')}
     ${u.units.length ? `<p class="hint">${[c.none < u.units.length ? 'Cost of stock on hand ' + money(c.value) + '.' : '', c.none ? (c.none === 1 ? '1 unit has' : c.none + ' units have') + ' no cost yet.' : ''].filter(Boolean).join(' ')}</p>` : ''}
     ${sec('Recent movements', recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div>` : '<p class="hint" style="padding:22px 14px 14px">None yet.</p>')}
@@ -725,6 +729,15 @@ function costInput(t) {
 function readCosts(path, n) {
   const c = getPath(path), out = Array.from({ length: n }, (_, k) => costAt(c, k).trim() === '' ? null : Number(costAt(c, k)));
   return out.some(x => x != null && (isNaN(x) || x < 0)) ? undefined : out;
+}
+
+/** A cost changed on the item sheet: one cost entry for that unit's In movement, the last one typed winning. */
+function setUnitCost(moveId, val) {
+  const cost = val.trim() === '' ? null : Number(val), m = live().all.find(x => x.id === moveId);
+  if (cost != null && (isNaN(cost) || cost < 0)) { toast('Cost must be zero or more.'); return rerender(); }
+  if (!m || m.cost === cost) return;
+  queue = queue.filter(q => !(q.kind === 'cost' && q.moveId === moveId && q.status === 'pending'));
+  qAdd('cost', { moveId, cost }); commit(); toast('Saved');
 }
 
 /* Item editor */
@@ -1860,6 +1873,7 @@ document.addEventListener('input', ev => {
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
+  if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
   // A known customer's name brings their contact with it.
   if (t.dataset.cust) { const o = getPath(t.dataset.cust), c = [...live().custs.values()].find(c => custKey(c.name) === custKey(t.value)); if (o && c && c.contact && !o.contact) { o.contact = c.contact; rerender(); } }
