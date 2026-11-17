@@ -905,7 +905,9 @@ function invInfo() {
   return { mode: f.preId || f.force === 'sale' || !shortL ? 'sale' : 'pre', shortL };
 }
 /** What decides the form's shape; when it changes while typing, the form is redrawn. */
-const invSig = () => invInfo().mode + ui.inv.lines.map(l => l.sku ? [lineQty(l) > stockOf(l.sku), lineQty(l) > freeOf(l.sku)].join() : '').join('|');
+const invSig = () => invInfo().mode + ui.inv.lines.map(l => l.sku ? [lineQty(l) > stockOf(l.sku), lineQty(l) > freeOf(l.sku), noCost(l)].join() : '').join('|');
+/** How many of the units a sale line takes have no cost yet. */
+const noCost = l => onHand(l.sku).units.slice(0, lineQty(l)).filter(u => u.cost == null).length;
 function invBalance() { const t = invTotal(), p = ui.inv.paid === '' ? t : Number(ui.inv.paid); return Math.max(0, r2(t - (isNaN(p) ? 0 : p))); }
 function invHint() {
   const L = live(), ls = ui.inv.lines.filter(l => l.sku && L.map.get(l.sku));
@@ -936,6 +938,10 @@ function invForced(l) {
   const t = q > have ? `${have > 0 ? 'Only ' + have : 'None'} on hand. Stock will go below zero.` : 'These units are owed to earlier pre-orders.';
   return `<div class="links"><p class="hint" style="flex:1">${t}</p><button class="tbtn" data-act="invForce" data-v="">Save as a pre-order</button></div>`;
 }
+function invNoCost(l) {
+  const n = noCost(l); if (!n) return '';
+  return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this item has' : n + ' units of this item have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
+}
 function renderInvForm() {
   const f = ui.inv, L = live(), pre = f.preId && L.pres.find(p => p.id === f.preId), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
@@ -946,7 +952,7 @@ function renderInvForm() {
     ${pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : ''}
     <div class="stack">${f.lines.map((l, i) => `
       <div class="lbl" style="margin:0">Item${several ? ' ' + (i + 1) : ''}</div>${pickerHtml('inv.lines.' + i, l.sku)}
-      ${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}
+      ${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}
       <div class="row2"><div><label for="q${i}">Quantity</label><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}"></div>
         <div><label for="p${i}">Price each (${esc(prefs.cur)})</label><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}"></div></div>
       ${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove this item</button>` : ''}`).join('')}
