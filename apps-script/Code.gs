@@ -13,7 +13,7 @@
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes item changes typed in the sheet.
  */
-var VERSION_ = '2.2.0';
+var VERSION_ = '2.3.0';
 var ITEM_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
