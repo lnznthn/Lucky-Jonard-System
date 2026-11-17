@@ -1,9 +1,10 @@
 /**
- * Toy Stock API: a Google Apps Script web app bound to the "Toy Inventory" spreadsheet.
+ * Bodega API: the back end of one shop, a Google Apps Script web app bound to that shop's spreadsheet. Every shop has a sheet of its own.
  *
- * Install: Extensions > Apps Script, paste this whole file over Code.gs, save, run setup() once,
- * then Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
- * After pasting a newer version, run setup() again and publish a new version of the existing deployment.
+ * Install: in the sheet, Extensions > Apps Script, paste this whole file over Code.gs and save. Reload the sheet and use
+ * Bodega > Set up or upgrade this sheet (or run setup() here), then Deploy > New deployment > Web app (Execute as: Me,
+ * Who has access: Anyone), then Bodega > Show connection code and paste the code into the app.
+ * After pasting a newer version, set up again and publish a new version of the existing deployment.
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
  * The app is the writer of the data tabs. Movements and returns are append-only, except that a cost or cond entry
@@ -13,14 +14,22 @@
  * Units leave stock first in, first out, in the order of the Movements tab; see stockOf_().
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
+ * The shop's own details belong to the sheet, not to a device: the Shop tab holds the text and Script Properties the logo.
  */
-var VERSION_ = '2.6.0';
-var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
+var VERSION_ = '2.7.0';
+var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'];
 // A unit's condition, in this order; CONDITIONS in index.html is the same list. Blank means not recorded.
 var CONDITIONS_ = ['MISB', 'MIB', 'MOC', 'CIB', 'Box damage', 'Loose complete', 'Loose'];
 // Payment details: typed by the owner in the sheet and sent to the app for the invoice image. The app never writes it.
 var PAY_HEAD_ = ['Method', 'Number', 'Name'];
+// The Shop tab: one row per field, found by its label in column A in any order (the first row with a label is used); the owner may type in it.
+// Each field: [label, JSON name, longest value]. Address, Notes and Currency are what the app calls contact, foot and cur.
+var SHOP_HEAD_ = ['Field', 'Value'];
+var SHOP_ = [['Shop name', 'name', 120], ['Address', 'contact', 500], ['Notes', 'foot', 500], ['Currency', 'cur', 4]];
+// The logo is a data URL, too big for a cell, so it lives in Script Properties: LOGO_0, LOGO_1, ... (each under the 9 KB a property holds),
+// LOGO_N chunks, and LOGO_REV, raised on every change so the snapshot sends the logo only to an app that does not have it yet.
+var LOGO_MAX_ = 120000, LOGO_CHUNK_ = 8000;
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
 var OUT_ONLY_ = ['Sale', 'Damaged', 'Lost'];
 var EITHER_ = ['Count', 'Correction', 'Other'];
@@ -32,7 +41,7 @@ var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // An intake run may set Status to Working while it still researches a row; any non-blank Status keeps a row out of the app.
 // Nothing in this tab counts as stock until the app applies it. Supplier and Expected, after Status, belong to Order rows
 // (a supplier order or quotation), which the app opens as an Ordered batch.
-var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
+var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
 // Browse: one row per product with the computed numbers, rewritten in full at the end of every sync and add.
 // Units on hand lists each unit on hand, oldest first, as its SKU, its cost (? without one) and its condition when recorded.
 var BROWSE_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
@@ -89,9 +98,20 @@ var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k
  * and Browse is made again when its header is not the current one. And a 2.4 sheet to 2.5, see upgrade25_().
  * A 2.5 sheet becomes 2.6 by the header rows alone: Movements gains Condition, Invoices Discount and Shipping fee, Invoice lines
  * Condition, each a new last column that reads blank on older rows; and the Payment details tab is made.
+ * A 2.6 sheet becomes 2.7 the same way: Toy line on Products and Inbox is renamed Product line (same column), and the Shop tab is made.
+ * It records the spreadsheet's ID; a copy (of the template or of another shop's sheet) can carry the original's properties, so
+ * when the ID differs it gets a new key, loses the copied logo and starts moveRev again.
  */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
+  var props = PropertiesService.getScriptProperties(), was = props.getProperty('SHEET_ID');
+  if (was && was !== ss.getId()) {
+    for (var i = 0, n = Number(props.getProperty('LOGO_N')) || 0; i < n; i++) props.deleteProperty('LOGO_' + i);
+    ['KEY', 'LOGO_N', 'LOGO_REV', 'moveRev'].forEach(function (k) { props.deleteProperty(k); });
+    Logger.log('This sheet is a copy of another, so it gets a new key; the copied logo is cleared and moveRev starts again.');
+  }
+  if (!props.getProperty('KEY')) props.setProperty('KEY', Utilities.getUuid().replace(/-/g, ''));
+  props.setProperty('SHEET_ID', ss.getId());
   if (old && !pr) pr = old.setName('Products');
   if (pr) ['Category', 'Reorder at'].forEach(function (h) { var c = pr.getRange(1, 1, 1, pr.getMaxColumns()).getValues()[0].indexOf(h); if (c >= 0) pr.deleteColumn(c + 1); });
   asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
@@ -101,6 +121,7 @@ function setup() {
   sheet_('Invoices').getRange('K:L').setNumberFormat('#,##0.00');
   // Not protected and not wiped: the owner types these rows.
   asText_(ensureSheet_(ss, 'Payment details', PAY_HEAD_), ['A:C']);
+  putShop_(asText_(ensureSheet_(ss, 'Shop', SHOP_HEAD_), ['A:B']), {});
   asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:O']);
   var br = ss.getSheetByName('Browse');
   if (br && br.getRange(1, 1, 1, BROWSE_HEAD_.length).getValues()[0].join('|') !== BROWSE_HEAD_.join('|')) ss.deleteSheet(br);
@@ -116,8 +137,6 @@ function setup() {
   });
   var first = ss.getSheetByName('Sheet1');
   if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
-  var props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('KEY')) props.setProperty('KEY', Utilities.getUuid().replace(/-/g, ''));
   writeOnHand_();
   writeBrowse_();
   Logger.log('Setup done. Key: ' + props.getProperty('KEY'));
@@ -150,9 +169,42 @@ function upgrade25_(ss) {
   if (po && lastRowOf_(po) < 2) ss.deleteSheet(po);
 }
 
-/** Prints the connection key in the execution log (View > Logs). */
-function showKey() {
-  Logger.log('Key: ' + PropertiesService.getScriptProperties().getProperty('KEY'));
+/** Adds the Bodega menu to the sheet each time it opens, so a new shop is set up without opening the script editor. */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Bodega').addItem('Set up or upgrade this sheet', 'setupFromMenu').addItem('Show connection code', 'showCode').addToUi();
+}
+/** Bodega > Set up or upgrade this sheet: setup(), then what to do next. */
+function setupFromMenu() {
+  setup();
+  dialog_('This sheet is ready (back end ' + VERSION_ + ')', '<p>Next:</p><ol>' +
+    '<li>If this sheet has no web app yet: Extensions &gt; Apps Script &gt; Deploy &gt; New deployment &gt; Web app, Execute as Me, Who has access Anyone. ' +
+    'After pasting a newer Code.gs, publish a new version instead: Deploy &gt; Manage deployments &gt; edit &gt; New version.</li>' +
+    '<li>Bodega &gt; Show connection code, and paste the code into the app: Settings &gt; Connection.</li>' +
+    '<li>Fill the Shop tab (or the Shop group in the app\'s Settings) and the Payment details tab.</li></ol>');
+}
+/**
+ * Bodega > Show connection code: <web app URL>#<key> to paste into the app, also logged. Before the first deployment there is no URL,
+ * so it shows the key and how to deploy. getUrl() is not always the deployment's own URL, so the dialog also says where to find that.
+ */
+function showCode() {
+  var key = PropertiesService.getScriptProperties().getProperty('KEY'), url = ScriptApp.getService().getUrl() || '';
+  if (!key) return dialog_('No key yet', '<p>Use Bodega &gt; Set up or upgrade this sheet first.</p>');
+  var box = function (v) { return '<textarea readonly rows="3" style="width:100%" onfocus="this.select()">' + v + '</textarea>'; };
+  var own = 'the Web app URL (Extensions &gt; Apps Script &gt; Deploy &gt; Manage deployments) followed by #' + key;
+  if (/\/exec$/.test(url)) {
+    Logger.log('Connection code: ' + url + '#' + key);
+    return dialog_('Connection code', '<p>Paste this into the app: Settings &gt; Connection. It opens this sheet\'s data, so give it only to this shop\'s devices.</p>' +
+      box(url + '#' + key) + '<p>If the app cannot connect with it, the code is ' + own + '.</p>');
+  }
+  Logger.log('Key: ' + key + '. Deploy the web app to get the connection code.');
+  dialog_('Deploy the web app first', '<p>This sheet\'s key:</p>' + box(key) + '<p>Extensions &gt; Apps Script &gt; Deploy &gt; New deployment &gt; Web app, ' +
+    'Execute as Me, Who has access Anyone. Then use Bodega &gt; Show connection code again.</p><p>Already deployed? The code is ' + own + '.</p>');
+}
+// A dialog over the sheet. Run from the script editor there is no sheet to show it on (getUi() throws there); the log has what matters.
+function dialog_(title, html) {
+  var ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { return; }
+  ui.showModalDialog(HtmlService.createHtmlOutput('<div style="font:14px/1.4 Arial,sans-serif">' + html + '</div>').setWidth(480).setHeight(300), title);
 }
 
 /**
@@ -189,7 +241,7 @@ function locked_(fn) {
 }
 
 function doGet() {
-  return out_({ ok: true, data: { app: 'Toy Stock API', version: VERSION_ } });
+  return out_({ ok: true, data: { app: 'Bodega API', version: VERSION_ } });
 }
 
 function doPost(e) {
@@ -379,19 +431,48 @@ function readPay_() {
   if (last < 2) return [];
   return sh.getRange(2, 1, last - 1, PAY_HEAD_.length).getValues().filter(function (v) { return s_(v[0]); }).map(function (v) { return { method: s_(v[0]), number: s_(v[1]), name: s_(v[2]) }; });
 }
+// The Shop tab's rows as it is now: { lower-case label: { row, value } }, the first row per label.
+function shopRows_(sh) {
+  var last = sh.getLastRow(), at = {};
+  if (last >= 2) sh.getRange(2, 1, last - 1, 2).getValues().forEach(function (v, i) { var k = s_(v[0]).toLowerCase(); if (k && !at[k]) at[k] = { row: i + 2, value: s_(v[1]) }; });
+  return at;
+}
+/** The shop's details { name, contact, foot, cur }, '' where blank. A missing tab (setup() not run since 2.6) reads as blank. */
+function readShop_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shop'), at = sh ? shopRows_(sh) : {}, out = {};
+  SHOP_.forEach(function (f) { var r = at[f[0].toLowerCase()]; out[f[1]] = r ? r.value : ''; });
+  return out;
+}
 
 // ---------- reading ----------
 
 // moveRev is raised whenever movement rows change other than by appending (a cost entry, wipeAllData()), so the next sync sends them all.
 function moveRev_() { return Number(PropertiesService.getScriptProperties().getProperty('moveRev')) || 0; }
 function raiseRev_() { PropertiesService.getScriptProperties().setProperty('moveRev', String(moveRev_() + 1)); }
+function logoRev_() { return Number(PropertiesService.getScriptProperties().getProperty('LOGO_REV')) || 0; }
+/** The logo's data URL, put together from its chunks; '' when there is none. */
+function logo_() {
+  var p = PropertiesService.getScriptProperties(), out = '';
+  for (var i = 0, n = Number(p.getProperty('LOGO_N')) || 0; i < n; i++) out += p.getProperty('LOGO_' + i) || '';
+  return out;
+}
+/** Stores a new logo ('' removes it) and raises LOGO_REV; the same logo again changes nothing. Chunks, count and rev go in one call. */
+function setLogo_(url) {
+  if (url === logo_()) return;
+  var p = PropertiesService.getScriptProperties(), had = Number(p.getProperty('LOGO_N')) || 0, n = Math.ceil(url.length / LOGO_CHUNK_);
+  var set = { LOGO_N: String(n), LOGO_REV: String(logoRev_() + 1) };
+  for (var i = 0; i < n; i++) set['LOGO_' + i] = url.slice(i * LOGO_CHUNK_, (i + 1) * LOGO_CHUNK_);
+  p.setProperties(set);
+  for (i = n; i < had; i++) p.deleteProperty('LOGO_' + i);
+}
 
 /**
  * Returns every item and document plus the movement rows the app does not have yet.
  * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
- * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns, waiting Inbox rows and the payment
- * details are always sent whole.
+ * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns, waiting Inbox rows, the payment
+ * details and the shop's details (shop, with logoRev) are always sent whole. The logo is sent only when have.logoRev is not LOGO_REV,
+ * since it is the one big value. version lets the app refuse to send entries to an older back end.
  * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
@@ -411,8 +492,11 @@ function snapshot_(have) {
   invs.forEach(function (x) { x.lines = []; byInv[x.id] = x; });
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ line: l.line, sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost, status: l.status, expected: l.expected, orderLine: l.orderLine, delivered: l.delivered, cond: l.cond }); });
   invs.forEach(function (x) { x.lines.sort(function (a, b) { return a.line - b.line; }); });
-  return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), warnings: warnings };
+  var shop = readShop_(), out = { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
+    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), shop: shop, warnings: warnings, version: VERSION_ };
+  shop.logoRev = logoRev_();
+  if (!have || have.logoRev !== shop.logoRev) out.logo = logo_();
+  return out;
 }
 
 // ---------- validation ----------
@@ -482,6 +566,22 @@ function cleanMove_(x) {
   return { id: id, date: date, sku: String(x.sku || '').trim(), dir: dir, qty: qty, reason: reason, ref: text_(x.ref, 60), note: text_(x.note, 300), cost: moneyOrNull_(x.cost, 'Unit cost'), cond: cond_(x.cond) };
 }
 
+// The fields a shop entry carries; an absent (or null) field is left out, so the sheet keeps what it has. The logo is a PNG or JPEG data URL, or '' to remove it.
+function cleanShop_(x) {
+  var out = {};
+  SHOP_.forEach(function (f) {
+    if (x[f[1]] == null) return;
+    out[f[1]] = s_(x[f[1]]);
+    if (out[f[1]].length > f[2]) throw new Error(f[0] + ' is too long');
+  });
+  if (x.logo != null) {
+    out.logo = s_(x.logo);
+    if (out.logo.length > LOGO_MAX_) throw new Error('The logo is too large; choose a smaller picture.');
+    if (out.logo && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/]+=*$/.test(out.logo)) throw new Error('The logo must be a PNG or JPEG picture.');
+  }
+  return out;
+}
+
 // Next unused T0001-style SKU, given a map of lower-case SKU -> item.
 function freeSku_(bySku) {
   var max = 0;
@@ -530,6 +630,9 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * cost        moveId, cost (a number, or null to clear it)             Unit cost (column J) of an In movement with a unit still on hand; raises moveRev
  * cond        moveId, cond ('' or one condition)                       Condition (column L) of the same; raises moveRev
  * inboxDone   rows [{ row, name, added?, type?, qty? }], mark          Inbox rows handled ('Done' or 'Dismissed')
+ * shop        shop { name?, contact?, foot?, cur?, logo? }, fill?      the shop's details: each field present is set to its value; with fill: true
+ *                                                                      only where the sheet has it blank (the logo only when none is stored);
+ *                                                                      written after the other writes, see writeShop_()
  *
  * A condition is one of CONDITIONS_; an invoice line and its Sale movement may carry several joined with ' / ', see cond_().
  *
@@ -613,7 +716,7 @@ function check_(p) {
  * Writes a plan. Rows changed in place go first, each one to the row that holds its key at that moment
  * (the key cell is read again just before the write, and the column again if it moved), as one row in one call.
  * A row written on Movements raises moveRev. New rows follow, after the last used row of the key column, without those of
- * entries refused on the way. Then On hand, then the Inbox marks.
+ * entries refused on the way. Then On hand, then the Inbox marks, then the shop's details.
  */
 function write_(p, skip) {
   var changed = false;
@@ -639,6 +742,7 @@ function write_(p, skip) {
   Object.keys(T_).forEach(function (k) { append_(sheet_(T_[k].name), T_[k].col, p.tabs[k].filter(function (o) { return !o._row && keep(o); }).map(T_[k].to)); });
   if (changed || items.length || moves.length) writeOnHand_();
   markInbox_(p.marks.filter(function (m) { return !skip[m.by]; }));
+  writeShop_(p.shop.filter(function (s) { return !skip[s.by]; }));
 }
 function append_(sh, col, rows) {
   if (!rows.length) return;
@@ -669,6 +773,29 @@ function markInbox_(marks) {
     sh.getRange(at + 2, 13, 1, 1).setValues([[m.mark]]);
     vals[at][12] = m.mark;
   });
+}
+/** Writes the planned shop fields [{ f, v }], the last value per field: the logo to Script Properties, the rest to the Shop tab (made when missing). */
+function writeShop_(sets) {
+  var v = {}, ss = SpreadsheetApp.getActiveSpreadsheet();
+  sets.forEach(function (s) { v[s.f] = s.v; });
+  if (v.hasOwnProperty('logo')) setLogo_(v.logo);
+  if (SHOP_.some(function (f) { return v.hasOwnProperty(f[1]); })) putShop_(ss.getSheetByName('Shop') || asText_(ensureSheet_(ss, 'Shop', SHOP_HEAD_), ['A:B']), v);
+}
+/**
+ * Puts values { name: value, ... } on the Shop tab by label, found as the tab is now: in the first row with that label, only when it
+ * differs. A label with no row gets a new one after the last row, with its value or blank; setup() passes {} to add only those.
+ */
+function putShop_(sh, vals) {
+  var at = shopRows_(sh), add = [];
+  SHOP_.forEach(function (f) {
+    var r = at[f[0].toLowerCase()], v = vals[f[1]];
+    if (!r) add.push([f[0], v == null ? '' : v]);
+    else if (v != null && v !== r.value) sh.getRange(r.row, 2).setValues([[v]]);
+  });
+  if (!add.length) return;
+  var start = sh.getLastRow() + 1;
+  ensureRows_(sh, start + add.length - 1);
+  sh.getRange(start, 1, add.length, 2).setValues(add);
 }
 
 /** Pending rows of the Edits tab: a Product ID or field filled and no Status. Each becomes an edit entry, or carries the reason it cannot. */
@@ -727,7 +854,7 @@ function plan_(entries, skip) {
   moveList.forEach(function (m) { existingIds[m.id] = true; unit_(unitNo, m); });
   var custs = readTab_('cust'), sups = readTab_('sup'), orders = readTab_('order'), invs = readTab_('inv'), lines = readTab_('line'), rets = readTab_('ret');
   var custById = index_(custs, 'id'), supById = index_(sups, 'id'), orderById = index_(orders, 'id'), invById = index_(invs, 'id'), invByNo = index_(invs, 'no'), retById = index_(rets, 'id');
-  var newItems = [], newMoves = [], results = [], remap = {}, refused = {}, marks = [], who = null;
+  var newItems = [], newMoves = [], results = [], remap = {}, refused = {}, marks = [], shopSets = [], shop = null, who = null;
   // Every record remembers the entries that changed it (_by), so a row that cannot be written fails exactly those.
   function touch_(o) { o._dirty = true; o._by = o._by || []; if (o._by.indexOf(who) < 0) o._by.push(who); }
   function made_(o) { o._by = [who]; return o; }
@@ -961,6 +1088,12 @@ function plan_(entries, skip) {
         var mark = e.mark === 'Dismissed' ? 'Dismissed' : 'Done';
         (e.rows || []).forEach(function (x) { if (x && s_(x.name)) marks.push({ x: x, mark: mark, by: who }); });
 
+      } else if (e.kind === 'shop') {
+        // Checked whole first. Values are absolute, so a retry changes nothing; fill only sets what the sheet (as this request leaves it) has blank.
+        var sv = cleanShop_(e.shop || {});
+        if (!shop) { shop = readShop_(); shop.logo = logo_(); }
+        Object.keys(sv).forEach(function (f) { if (e.fill === true && shop[f]) return; shop[f] = sv[f]; shopSets.push({ f: f, v: sv[f], by: who }); });
+
       } else {
         throw new Error('Unknown entry type');
       }
@@ -972,6 +1105,6 @@ function plan_(entries, skip) {
   });
 
   var stock = stockOf_(allMoves_()).stock;
-  return { results: results, items: items, moves: moveList, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
+  return { results: results, items: items, moves: moveList, newItems: newItems, newMoves: newMoves, marks: marks, shop: shopSets, stock: stock,
     tabs: { cust: custs, sup: sups, order: orders, inv: invs, line: lines, ret: rets } };
 }

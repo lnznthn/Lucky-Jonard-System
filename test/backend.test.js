@@ -15,7 +15,7 @@ const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { 
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
-assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.6.0');
+assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.7.0');
 assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -235,7 +235,7 @@ assert.match(z18.dupname2.error, /already exists/); assert.match(z18.oso10.error
 // 19. Inbox: rows Claude appends in the sheet show up as waiting, the app marks them Done or Dismissed; Order rows carry Supplier and Expected
 const ib = sheet('Inbox');
 assert.ok(ib, 'setup creates the Inbox tab');
-assert.deepEqual(ib.getRange(1, 1, 1, 15).getValues()[0], ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected']);
+assert.deepEqual(ib.getRange(1, 1, 1, 15).getValues()[0], ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected']);
 assert.deepEqual(full().inbox, [], 'an empty Inbox sends nothing');
 const putRow = (row, vals) => vals.forEach((v, j) => ib.set(row, j + 1, v));
 putRow(2, ['2026-11-15', 'Count', 'Grandista Son Goku', '3', '', 'Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Y', '=back row hidden', '']);
@@ -676,4 +676,79 @@ assert.deepEqual(r.sync.invs[0].total, 100, 'a 2.5 invoice keeps working with no
 const cellsY = () => Y.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(x.cells).sort())]), afterY = cellsY();
 vm.runInContext('setup()', Y.b);
 assert.deepEqual(cellsY(), afterY, 'running setup() again changes nothing');
+
+// ---------- 2.7: the shop's details and logo kept by the sheet, the version, a copied sheet, the Bodega menu ----------
+const S = bench(), shopT = S.sheet('Shop'), P = S.b.props;
+const shopE = (id, shop, fill) => ({ id, kind: 'shop', shop, ...(fill ? { fill: true } : {}) });
+const shopRows = () => shopT.rowsOf().map(x => x.slice(0, 2));
+
+// (z) setup() makes the Shop tab with its four labels, plain text and unprotected; every reply carries shop and version; the app name says Bodega
+const sz = S.full();
+assert.deepEqual([shopT.getRange(1, 1, 1, 2).getValues()[0], shopRows(), shopT.textCols.has(1) && shopT.textCols.has(2), shopT.getProtections(), P.SHEET_ID],
+  [['Field', 'Value'], [['Shop name', ''], ['Address', ''], ['Notes', ''], ['Currency', '']], true, [], 'mock-sheet']);
+assert.deepEqual([sz.shop, sz.logo, sz.version, S.add([]).sync.version, JSON.parse(vm.runInContext('doGet()', S.b).text).data], [{ name: '', contact: '', foot: '', cur: '', logoRev: 0 }, '', '2.7.0', '2.7.0', { app: 'Bodega API', version: '2.7.0' }]);
+
+// (aa) rows are found by label after the owner reorders them; a field is written on its own row, trimmed, and a retry writes nothing
+shopT.putRows([['Currency', '$'], ['Notes', 'Thank you'], ['Shop name', 'Old Name'], ['Address', '']]);
+r = S.add([shopE('sh1', { name: ' Corner Shop ', contact: '12 Main St', cur: '₱' })]);
+assert.deepEqual([r.results[0].ok, shopRows(), r.sync.shop], [true, [['Currency', '₱'], ['Notes', 'Thank you'], ['Shop name', 'Corner Shop'], ['Address', '12 Main St']], { name: 'Corner Shop', contact: '12 Main St', foot: 'Thank you', cur: '₱', logoRev: 0 }]);
+const shopWrites = shopT.writes;
+assert.ok(S.add([shopE('sh1', { name: 'Corner Shop', contact: '12 Main St', cur: '₱' })]).results[0].ok); assert.equal(shopT.writes, shopWrites, 'the same values again write nothing');
+
+// (bb) fill sets only what is blank, as the request leaves it; (cc) a field over its length refuses the whole entry
+r = S.add([shopE('sh2', { foot: '' }), shopE('sh3', { name: 'Device Name', foot: 'From a device', cur: 'P' }, true),
+  shopE('sh4', { name: 'x'.repeat(121) }), shopE('sh5', { contact: 'y'.repeat(501), name: 'Never' }), shopE('sh6', { foot: 'z'.repeat(501) }), shopE('sh7', { cur: 'PHP12' })]);
+assert.deepEqual(r.results.map(x => x.error), [undefined, undefined, 'Shop name is too long', 'Address is too long', 'Notes is too long', 'Currency is too long']);
+assert.deepEqual(r.sync.shop, { name: 'Corner Shop', contact: '12 Main St', foot: 'From a device', cur: '₱', logoRev: 0 }, 'fill kept the name and currency, filled the notes the first entry cleared');
+
+// (dd) a label row the owner deleted reads blank, and is appended after the last row when written
+shopT.putRows(shopT.rowsOf().filter(x => x[0] !== 'Notes'));
+assert.equal(S.full().shop.foot, '');
+S.add([shopE('sh8', { foot: 'Come again' })]);
+assert.deepEqual(shopRows().slice(-1), [['Notes', 'Come again']]);
+
+// (ee) the logo: chunks under 9 KB in Script Properties, LOGO_REV raised only on a change, sent only when have.logoRev differs
+const png = n => 'data:image/png;base64,' + 'A'.repeat(n - 22), chunks = () => Object.keys(P).filter(k => /^LOGO_\d+$/.test(k));
+const big = png(50000), small = 'data:image/jpeg;base64,' + 'B'.repeat(9000) + '==';
+r = S.add([shopE('lg1', { logo: big })]);
+assert.deepEqual([r.results[0].ok, P.LOGO_N, chunks().length, chunks().every(k => P[k].length <= 8000), r.sync.logo === big, r.sync.shop.logoRev], [true, '7', 7, true, true, 1]);
+r = S.add([shopE('lg2', { logo: small }), shopE('lg3', { logo: small }), shopE('lg4', { logo: png(120001) }), shopE('lg5', { logo: 'data:image/gif;base64,AAAA' }), shopE('lg6', { logo: 'https://example.com/logo.png' })]);
+assert.deepEqual(r.results.map(x => x.error), [undefined, undefined, 'The logo is too large; choose a smaller picture.', 'The logo must be a PNG or JPEG picture.', 'The logo must be a PNG or JPEG picture.']);
+assert.deepEqual([P.LOGO_N, chunks().length, r.sync.logo === small, r.sync.shop.logoRev], ['2', 2, true, 2], 'leftover chunks deleted; the same logo twice is one change');
+const syncL = rev => S.c('sync', { have: { rows: 0, logoRev: rev } }).data;
+assert.deepEqual(['logo' in syncL(2), syncL(1).logo === small, 'logo' in S.c('sync', { have: { rows: 0 } }).data], [false, true, true], 'only an app without this logo gets it');
+r = S.add([shopE('lg7', { logo: png(120000) }, true), shopE('lg8', { logo: '' }), shopE('lg9', { logo: png(120000) }, true)]);
+assert.deepEqual([r.results.every(x => x.ok), r.sync.logo === png(120000), r.sync.shop.logoRev, P.LOGO_N], [true, true, 3, '15'], 'fill skips a stored logo; removed, then filled at the limit: one request, one change');
+
+// (ff) wipeAllData() leaves the Shop tab and the logo
+vm.runInContext('wipeAllData()', S.b);
+assert.deepEqual([S.full().shop.name, S.full().logo === png(120000)], ['Corner Shop', true]);
+
+// (gg) a copied sheet (another spreadsheet ID): a new key, no logo, moveRev from 0; the shop text stays; running setup() again keeps the new key
+const keyS = P.KEY; S.b.ss.id = 'copied-sheet'; P.moveRev = '4';
+vm.runInContext('setup()', S.b);
+assert.ok(P.KEY && P.KEY !== keyS, 'new key');
+assert.deepEqual([P.SHEET_ID, P.moveRev, P.LOGO_N, P.LOGO_REV, chunks(), S.c('ping', {}, keyS).auth, S.c('sync', { have: { rows: 0 } }, P.KEY).data.shop.name], ['copied-sheet', undefined, undefined, undefined, [], true, 'Corner Shop']);
+const keyCopy = P.KEY; vm.runInContext('setup()', S.b); assert.equal(P.KEY, keyCopy);
+
+// (hh) setup() on a 2.6 sheet: Toy line becomes Product line on Products and Inbox with every row in place, the Shop tab is made, the ID recorded
+const Z = bench(), zKey = Z.b.props.KEY, zTabs = ['Products', 'Inbox'];
+Z.add([item('Z1', 'Zed One', { line: 'Line Z' })]);
+['2026-11-18', 'Count', 'Zed Box', '1', '', '', '', 'Inbox line'].forEach((v, j) => Z.sheet('Inbox').set(2, j + 1, v));
+zTabs.forEach(n => Z.sheet(n).set(1, 8, 'Toy line')); Z.b.ss.deleteSheet(Z.sheet('Shop')); delete Z.b.props.SHEET_ID;
+const zBefore = zTabs.map(n => Z.sheet(n).rowsOf());
+vm.runInContext('setup()', Z.b);
+assert.deepEqual([zTabs.map(n => Z.sheet(n).cell(1, 8)), zTabs.map(n => Z.sheet(n).rowsOf()), Z.sheet('Shop').rowsOf().map(x => x[0]), Z.b.props.SHEET_ID, Z.b.props.KEY, Z.full().items[0].line, Z.full().inbox[0].line],
+  [['Product line', 'Product line'], zBefore, ['Shop name', 'Address', 'Notes', 'Currency'], 'mock-sheet', zKey, 'Line Z', 'Inbox line']);
+const cellsZ = () => Z.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(x.cells).sort())]), afterZ = cellsZ();
+vm.runInContext('setup()', Z.b);
+assert.deepEqual(cellsZ(), afterZ, 'running setup() again changes nothing');
+
+// (ii) the Bodega menu; Show connection code shows <url>#<key> when the web app is deployed, else the key and how to deploy
+vm.runInContext('onOpen()', Z.b);
+assert.deepEqual(Z.b.ui.menus, [{ name: 'Bodega', items: [['Set up or upgrade this sheet', 'setupFromMenu'], ['Show connection code', 'showCode']] }]);
+const zUrl = Z.b.url; vm.runInContext('showCode()', Z.b); Z.b.url = null; vm.runInContext('showCode()', Z.b); vm.runInContext('setupFromMenu()', Z.b);
+const dz = Z.b.ui.dialogs;
+assert.deepEqual(dz.map(d => d.title), ['Connection code', 'Deploy the web app first', 'This sheet is ready (back end 2.7.0)']);
+assert.ok(dz[0].html.includes(zUrl + '#' + zKey) && !dz[1].html.includes('/exec#') && dz[1].html.includes(zKey) && dz[1].html.includes('New deployment'));
 console.log('backend tests passed');
