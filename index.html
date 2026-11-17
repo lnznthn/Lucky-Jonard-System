@@ -305,7 +305,7 @@ let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
 let docs = Object.assign({ custs: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
-let meta = store.get('meta', { rows: 0, lastId: '', syncedAt: null });
+let meta = store.get('meta', {});
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
 if (prefs.tab === 'move') prefs.tab = 'home';
@@ -729,14 +729,15 @@ function renderStockList() {
   if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (STOCK_TEST[ui.filter]) rows = rows.filter(STOCK_TEST[ui.filter]);
   const box = $('#stockList'); if (!box) return;
-  // The table keeps its filter row when nothing matches, so a filter can be undone.
   if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
-  if (w) return keepScroll(() => { box.innerHTML = stockTable(rows, scope) + (rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''); });
+  const more = rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : '';
+  // The table keeps its filter row when nothing matches, so a filter can be undone.
+  if (w) return keepScroll(() => { box.innerHTML = stockTable(rows, scope) + more; });
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
     const s = status(i), n = nums(i.sku);
     return row(esc(i.name), `${esc(catOf(i))} · ${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
-  }).join('')}</div>${rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''}`;
+  }).join('')}</div>${more}`;
 }
 /** Stock on desktop: every field of an item, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
 function stockTable(list, scope) {
@@ -1155,11 +1156,12 @@ function preListHtml() {
   const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
   // Desktop: one table, ready to ship first; Status sorts in that order too.
   const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
-  if (wide()) return `<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>
+  const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>';
+  if (wide()) return `${how}
     ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date))], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p)], ['Contact', contactOf], ['Item', p => p.name, null, 'w'], ['Qty', p => p.qty, null, 'n'],
       ['Price', p => p.price, p => money(p.price), 'n'], ['Paid', p => p.paid, p => money(p.paid), 'n'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'n'], ['Status', rank, p => said[rank(p)]]],
       [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
-  return `<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>
+  return `${how}
     ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
     ${open.length ? sec('Waiting for stock', `<div class="list">${open.map(p => preRow(p)).join('')}</div>`) : ''}
     ${!L.pres.length ? `<p class="empty">No pre-orders yet.</p>` : ''}
@@ -1186,17 +1188,18 @@ function openPre(id) {
 function ordRow(o) { return row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`, o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''), `data-act="ord" data-id="${esc(o.id)}"`, `<span class="qty">${o.status === 'Received' ? o.recQty : o.qty}</span>`); }
 function ordListHtml() {
   const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
-  const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status);
+  const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), none = 'No supplier orders yet. Add one when stock is ordered and paid for.';
   if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
     ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date))], ['Item', o => o.name, o => esc(o.name) + waitTag(o), 'w'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'n'],
       ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : ''], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
-      [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">No supplier orders yet. Add one when stock is ordered and paid for.</p>`}`;
+      [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">${none}</p>`}`;
   return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
-    ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : 'No supplier orders yet. Add one when stock is ordered and paid for.'}</p>`}
+    ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
     ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
 }
+const newOrd = sku => ({ sku: sku || '', qty: 1, expected: '', note: '' });
 function openOrdForm() {
-  const f = ui.f || (ui.f = { type: 'ord', sku: '', qty: 1, expected: '', date: todayISO(), note: '' });
+  const f = ui.f || (ui.f = newOrd());
   openSheet(`
     <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
     <div><div class="lbl">Item</div>${pickerHtml('f', f.sku)}</div>
@@ -1675,7 +1678,7 @@ function applyCount(rows) {
     if (!r.on || !['new', 'count', 'same', 'details'].includes(r.status)) return;
     let it = r.match, fresh = false;
     if (it && seen.has(it.sku)) return;
-    if (!it) { it = newItemFrom(r); qItem(it, true); dirty(); out.nNew++; fresh = true; }
+    if (!it) { it = newItemFrom(r); qItem(it, true); out.nNew++; fresh = true; }
     else if (patchExisting(it, r)) out.nDetails++;
     seen.add(it.sku); out.done.add(i);
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
@@ -1694,7 +1697,7 @@ function applyReceive(rows) {
   rows.forEach((r, i) => {
     if (!r.on || !['new', 'recv'].includes(r.status)) return;
     let it = r.match || made.get(norm(r.name));
-    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); out.nNew++; }
+    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
     if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: r.costs });
     else qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs);
@@ -1854,7 +1857,7 @@ document.addEventListener('click', async ev => {
         ui.inv.force = ''; ui.sellSeg = 'new'; go('sell');
       } else {
         ui.ordSeg = 'sup'; go('orders');
-        ui.f = { type: 'ord', sku: it.sku, qty: 1, expected: '', date: todayISO(), note: '' }; openOrdForm();
+        ui.f = newOrd(it.sku); openOrdForm();
       }
       break;
     }
@@ -1947,12 +1950,12 @@ document.addEventListener('click', async ev => {
       catch (e) { cfg = prev; toast(e.message); }
       break;
     }
-    case 'redownload': meta = { rows: 0, lastId: '', syncedAt: null }; closeSheet(); syncNow(true); break;
+    case 'redownload': meta = {}; closeSheet(); syncNow(true); break;
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
     case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
-    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.sort(cmpMove).map(m => [m.date, m.sku, (live().map.get(m.sku) || {}).name, m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
