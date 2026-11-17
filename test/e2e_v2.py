@@ -299,7 +299,7 @@ with sync_playwright() as pw:
     check('invoice 3' in p.inner_text('#view'), 'activity names the invoice behind a sale')
     for name in ['Home', 'Inventory', 'Sales', 'Orders']:
         tab(p, name); p.screenshot(path=f"{SHOTS}/tab-{name.lower()}.png")
-    update_stock(p)
+    add_inventory(p)
     if not p.is_visible('#impText'): p.click('#manual summary')
     p.click('button[data-m="receive"]'); p.screenshot(path=f'{SHOTS}/tab-import-receive.png')
     tab(p, 'Orders'); p.click('button[data-s="pre"]'); p.screenshot(path=f'{SHOTS}/tab-orders-pre.png')
