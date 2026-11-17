@@ -16,7 +16,6 @@ const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: '
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
 assert.equal(call('ping').ok, true);
-assert.deepEqual(sheet('Items').formulas, {}, 'Items holds no formula');
 assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -102,7 +101,6 @@ assert.ok(z9.iT0100.ok && z9.ed9.ok && z9.ed10.ok); assert.match(z9.badrel.error
 let goku = r.sync.items.find(i => i.sku === 'T0100');
 assert.deepEqual([goku.mfr, goku.brand, goku.line, goku.chr, goku.rel, goku.relCheck], ['Bandai Spirits', 'Banpresto', 'Grandista', 'Goku', '2019-06-20', false]);
 assert.equal(r.sync.items.find(i => i.sku === 'T0002').brand, '=Brand', 'detail text is stored as typed');
-assert.deepEqual(sheet('Items').formulas, {}, 'no formula after item writes');
 for (let row = 2; row <= sheet('Items').getLastRow(); row++) assert.equal(typeof sheet('Items').cell(row, 7), 'number', 'On hand is a number on row ' + row);
 
 // 10. cost on a receipt movement
@@ -341,12 +339,12 @@ assert.ok(res(r).dp2c.ok); assert.equal(res(r).dp3c.error, MSG('Pre-orders', 'd3
 assert.ok(!W.sheet('Pre-orders').rowsOf().some(x => x[9] === 50), 'the refused payment was written nowhere');
 W.sheet('Pre-orders').putRows(W.sheet('Pre-orders').rowsOf().filter((x, i, all) => all.findIndex(y => y[0] === x[0]) === i));
 
-// (e) On hand is a number per SKU, right after every add, with no formula
+// (e) On hand is a number per SKU, right after every add
 const stockNow = () => { const m = {}; W.full().moves.forEach(x => { m[x.sku] = (m[x.sku] || 0) + (x.dir === 'In' ? x.qty : -x.qty); }); return m; };
 W.add([move('e1', 'S0', 'Out', 2, 'Sale'), move('e2', 'S4', 'In', 3, 'Restock'), item('S9', 'Item New')]);
 const st = stockNow();
 assert.deepEqual(G(), Object.fromEntries(Object.keys(names()).map(k => [k, st[k] || 0])), 'On hand matches the movements for every row');
-assert.deepEqual(W.sheet('Items').formulas, {}); assert.equal(G().S9, 0);
+assert.equal(G().S9, 0);
 
 // (f) Browse: every item with its numbers, rewritten on add and on sync; a filter stays
 W.add([{ id: 'f1', kind: 'order', order: { id: 'fo1', date: '2026-11-10', sku: 'S5', qty: 4, expected: '', note: '' } }, move('f2', 'S5', 'In', 2, 'Restock', { cost: 100 }), move('f3', 'S5', 'In', 2, 'Restock', { cost: 200 }), move('f4', 'S5', 'Out', 1, 'Sale'), preD('f5', 20)]);

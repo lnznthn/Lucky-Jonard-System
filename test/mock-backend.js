@@ -11,13 +11,13 @@ class Range {
   setValues(vals) { if (vals.length !== this.nr || vals[0].length !== this.nc) throw new Error('Mock: range size ' + this.nr + 'x' + this.nc + ' does not match values ' + vals.length + 'x' + vals[0].length); vals.forEach((row, i) => row.forEach((v, j) => this.sh.set(this.r + i, this.c + j, v))); this.sh.writes++; const h = this.sh.ss.onSetValues; if (h) h(this.sh, this); return this; }
   setNumberFormat(f) { if (f === '@' && this.r === 1 && this.nr === this.sh.max) for (let j = 0; j < this.nc; j++) this.sh.textCols.add(this.c + j); return this; }
   setFontWeight() { return this; }
-  clearContent() { for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) { delete this.sh.cells[(this.r + i) + ',' + (this.c + j)]; delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)]; } return this; }
+  clearContent() { for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) delete this.sh.cells[(this.r + i) + ',' + (this.c + j)]; return this; }
   setDataValidation(rule) { this.sh.validation = { r: this.r, c: this.c, nr: this.nr, nc: this.nc, rule }; return this; }
 }
 class Sheet {
-  constructor(name, ss) { this.name = name; this.ss = ss || {}; this.cells = {}; this.formulas = {}; this.max = 1000; this.frozen = 0; this.textCols = new Set(); this.protections = []; this.validation = null; this.filter = null; this.writes = 0; }
+  constructor(name, ss) { this.name = name; this.ss = ss || {}; this.cells = {}; this.max = 1000; this.frozen = 0; this.textCols = new Set(); this.protections = []; this.validation = null; this.filter = null; this.writes = 0; }
   cell(r, c) { return this.cells[r + ',' + c]; }
-  set(r, c, v) { if (r > this.max) throw new Error('Mock: row ' + r + ' beyond grid ' + this.max); if (typeof v === 'string' && /^[=+@-]/.test(v) && !this.textCols.has(c) && r > 1) throw new Error('Mock: column ' + c + ' is not text-formatted, so "' + v + '" would become a formula'); this.cells[r + ',' + c] = v; delete this.formulas[r + ',' + c]; }
+  set(r, c, v) { if (r > this.max) throw new Error('Mock: row ' + r + ' beyond grid ' + this.max); if (typeof v === 'string' && /^[=+@-]/.test(v) && !this.textCols.has(c) && r > 1) throw new Error('Mock: column ' + c + ' is not text-formatted, so "' + v + '" would become a formula'); this.cells[r + ',' + c] = v; }
   getMaxRows() { return this.max; }
   getMaxColumns() { return 26; }
   insertRowsAfter(after, n) { this.max += n; }
@@ -53,7 +53,7 @@ function makeSandbox() {
   sheets.push(new Sheet('Sheet1', ss));
   let locked = false;
   const sandbox = {
-    sheets, props, copies, logs: [],
+    sheets, props, copies,
     ss,
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET' },
       newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; } },
@@ -62,7 +62,7 @@ function makeSandbox() {
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ text: s, setMimeType() { return this; } }) },
     Utilities: { getUuid: () => require('crypto').randomUUID(), formatDate: d => d.toISOString().slice(0, 10) },
     Session: { getScriptTimeZone: () => 'UTC' },
-    Logger: { log: m => sandbox.logs.push(String(m)) },
+    Logger: { log() {} },
     JSON, Date, Math, Object, String, Number, Array, isNaN, RegExp, Error,
   };
   return sandbox;
@@ -82,10 +82,9 @@ if (require.main === module) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
   http.createServer((req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-    if (req.url.startsWith('/_key')) { res.writeHead(200, cors); return res.end(sb.props.KEY); }
     if (req.url.startsWith('/_reset')) { sb = load(); res.writeHead(200, cors); return res.end(sb.props.KEY); }
     if (req.url.startsWith('/_dump')) {
-      const dump = {}; sb.sheets.forEach(s => { const rows = []; for (let r = 1; r <= s.getLastRow(); r++) { const row = []; for (let c = 1; c <= 20; c++) row.push(s.cell(r, c) === undefined ? '' : s.cell(r, c)); rows.push(row); } dump[s.name] = { rows, formulas: s.formulas }; });
+      const dump = {}; sb.sheets.forEach(s => { const rows = []; for (let r = 1; r <= s.getLastRow(); r++) { const row = []; for (let c = 1; c <= 20; c++) row.push(s.cell(r, c) === undefined ? '' : s.cell(r, c)); rows.push(row); } dump[s.name] = { rows }; });
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); return res.end(JSON.stringify(dump));
     }
     let body = ''; req.on('data', d => body += d); req.on('end', () => {
@@ -106,7 +105,6 @@ if (require.main === module) {
       let out;
       if (req.method === 'POST') { sb.__e = { postData: { contents: body } }; out = vm.runInContext('doPost(__e)', sb).text; }
       else out = vm.runInContext('doGet()', sb).text;
-      if (process.env.MOCK_LATENCY) return setTimeout(() => { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(out); }, +process.env.MOCK_LATENCY);
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(out);
     });
   }).listen(port, () => console.log('mock backend on ' + port));

@@ -7,6 +7,7 @@ SHOTS = '/tmp/shots'
 os.makedirs(SHOTS, exist_ok=True)
 def activity(p): tab(p, 'Stock'); p.click('#view button[data-t="activity"]')
 def update_label(p): tab(p, 'Home'); return p.inner_text('#view button[data-t="import"]')
+def post_rows(name, rs): urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': name, 'rows': rs}).encode(), method='POST')).read()   # rows 2 onward of a tab, as typed in the sheet
 
 with sync_playwright() as pw:
     b = launch(pw)
@@ -118,7 +119,7 @@ with sync_playwright() as pw:
     check(any(r[8] == 'Weekend sale' for r in mv_rows), 'note reached the sheet')
     check(all(r[0] and r[1] and r[2] and r[3] for r in mv_rows), 'sheet rows carry id, date, sku and item name')
     onh = {r[1]: r[6] for r in d['Items']['rows'][1:]}
-    check(d['Items']['formulas'] == {} and onh == before, f'On hand in the sheet is a written number per item, with no formula: {onh}')
+    check(onh == before, f'On hand in the sheet is a written number per item: {onh}')
     p.screenshot(path=f'{SHOTS}/08-synced.png')
 
     # ---- reverse a synced movement
@@ -287,7 +288,7 @@ with sync_playwright() as pw:
     ib = dump()['Inbox']['rows'][1:]
     for r in ib:
         if r[2] == 'Bulk 1': r[3] = '7'
-    urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Inbox', 'rows': ib}).encode(), method='POST')).read()
+    post_rows('Inbox', ib)
     p.click('#syncBtn'); synced(p)
     check('opening stock 7' in p.inner_text('.prow:has-text("Bulk 1")') and 'Corrected here' in p.inner_text('#impOut') and 'opening stock 4' in p.inner_text('#impOut .grp-check'), f"a row edited in the sheet shows its new content after a sync; corrections stay: {p.inner_text('#impOut')[:900]!r}")
     check(not p.is_checked('.prow:has-text("Keep Me") input[type=checkbox]'), 'an untick survives that sync')
@@ -307,12 +308,11 @@ with sync_playwright() as pw:
     check([v for k, v in {r[2]: r[12] for r in dump()['Inbox']['rows'][1:] if r[0] == '2026-11-16'}.items() if k in ('Keep Me', 'Unidentified figure, blue')] == ['Dismissed', 'Dismissed'], 'Dismiss these rows marks everything shown')
     # warnings from the sheet: a banner on Home under the buttons, gone once fixed
     items_rows = dump()['Items']['rows'][1:]
-    post_rows = lambda rows: urllib.request.urlopen(urllib.request.Request(API + '/_rows', data=json.dumps({'tab': 'Items', 'rows': rows}).encode(), method='POST')).read()
-    post_rows(items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
+    post_rows('Items', items_rows + [items_rows[0]]); tab(p, 'Home'); p.click('#syncBtn'); synced(p)
     warn = f'Items: SKU {items_rows[0][0]} appears on 2 rows. The first is used.'
     check(p.inner_text('#view .banner.danger') == warn and p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).color") == p.evaluate("getComputedStyle(document.querySelector('.banner.danger')).borderTopColor"), 'a warning from the sheet shows on Home in the danger colour')
     check(p.evaluate("document.querySelector('.banner.danger').previousElementSibling.classList.contains('actions')"), 'the banner sits under the buttons'); p.screenshot(path=f'{SHOTS}/14-warning.png')
-    post_rows(items_rows); p.click('#syncBtn'); synced(p)
+    post_rows('Items', items_rows); p.click('#syncBtn'); synced(p)
     check(p.query_selector('#view .banner.danger') is None, 'no banner when the sheet reports no warnings')
 
     # ---- theme: Device, Light or Dark, set in Settings only, kept on the device
