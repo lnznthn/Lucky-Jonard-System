@@ -1350,72 +1350,86 @@ function receiveAll(id) {
 
 /* ---------- Invoice image: the invoice drawn on a canvas and saved as PNG ---------- */
 const loadImg = src => new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
-/** One canvas per image, 595 pt wide at scale 2 (1190 px), cropped to its content and at most 1024 pt (2048 px) tall.
- *  A longer document continues on further images that repeat the column header and carry the page number.
+/** One canvas per image, 595 pt wide at scale 2 (1190 px), cropped to its content and at most 1024 pt (2048 px) tall, laid out like
+ *  the owner's invoice template. A longer invoice continues on further images that repeat the column header and carry the page number.
  *  Synchronous, so the number of images is known during a tap: the logo gets a fixed box and is drawn by docPngs(). */
 function drawDoc(v) {
-  const W = 595, H = 1024, M = 48, S = 2, R = W - M, shop = prefs.shop;
-  const contact = contactOf(v), pages = [], ends = []; let x, y;
-  const day = iso => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  const W = 595, H = 1024, M = 28, S = 2, R = W - M, TL = M - 4, TR = R + 4, shop = prefs.shop, pay = docs.pay || [];
+  const GREY = '#666666', PALE = '#999999', NAVY = '#213E67', pages = [], ends = []; let x, y, zebra;
+  const mdy = iso => { const [yy, mm, dd] = iso.split('-'); return `${+mm}/${+dd}/${yy}`; };   // 11/17/2026, as the template writes dates
   const font = (size, bold) => { x.font = `${bold ? '700' : '400'} ${size}px Helvetica, Arial, sans-serif`; };
-  const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#1d1b20'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
+  const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#000'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
   const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
-  const rule = (py, c) => { x.strokeStyle = c || '#d9d4cb'; x.lineWidth = 0.75; x.beginPath(); x.moveTo(M, py); x.lineTo(R, py); x.stroke(); };
-  const page = () => { if (pages.length) ends.push(y); const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
-  const cap = (s, px, align) => text(s, px, y, { size: 8, color: '#6f6b76', bold: true, align });   // a small grey label
-  const head = () => { cap('ITEM', M); cap('QTY', 372, 'right'); cap('PRICE', 455, 'right'); cap('AMOUNT', R, 'right'); y += 7; rule(y); y += 16; };
+  const rule = (py, c, a = TL, b = TR) => { x.strokeStyle = c; x.lineWidth = 1; x.beginPath(); x.moveTo(a, py); x.lineTo(b, py); x.stroke(); };
+  const fill = (px, py, w, h, c) => { x.fillStyle = c; x.fillRect(px, py, w, h); };
+  const page = () => { if (pages.length) ends.push(y); const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); fill(0, 0, W, H, '#fff'); fill(0, 0, W, 6, '#283592'); pages.push(c); y = 30; };
+  // Columns: Item at the left; Condition, Qty and Expected arrival centred on these points, wide enough for "Loose complete"; Total price at the right.
+  const COND = 318, QTY = 378, EXP = 448;
+  const head = () => { rule(y, '#B7B7B7'); const h = (s, px, align) => text(s, px, y + 13, { size: 12, bold: true, color: NAVY, align }); h('Item', M); h('Condition', COND, 'center'); h('Qty', QTY, 'center'); h('Expected arrival', EXP, 'center'); h('Total price', R, 'right'); y += 18; rule(y, '#000'); zebra = 0; };
   page();
-  // Header: shop on the left, under the logo's 150 x 56 pt box when there is one; document title on the right.
-  let ly = y + (shop.logo ? 72 : 14);
-  if (shop.name) { text(shop.name, M, ly, { size: 15, bold: true }); ly += 15; }
-  font(9.5); wrap(shop.contact || '', 250).filter(Boolean).forEach(l => { text(l, M, ly, { size: 9.5, color: '#6f6b76' }); ly += 13; });
-  let ry = y + 16;
-  text('INVOICE', R, ry, { size: 22, bold: true, align: 'right' }); ry += 20;
-  text('No. ' + v.no, R, ry, { size: 11, align: 'right' }); ry += 15;
-  text(day(v.date), R, ry, { size: 10, color: '#6f6b76', align: 'right' });
-  y = Math.max(ly, ry) + 26;
-  cap('BILLED TO', M); y += 15;
-  text(v.cust, M, y, { size: 12, bold: true }); y += 14;
-  if (contact) { text(contact, M, y, { size: 10, color: '#6f6b76' }); y += 14; }
-  y += 18; head();
-  // A line that would not fit above the page number starts the next image; the last line takes the totals and footer with it.
-  // Cancelled lines are left out; a to-follow line says when it is expected, and a line shipped after the invoice date says when it was.
-  font(9.5); const fl = shop.foot ? wrap(shop.foot, R - M) : [], tail = 6 + (v.balance > 0 ? 57 : 20) + (fl.length ? 20 + fl.length * 13 : 0);
+  // Header: shop name and contact lines at the left, beside the logo's 150 pt box at the top right when there is one; the title under them.
+  const lw = (shop.logo ? R - 166 : R) - M; y = 22;
+  font(20, true); wrap(shop.name, lw).filter(Boolean).forEach(s => text(s, M, y += 22, { size: 20, bold: true, color: '#C43232' }));
+  font(14); wrap(shop.contact, lw).filter(Boolean).forEach(s => text(s, M, y += 20, { size: 14, color: GREY }));
+  text('Invoice', M, y += 56, { size: 32, color: NAVY }); text('No. ' + v.no, M + x.measureText('Invoice').width + 10, y, { size: 12, color: GREY });   // the app renumbers invoices, so the number stays visible
+  // Billed To at the left and Date at the right, both under the logo box.
+  const DX = 405, contact = contactOf(v); y = Math.max(y + 44, shop.logo ? 174 : 0);
+  ['Billed To:', 'Date:'].forEach((s, i) => text(s, i ? DX : M, y, { size: 17, bold: true, color: '#434343' })); text(mdy(v.date), DX, y + 22, { size: 14, color: PALE });
+  font(14); wrap(v.cust, DX - M - 16).forEach((s, i) => text(s, M, y += i ? 18 : 22, { size: 14, color: PALE }));
+  font(11); wrap(contact, DX - M - 16).filter(Boolean).forEach((s, i) => text(s, M, y += i ? 14 : 17, { size: 11, color: PALE }));
+  y += 21; head();
+  // The bottom block is measured first: the last line takes it to the next image when the two do not fit together.
+  // Payment details from the sheet: method, number right-aligned in its column, name wrapped before the totals.
+  font(10, true); const mw = Math.max(0, ...pay.map(p => x.measureText(p.method || '').width));
+  font(10); const NR = Math.max(M + 152, M + mw + 12 + Math.max(0, ...pay.map(p => x.measureText(p.number || '').width))), names = pay.map(p => wrap(p.name || '', 384 - NR - 8));
+  const payH = names.reduce((t, ns) => t + 19 + (ns.length - 1) * 13, 0), BOX = 54, fl = shop.foot ? wrap(shop.foot, R - M - 64) : [];
+  const block = 19 + Math.max(81 + BOX, payH + 8) + (fl.length ? 15 + (fl.length - 1) * 13 : 0);
+  // One row per line that is not Cancelled, every other row shaded; a name or a mixed condition wraps and makes its row taller.
+  // Expected arrival: a to-follow line's expected date, or "To follow" without one; blank on every other line.
   const shown = v.lines.filter(l => l.status !== CANCELLED);
-  const mark = l => l.status === FOLLOW ? 'To follow' + (lineExp(l) ? ' · expected ' + day(lineExp(l)) : '') : l.delivered && l.delivered !== v.date ? 'Delivered ' + day(l.delivered) : '';
   shown.forEach((l, n) => {
-    font(10.5); const ls = wrap(l.name, 290), mk = mark(l);
-    if (y + ls.length * 14 + (mk ? 13 : 0) + 14 + (n === shown.length - 1 ? tail : 0) > H - 40) { page(); head(); }
-    ls.forEach((s, i) => text(s, M, y + i * 14, { size: 10.5 }));
-    text(l.qty, 372, y, { size: 10.5, align: 'right' }); text(money(l.price), 455, y, { size: 10.5, align: 'right' }); text(money(r2(l.qty * l.price)), R, y, { size: 10.5, align: 'right' });
-    if (mk) text(mk, M, y + ls.length * 14 - 1, { size: 9, color: '#6f6b76' });
-    y += ls.length * 14 + (mk ? 13 : 0) + 4; rule(y - 6, '#eeeae2'); y += 10;
+    font(10); const ls = wrap(l.name, 240), cs = wrap((l.cond || '').split(' / ').join(' /\n'), 76), rh = 19 + (Math.max(ls.length, cs.length) - 1) * 12.5;
+    if (y + rh + (n === shown.length - 1 ? block : 0) > H - 34) { page(); head(); }
+    if (!(zebra++ % 2)) fill(TL, y + 0.5, TR - TL, rh, '#F3F3F3');
+    const row = (s, px, align, i = 0) => text(s, px, y + 13 + i * 12.5, { color: GREY, align }), exp = l.status === FOLLOW ? (lineExp(l) ? mdy(lineExp(l)) : 'To follow') : '';
+    ls.forEach((s, i) => text(s, M, y + 13 + i * 12.5)); cs.forEach((s, i) => row(s, COND, 'center', i));
+    row(l.qty, QTY, 'center'); if (exp) row(exp, EXP, 'center'); row(money(r2(l.qty * l.price)), R, 'right');
+    y += rh;
   });
-  y += 6;
-  const sum = (label, val, bold) => { text(label, 455, y, { size: bold ? 12 : 10.5, bold, align: 'right', color: bold ? '#1d1b20' : '#6f6b76' }); text(val, R, y, { size: bold ? 12 : 10.5, bold, align: 'right' }); y += bold ? 20 : 17; };
-  sum('Total', money(v.total), true);
-  if (v.balance > 0) { sum('Paid', money(v.paid)); sum('Balance', money(v.balance), true); }
-  if (fl.length) { y += 4; rule(y); y += 16; fl.forEach(l => { text(l, M, y, { size: 9.5, color: '#6f6b76' }); y += 13; }); }
+  // Two rules under the rows, then payment details at the left and the totals at the right: labels always, values when above zero
+  // (Paid only on a part payment, when the Total box shows the balance).
+  const by = y += 19, LX = 456, BX = 396, sub = r2(shown.reduce((t, l) => t + l.qty * l.price, 0));
+  rule(by, '#000', TL, 184); rule(by, '#000', 292, TR);
+  pay.forEach((p, i) => { y += 19; text(p.method || '', M, y, { bold: true }); text(p.number || '', NR, y, { color: GREY, align: 'right' }); names[i].forEach((s, j) => text(s, NR + 8, y + j * 13, { color: GREY })); y += (names[i].length - 1) * 13; });
+  [['SubTotal', money(sub)], ['Discount', v.disc > 0 ? '−' + money(v.disc) : ''], ['Paid', v.balance > 0 && v.paid > 0 ? money(v.paid) : ''], ['Shipping Fee', v.fee > 0 ? money(v.fee) : '']]
+    .forEach(([k, val], i) => { text(k, LX, by + 19 * (i + 1), { color: GREY, align: 'right' }); text(val, R, by + 19 * (i + 1), { color: GREY, bold: !i, align: 'right' }); });
+  // The Total box: what is still owed after a part payment, else the invoice total; a long amount shrinks to fit.
+  const bt = by + 81, amt = money(v.balance > 0 ? v.balance : v.total); fill(BX, bt, TR - BX, BOX, '#FFF2CC'); rule(bt, '#B7B7B7', BX, TR);
+  text('Total', LX, bt + 31, { bold: true, align: 'right' }); font(22, true); text(amt, R - 10, bt + 35, { size: Math.min(22, 22 * (R - 20 - LX) / x.measureText(amt).width), bold: true, align: 'right' });
+  // Foot: a rule, then "Notes:" and the footer line; nothing without a footer line.
+  y = by + Math.max(81 + BOX, payH + 8);
+  if (fl.length) { rule(y, '#B7B7B7'); text('Notes:', M, y += 15, { color: GREY }); fl.forEach((s, i) => text(s, M + 64, y + i * 13, { color: GREY })); y += (fl.length - 1) * 13; }
   ends.push(y);
   // Each image is cropped to its content; with several, each carries its page number at the foot.
   return pages.map((c, i) => {
-    const h = Math.min(H, ends[i] + (pages.length > 1 ? 40 : 24)), out = document.createElement('canvas');
+    const h = Math.min(H, ends[i] + (pages.length > 1 ? 34 : 16)), out = document.createElement('canvas');
     out.width = W * S; out.height = Math.ceil(h * S); x = out.getContext('2d'); x.drawImage(c, 0, 0); x.scale(S, S);
-    if (pages.length > 1) text(`Page ${i + 1} of ${pages.length}`, R, h - 24, { size: 8, color: '#6f6b76', align: 'right' });
+    if (pages.length > 1) text(`Page ${i + 1} of ${pages.length}`, R, h - 12, { size: 8, color: PALE, align: 'right' });
     return out;
   });
 }
-/** The images as PNG blobs, with the logo drawn into its box at the top left of the first (its context is still in points). */
+/** The images as PNG blobs, with the logo drawn into its 150 pt box at the top right of the first (its context is still in points):
+ *  fitted inside, at most one point per logo pixel, flush with the right margin. */
 async function docPngs(cs) {
   const logo = prefs.shop.logo && await loadImg(prefs.shop.logo);
-  if (logo) { const k = Math.min(150 / logo.width, 56 / logo.height, 1); cs[0].getContext('2d').drawImage(logo, 48, 48, logo.width * k, logo.height * k); }
+  if (logo) { const k = Math.min(150 / logo.width, 150 / logo.height, 1), w = logo.width * k; cs[0].getContext('2d').drawImage(logo, 567 - w, 8, w, logo.height * k); }
   return Promise.all(cs.map(c => new Promise(res => c.toBlob(res, 'image/png'))));
 }
 const imgName = (v, i, n) => 'Invoice-' + v.no + (n > 1 ? '-' + (i + 1) : '') + '.png';
 /** Makes the images as soon as the document is opened, so the Save or Copy tap itself has nothing to wait for.
  *  Returns { n: number of images, p: promise of the PNGs }. */
 function prepImg(v) {
-  const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, v.lines.map(lineExp), v.paid, v.balance, prefs.shop, prefs.cur]);
+  const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, v.lines.map(lineExp), v.total, v.paid, v.balance, v.disc, v.fee, docs.pay, prefs.shop, prefs.cur]);
   if (!ui.img || ui.img.sig !== sig) { const cs = drawDoc(v); ui.img = { sig, n: cs.length, p: docPngs(cs) }; }
   return ui.img;
 }
