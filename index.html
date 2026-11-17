@@ -302,9 +302,7 @@ function live() {
   const custs = new Map(docs.custs.map(c => [c.id, { ...c }]));
   const orders = docs.orders.map(o => ({ ...o })), pres = docs.pres.map(p => ({ ...p })), invs = docs.invs.map(v => ({ ...v })), rets = docs.rets.map(r => ({ ...r }));
   const all = moves.map((m, i) => ({ ...m, _i: i }));
-  const push = (m, q) => all.push({ ...m, _i: all.length, q });
-  // An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with its own cost.
-  const units = (m, costs, q) => costs.forEach((cost, k) => push({ ...m, id: m.id + '-' + (k + 1), qty: 1, cost }, q));
+  const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, q) => perUnit(m, costs).forEach(x => push(x, q));
   const find = (list, id) => list.find(x => x.id === id);
   const nameOf = sku => (map.get(sku) || { name: sku }).name, handled = new Set();
   for (const q of queue) {
@@ -365,7 +363,7 @@ function fifo(list) {
   list.forEach(m => {
     const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
     let n = m.qty;
-    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost == null ? null : m.cost }); }
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost }); }
     else {
       if (m.reason === 'Correction' && m.ref) s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
@@ -431,6 +429,9 @@ const qAdd = (kind, payload) => queue.push(Object.assign({ id: 'q' + uid(), kind
 const qItem = (item, auto) => qAdd('item', { item, auto: !!auto });
 const qEdit = (sku, patch) => qAdd('edit', { sku, patch });
 const qMove = move => qAdd('move', { move });
+/** An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with that unit's cost, as Code.gs writes receipts and returns. */
+const perUnit = (move, costs) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost }));
+const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
 const entrySkus = q => q.kind === 'move' ? [q.move.sku] : q.kind === 'edit' ? [q.sku] : q.kind === 'item' ? [q.item.sku] : q.kind === 'order' ? [q.order.sku] : q.kind === 'pre' ? [q.pre.sku] : q.kind === 'invoice' ? q.invoice.lines.map(l => l.sku) : q.kind === 'ret' ? [q.ret.sku] : [];
 function describe(q) {
   const nm = s => (live().map.get(s) || { name: s }).name;
@@ -750,7 +751,7 @@ function saveItem(sku) {
     const cost = $('#fCost').value === '' ? null : Number($('#fCost').value);
     if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
     qItem(Object.assign({ sku: nsku, name, cat, price, min: null, active: true }, det), nsku === $('#fSku').dataset.sug);
-    if (start > 0) qMove({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', qty: start, reason: 'Opening', ref: '', note: '', cost });
+    qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, Array(start).fill(cost));
     closeSheet(); commit(); toast(`${name} added`);
   }
 }
@@ -798,7 +799,8 @@ function saveMove() {
   if (cost != null && (isNaN(cost) || cost < 0)) return toast('Cost must be zero or more.');
   const have = stockOf(it.sku);
   if (m.dir === 'Out' && qty > have && !confirm(`Only ${have} in stock. Record ${qty} out anyway? Stock will show ${have - qty}.`)) return;
-  qMove({ id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost });
+  const mv = { id: 'm' + uid(), date, sku: it.sku, dir: m.dir, qty, reason: m.reason, ref: '', note: String(m.note || '').trim(), cost };
+  if (m.dir === 'In') qIns(mv, Array(qty).fill(cost)); else qMove(mv);
   const after = have + (m.dir === 'In' ? qty : -qty);
   ui.mv = null; prefs.tab = 'stock'; savePrefs();
   commit(); toast(`${signed(m.dir, qty)} ${it.name} → ${after} in stock`);
@@ -848,7 +850,9 @@ function openMove(id) {
 }
 function reverseMove(id) {
   const m = moves.find(x => x.id === id); if (!m) return;
-  qMove({ id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` });
+  // Reversing an Out brings its units back at the cost it left with; reversing an In takes that In's units out.
+  const r = { id: 'm' + uid(), date: todayISO(), sku: m.sku, dir: m.dir === 'In' ? 'Out' : 'In', qty: m.qty, reason: 'Correction', ref: m.id, note: `Reverses ${m.date} ${m.dir} ${m.qty} (${m.reason})` };
+  if (m.dir === 'In') qMove(r); else qIns(r, Array(m.qty).fill(m.cost));
   closeSheet(); commit(); toast('Reversal recorded');
 }
 
@@ -1214,7 +1218,7 @@ const unnamed = name => /^unidentified/i.test(String(name || '').trim());
 /** One Count row from its columns: Name, Category, Count, Price, Note, then the item details. */
 function countRow(c) {
   const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
+  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), cost: parsePrice(c[11]), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
   readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
@@ -1247,12 +1251,12 @@ function settleCount(rows) {
     used.add(key);
     if (r.match) {
       const have = stockOf(r.match.sku), d = r.count - have;
-      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r));
+      r.have = have; r.delta = d; r.adds = detailNames(detailPatch(r.match, r)); r.costs = Array(Math.max(d, 0)).fill(r.cost);   // one per unit the row adds
       r.status = d !== 0 ? 'count' : r.adds ? 'details' : 'same';
       r.on = d !== 0 || !r.match.active || !!r.adds;
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
-      r.status = 'new'; r.on = !r.similar;
+      r.status = 'new'; r.on = !r.similar; r.costs = Array(r.count).fill(r.cost);
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
@@ -1287,7 +1291,7 @@ function settleReceive(rows) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null;
+    r.msg = ''; r.order = null; r.costs = Array(r.qty).fill(r.cost);   // one per unit the row adds
     if (r.match) {
       r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1302,7 +1306,9 @@ function settleReceive(rows) {
 }
 function parseMoves(text) {
   const rows = [], L = live(), run = new Map();
-  const seenKey = new Set(L.all.map(m => [m.date, m.sku, m.dir, m.qty, m.reason].join('|')));
+  // An In written one unit per row (<id>-1 ... <id>-N) counts as one movement of N units.
+  const one = new Map(); L.all.forEach(m => { const k = m.dir === 'In' ? m.id.replace(/-\d+$/, '') : m.id, g = one.get(k); if (g) g.qty += m.qty; else one.set(k, { ...m }); });
+  const seenKey = new Set([...one.values()].map(m => [m.date, m.sku, m.dir, m.qty, m.reason].join('|')));
   cleanLines(text).forEach((line, idx) => {
     const c = splitLine(line);
     if (!c) { rows.push({ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }); return; }
@@ -1357,7 +1363,7 @@ function inboxLoad() {
       const ok = /^\d+$/.test(String(r.qty).trim()) && !unnamed(r.name), k = norm(r.name) || r.name, m = ok && by.get(k);
       if (!m) { const g = { ...r, parts: [r], n: ok ? Number(r.qty) : null }; groups.push(g); if (ok) by.set(k, g); return; }
       m.parts.push(r); m.n += Number(r.qty);
-      ['mfr', 'brand', 'line', 'chr', 'rel', 'verify'].forEach(f => { if (!m[f] && r[f]) m[f] = r[f]; });
+      ['mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'].forEach(f => { if (!m[f] && r[f]) m[f] = r[f]; });
       if (r.note && !String(m.note).includes(r.note)) m.note = [m.note, r.note].filter(Boolean).join('; ');
     });
     groups.forEach(g => { if (g.n != null) g.qty = g.n; });
@@ -1366,7 +1372,7 @@ function inboxLoad() {
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
   ui.rdate = todayISO();
   ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
-    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(c);
+    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(c);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
@@ -1527,7 +1533,12 @@ function applyCount(rows) {
     else if (patchExisting(it, r)) out.nDetails++;
     seen.add(it.sku); out.done.add(i);
     const d = r.count - (fresh ? 0 : stockOf(it.sku));
-    if (d !== 0) { qMove({ id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null }); out.nMove++; if (!fresh) out.nCount++; }
+    if (d !== 0) {
+      const m = { id: 'm' + uid(), date: todayISO(), sku: it.sku, dir: d > 0 ? 'In' : 'Out', qty: Math.abs(d), reason: fresh ? 'Opening' : 'Count', ref: '', note: r.note, cost: null };
+      // Stock can move between the review and Apply (a sync); the row's costs are then used as far as they go.
+      if (d > 0) qIns(m, Array.from({ length: d }, (_, k) => k < r.costs.length ? r.costs[k] : r.cost)); else qMove(m);
+      out.nMove++; if (!fresh) out.nCount++;
+    }
     dirty();
   });
   return out;
@@ -1539,15 +1550,20 @@ function applyReceive(rows) {
     let it = r.match || made.get(norm(r.name));
     if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
-    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: Array(r.qty).fill(r.cost) });
-    else qMove({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', qty: r.qty, reason: 'Restock', ref: '', note: r.note, cost: r.cost });
+    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: r.costs });
+    else qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs);
     out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
   return out;
 }
 function applyMoves(rows) {
   let n = 0;
-  rows.forEach(r => { if (r.on && r.item) { qMove({ id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note, cost: r.cost }); n++; } });
+  rows.forEach(r => {
+    if (!r.on || !r.item) return;
+    const m = { id: 'm' + uid(), date: r.date, sku: r.item.sku, dir: r.dir, qty: r.qty, reason: r.reason, ref: '', note: r.note, cost: r.cost };
+    if (r.dir === 'In') qIns(m, Array(r.qty).fill(r.cost)); else qMove(m);
+    n++;
+  });
   return n;
 }
 function buildPrompt() {
