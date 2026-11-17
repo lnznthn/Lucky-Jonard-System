@@ -284,7 +284,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
 let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, pdf: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null };
+  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -472,7 +472,7 @@ async function syncNow(manual) {
       const data = await api('add', { entries: batch.map(wire), have: { rows: meta.rows, lastId: meta.lastId } });
       warn = (data.sync && data.sync.warnings) || data.warnings || [];
       const res = new Map(data.results.map(r => [r.id, r]));
-      data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); if (r.ok && r.fromNo != null) note = `The sheet already had no. ${r.fromNo}, so that document is now no. ${r.no}. Print its PDF again.`; });
+      data.results.forEach(r => { if (r.ok && r.from) renumber(r.from, r.sku); if (r.ok && r.fromNo != null) note = `The sheet already had no. ${r.fromNo}, so that document is now no. ${r.no}. Send its image again.`; });
       queue = queue.filter(q => !(res.get(q.id) && res.get(q.id).ok));
       batch.forEach(b => { const q = queue.find(x => x.id === b.id); if (!q) return; const r = res.get(q.id); q.status = 'failed'; q.error = r ? r.error : 'The sheet did not answer for this entry'; });
       // Whatever is still queued for a toy the sheet refused must not be sent against another toy's SKU.
@@ -751,7 +751,7 @@ function renderMove() {
     <div class="row2"><div><label for="mvDate">Date</label><input id="mvDate" type="date" value="${esc(m.date)}"></div><div><label for="mvNote">Note</label><input id="mvNote" value="${esc(m.note)}" placeholder="Optional" autocomplete="off"></div></div>
     <div class="stack"><p class="hint" id="mvHint"></p>
     <button class="btn primary big" data-act="saveMove">Record ${m.dir === 'In' ? 'stock in' : 'stock out'}</button>
-    ${m.dir === 'Out' ? `<p class="hint">Selling to a customer? Use <b>New sale</b>: it records the stock out and makes the invoice PDF in one step.</p>` : ''}</div>`;
+    ${m.dir === 'Out' ? `<p class="hint">Selling to a customer? Use <b>New sale</b>: it records the stock out and makes the invoice image in one step.</p>` : ''}</div>`;
   updateMvHint();
 }
 function updateMvHint() {
@@ -964,13 +964,13 @@ function openInv(id) {
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
       <div class="links"><button class="btn primary" style="flex:1" data-act="retSave">Record return</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   }
-  prepPdf(v);
+  prepImg(v);
   openSheet(`
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
     <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) + ' at average cost' : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
-    <button class="btn primary big" data-act="pdfPrint" data-id="${esc(id)}">Print PDF</button>
+    <button class="btn primary big" data-act="imgSave" data-id="${esc(id)}">Save image</button>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
     ${myRets.length ? sec('Returns', `<div class="list">${myRets.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.name)} × ${r.qty} · ${esc(r.outcome)}${waitTag(r)}</div><div class="sub">${esc(fmtDay(r.date))}${r.refund ? ' · refunded ' + money(r.refund) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div></div>${r.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(r.q.id)}" data-stay="1">Delete</button>` : ''}</div>`).join('')}</div>`) : ''}
@@ -1021,7 +1021,7 @@ function openPre(id) {
       <dt>Status</dt><dd>${open ? (ready ? 'Ready to ship: the item is in stock' : 'Waiting for stock') : esc(p.status)}${p.status === PRE_CANCEL ? (p.kept ? ', kept ' + money(p.kept) : ', refunded in full') : ''}${p.invNo ? ', invoice no. ' + p.invNo : ''}</dd>${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}</dl>
     ${open ? `<p class="hint">${esc(fourText(p.sku))}</p>` : ''}
     ${sub || (open ? `<div class="actions"><button class="btn ${ready ? 'primary' : ''}" data-act="fulfil" data-id="${esc(id)}">Issue invoice</button>${p.balance > 0 ? `<button class="btn" data-act="subOn" data-id="${esc(id)}" data-m="pay">Add payment</button>` : ''}</div><button class="tbtn danger" data-act="subOn" data-id="${esc(id)}" data-m="cancel">Cancel</button>` : '')}
-    ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (PDF)</button>` : ''}
+    ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (image)</button>` : ''}
     ${p.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(p.q.id)}">Delete this pre-order</button>` : ''}`, 'pre:' + id, () => openPre(id));
 }
 function ordRow(o) { return row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`, o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''), `data-act="ord" data-id="${esc(o.id)}"`, `<span class="qty">${o.status === 'Received' ? o.recQty : o.qty}</span>`); }
@@ -1075,17 +1075,19 @@ function receiveOrd() {
   if (waiting) { prefs.tab = 'orders'; ui.ordSeg = 'pre'; savePrefs(); render(); }
 }
 
-/* ---------- PDF: the invoice or receipt drawn on a canvas, wrapped as a one-image-per-page PDF ---------- */
+/* ---------- Invoice image: the invoice or receipt drawn on a canvas and saved as PNG ---------- */
 const loadImg = src => new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+/** One canvas per image, 595 pt wide at scale 2 (1190 px), cropped to its content and at most 1024 pt (2048 px) tall.
+ *  A longer document continues on further images that repeat the column header and carry the page number. */
 async function drawDoc(v) {
-  const W = 595, H = 842, M = 48, S = 2, R = W - M, sale = v.type === SALE, shop = prefs.shop;
+  const W = 595, H = 1024, M = 48, S = 2, R = W - M, sale = v.type === SALE, shop = prefs.shop;
   const pre = v.preId && live().pres.find(p => p.id === v.preId), contact = contactOf(v);
-  const pages = []; let x, y;
+  const pages = [], ends = []; let x, y;
   const font = (size, bold) => { x.font = `${bold ? '700' : '400'} ${size}px Helvetica, Arial, sans-serif`; };
   const text = (s, px, py, o = {}) => { font(o.size || 10, o.bold); x.fillStyle = o.color || '#1d1b20'; x.textAlign = o.align || 'left'; x.fillText(String(s), px, py); };
   const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
   const rule = (py, c) => { x.strokeStyle = c || '#d9d4cb'; x.lineWidth = 0.75; x.beginPath(); x.moveTo(M, py); x.lineTo(R, py); x.stroke(); };
-  const page = () => { const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
+  const page = () => { if (pages.length) ends.push(y); const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
   const head = () => { text('ITEM', M, y, { size: 8, color: '#6f6b76', bold: true }); text('QTY', 372, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('PRICE', 455, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('AMOUNT', R, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); y += 7; rule(y); y += 16; };
   page();
   // Header: shop on the left, document title on the right.
@@ -1103,9 +1105,11 @@ async function drawDoc(v) {
   text(v.cust, M, y, { size: 12, bold: true }); y += 14;
   if (contact) { text(contact, M, y, { size: 10, color: '#6f6b76' }); y += 14; }
   y += 18; head();
-  v.lines.forEach(l => {
+  // A line that would not fit above the page number starts the next image; the last line takes the totals and footer with it.
+  font(9.5); const fl = shop.foot ? wrap(shop.foot, R - M) : [], tail = 6 + (!sale && pre ? 57 : 20) + (fl.length ? 20 + fl.length * 13 : 0);
+  v.lines.forEach((l, n) => {
     font(10.5); const ls = wrap(l.name, 290);
-    if (y + ls.length * 14 > H - M - 120) { page(); head(); }
+    if (y + ls.length * 14 + 14 + (n === v.lines.length - 1 ? tail : 0) > H - 40) { page(); head(); }
     ls.forEach((s, i) => text(s, M, y + i * 14, { size: 10.5 }));
     text(l.qty, 372, y, { size: 10.5, align: 'right' }); text(money(l.price), 455, y, { size: 10.5, align: 'right' }); text(money(r2(l.qty * l.price)), R, y, { size: 10.5, align: 'right' });
     y += ls.length * 14 + 4; rule(y - 6, '#eeeae2'); y += 10;
@@ -1114,52 +1118,38 @@ async function drawDoc(v) {
   const sum = (label, val, bold) => { text(label, 455, y, { size: bold ? 12 : 10.5, bold, align: 'right', color: bold ? '#1d1b20' : '#6f6b76' }); text(val, R, y, { size: bold ? 12 : 10.5, bold, align: 'right' }); y += bold ? 20 : 17; };
   sum('Total', money(v.total), true);
   if (!sale && pre) { sum('Amount paid', money(pre.paid)); sum('Balance', money(pre.balance), true); }
-  if (shop.foot) { font(9.5); const fl = wrap(shop.foot, R - M); let fy = H - M - (fl.length - 1) * 13; rule(fy - 16); fl.forEach(l => { text(l, M, fy, { size: 9.5, color: '#6f6b76' }); fy += 13; }); }
-  if (pages.length > 1) pages.forEach((c, i) => { x = c.getContext('2d'); text(`Page ${i + 1} of ${pages.length}`, R, H - 24, { size: 8, color: '#6f6b76', align: 'right' }); });
-  return pages;
-}
-function buildPdf(imgs) {
-  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
-  const add = b => { if (typeof b === 'string') b = enc.encode(b); parts.push(b); len += b.length; };
-  const obj = (n, body) => { offs[n] = len; add(n + ' 0 obj\n'); body(); add('\nendobj\n'); };
-  add('%PDF-1.4\n%âãÏÓ\n');
-  obj(1, () => add('<< /Type /Catalog /Pages 2 0 R >>'));
-  obj(2, () => add(`<< /Type /Pages /Kids [${imgs.map((_, i) => (3 + i * 3) + ' 0 R').join(' ')}] /Count ${imgs.length} >>`));
-  imgs.forEach((im, i) => {
-    const p = 3 + i * 3, content = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q';
-    obj(p, () => add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ${p + 2} 0 R >> >> /Contents ${p + 1} 0 R >>`));
-    obj(p + 1, () => add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`));
-    obj(p + 2, () => { add(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.bytes.length} >>\nstream\n`); add(im.bytes); add('\nendstream'); });
+  if (fl.length) { y += 4; rule(y); y += 16; fl.forEach(l => { text(l, M, y, { size: 9.5, color: '#6f6b76' }); y += 13; }); }
+  ends.push(y);
+  // Each image is cropped to its content; with several, each carries its page number at the foot.
+  return pages.map((c, i) => {
+    const h = Math.min(H, ends[i] + (pages.length > 1 ? 40 : 24)), out = document.createElement('canvas');
+    out.width = W * S; out.height = Math.ceil(h * S); x = out.getContext('2d'); x.drawImage(c, 0, 0); x.scale(S, S);
+    if (pages.length > 1) text(`Page ${i + 1} of ${pages.length}`, R, h - 24, { size: 8, color: '#6f6b76', align: 'right' });
+    return out;
   });
-  const n = 3 + imgs.length * 3, at = len;
-  add(`xref\n0 ${n}\n0000000000 65535 f \n` + offs.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${at}\n%%EOF\n`);
-  return new Blob(parts, { type: 'application/pdf' });
 }
-async function docPdf(v) {
-  const pages = await drawDoc(v), imgs = [];
-  for (const c of pages) { const b = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.92)); imgs.push({ w: c.width, h: c.height, bytes: new Uint8Array(await b.arrayBuffer()) }); }
-  return buildPdf(imgs);
-}
-const pdfName = v => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no + '.pdf';
-/** Makes the PDF as soon as the document is opened, so the Print tap itself has nothing to wait for. */
-function prepPdf(v) {
+const docPngs = async v => Promise.all((await drawDoc(v)).map(c => new Promise(res => c.toBlob(res, 'image/png'))));
+const imgName = (v, i, n) => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no + (n > 1 ? '-' + (i + 1) : '') + '.png';
+/** Makes the images as soon as the document is opened, so the Save tap itself has nothing to wait for. */
+function prepImg(v) {
   const pre = v.preId && live().pres.find(p => p.id === v.preId);
   const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
-  if (!ui.pdf || ui.pdf.sig !== sig) ui.pdf = { sig, id: v.id, p: docPdf(v) };
-  return ui.pdf.p;
+  if (!ui.img || ui.img.sig !== sig) { const c = ui.img = { sig }; c.p = docPngs(v).then(bs => { c.n = bs.length; return bs; }); }
+  return ui.img.p;
 }
-/** Print PDF: opens the PDF in a new tab, where the browser's viewer prints it. The tab is opened during the tap
- *  (a tab opened after waiting for the PDF would be blocked), then pointed at the file. Downloads it when no tab can open. */
-async function printPdf(id) {
+/** Save image: one image opens in a new tab, opened during the tap (a tab opened after waiting for the image would be
+ *  blocked) and then pointed at the PNG; it downloads when no tab can open. Several images all download, with no tab. */
+async function saveImg(id) {
   const v = live().invs.find(x => x.id === id); if (!v) return;
-  const w = window.open('', '_blank');
+  const w = ui.img && ui.img.n > 1 ? null : window.open('', '_blank');
   try {
-    const blob = await prepPdf(v), url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-    setTimeout(() => URL.revokeObjectURL(url), 10 * 60000);
-    if (w && !w.closed) { w.location.href = url; return; }
-    const a = document.createElement('a'); a.href = url; a.download = pdfName(v); document.body.appendChild(a); a.click(); a.remove();
-    toast('PDF downloaded');
-  } catch (e) { if (w) w.close(); toast('Could not make the PDF: ' + e.message); }
+    const bs = await prepImg(v), urls = bs.map(b => URL.createObjectURL(b));
+    setTimeout(() => urls.forEach(u => URL.revokeObjectURL(u)), 10 * 60000);
+    if (urls.length === 1 && w && !w.closed) { w.location.href = urls[0]; return; }
+    if (w) w.close();
+    urls.forEach((url, i) => { const a = document.createElement('a'); a.href = url; a.download = imgName(v, i, urls.length); document.body.appendChild(a); a.click(); a.remove(); });
+    toast(urls.length > 1 ? `${urls.length} images downloaded` : 'Image downloaded');
+  } catch (e) { if (w) w.close(); toast('Could not make the image: ' + e.message); }
 }
 
 /* ---------- import ---------- */
@@ -1575,7 +1565,7 @@ function openSettings() {
     ${sec('Connection', `<div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <p class="hint">${cfg.url ? (ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
       <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>`, '', 'pad')}
-    ${sec('Invoice PDF', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" autocomplete="off"></div>
+    ${sec('Invoice image', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" autocomplete="off"></div>
       <div><label for="sContact">Contact details (one per line)</label><textarea id="sContact" rows="3">${esc(sh.contact)}</textarea></div>
       <div><label for="sFoot">Line at the foot of the page</label><input id="sFoot" value="${esc(sh.foot)}" placeholder="Optional" autocomplete="off"></div>
       <div><div class="lbl">Logo</div><div class="links">${sh.logo ? `<img class="logo" src="${esc(sh.logo)}" alt="Logo">` : ''}<label class="btn sm" style="margin:0 0 3px;color:var(--text)">${sh.logo ? 'Replace' : 'Choose a picture'}<input id="sLogo" type="file" accept="image/*" hidden></label>${sh.logo ? `<button class="tbtn danger" data-act="logoOff">Remove</button>` : ''}</div></div>
@@ -1685,7 +1675,7 @@ document.addEventListener('click', async ev => {
     case 'invReset': ui.inv = newInv(); renderSell(); break;
     case 'invIssue': issueInvoice(); break;
     case 'inv': ui.sub = null; openInv(d.id); break;
-    case 'pdfPrint': await printPdf(d.id); break;
+    case 'imgSave': saveImg(d.id); break;
     case 'ship': {
       const v = live().invs.find(x => x.id === d.id); if (!v || v.ship === d.s) break;
       queue = queue.filter(q => !(q.kind === 'ship' && q.invId === d.id && q.status === 'pending'));   // the last tap wins

@@ -1,6 +1,6 @@
-# End-to-end test of the v2 flows: toy details, receipt cost, supplier orders, pre-orders, invoices with PDF, returns.
+# End-to-end test of the v2 flows: toy details, receipt cost, supplier orders, pre-orders, invoices with the image, returns.
 # python3 test/e2e_v2.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import datetime, json, os, re, subprocess, sys, urllib.request
+import datetime, json, os, re, sys, urllib.request
 from playwright.sync_api import sync_playwright
 
 import os
@@ -41,23 +41,24 @@ def connect(p, code=CODE):
 def pick(p, key, text):
     p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug="{key}"] button')
 def close(p): p.click('button[aria-label="Close"]')
-def pdf(p, name, blocked=False):
-    """Taps Print PDF. Normally the PDF opens in a new tab (returns 'tab'); with blocked=True no tab can open,
-    so the file downloads instead (returns its file name)."""
-    path = f'{SHOTS}/{name}.pdf'
+def png_size(data):
+    """Width and height from a PNG's IHDR chunk, or None when the bytes are not a PNG."""
+    return (int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')) if data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR' else None
+def save_img(p, name, blocked=False):
+    """Taps Save image. Normally the PNG opens in a new tab (returns 'tab'); with blocked=True no tab can open,
+    so the file downloads instead (returns its file name). Also returns the image's width and height."""
+    path = f'{SHOTS}/{name}.png'
     if blocked:
         p.evaluate("() => { window.__open = window.open; window.open = () => null; }")
-        with p.expect_download() as d: p.click('button:has-text("Print PDF")')
+        with p.expect_download() as d: p.click('button:has-text("Save image")')
         d.value.save_as(path); got = d.value.suggested_filename
         p.evaluate("() => { window.open = window.__open; }")
     else:
-        with p.expect_popup() as pop: p.click('button:has-text("Print PDF")')
+        with p.expect_popup() as pop: p.click('button:has-text("Save image")')
         t = pop.value; t.wait_for_url('blob:**')
         data = t.evaluate("async () => Array.from(new Uint8Array(await (await fetch(location.href)).arrayBuffer()))")
         t.close(); open(path, 'wb').write(bytes(data)); got = 'tab'
-    info = subprocess.run(['pdfinfo', path], capture_output=True, text=True)
-    subprocess.run(['pdftoppm', '-r', '70', '-png', path, f'{SHOTS}/{name}'])
-    return got, open(path, 'rb').read(5), info.returncode == 0 and re.search(r'Pages:\s+(\d+)', info.stdout).group(1)
+    return got, png_size(open(path, 'rb').read())
 
 def apply(p, label):
     """Taps Apply, reads the result sheet that stays until closed, and closes it."""
@@ -136,7 +137,7 @@ with sync_playwright() as pw:
     p.click('#view button:has-text("New sale")')
     check('on' in p.get_attribute('#tabs button[data-t="sell"]', 'class') and p.inner_text('#title') == 'New sale' and p.is_visible('button:has-text("Issue invoice no. 1")'), 'New sale on Home opens the form')
 
-    # ---- customer pre-order: partial payment, receipt PDF, no stock movement, four numbers
+    # ---- customer pre-order: partial payment, receipt image, no stock movement, four numbers
     n_moves = len(rows('Movements'))
     pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.lines.0.price"]', '1500')
     check(not p.is_visible('#invNotice') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice.' == p.inner_text('#invHint'), 'one in stock and one wanted: the form is a sale and says what the tap does')
@@ -153,8 +154,8 @@ with sync_playwright() as pw:
     p.click('button:has-text("Save pre-order · receipt no. 1")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/06-receipt.png')
     check('Pre-order receipt no. 1' in sheet and 'Paid ₱1,000 · balance ₱2,000' in sheet, 'receipt opens straight after saving')
-    name, magic, pages = pdf(p, 'receipt-1', blocked=True)
-    check(name == 'Receipt-1.pdf' and magic == b'%PDF-' and pages == '1', f'with no tab allowed, the receipt PDF downloads as a valid one-page PDF: {name} {magic} {pages}')
+    name, size = save_img(p, 'receipt-1', blocked=True)
+    check(name == 'Receipt-1.png' and size and size[0] == 1190 and size[1] <= 2048, f'with no tab allowed, the receipt image downloads as a valid PNG 1190 px wide: {name} {size}')
     close(p); synced(p)
     check(len(rows('Movements')) == n_moves, 'pre-order moved no stock')
     pre = rows('Pre-orders')[0]
@@ -232,7 +233,8 @@ with sync_playwright() as pw:
     p.click('button:has-text("Issue invoice no. 3")')
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/11-invoice.png')
     check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin ₱500 at average cost' in sheet, 'invoice sheet shows override and margin')
-    name, magic, pages = pdf(p, 'invoice-3'); check(name == 'tab' and magic == b'%PDF-' and pages == '1', 'Print PDF opens a valid invoice PDF in a new tab')
+    name, size = save_img(p, 'invoice-3')
+    check(name == 'tab' and size and size[0] == 1190 and size[1] < 1684, f'Save image opens a valid PNG in a new tab, 1190 px wide and cropped shorter than an A4 page: {size}')
     p.click('#sheet [data-act="ship"]'); check(p.is_checked('#sheet [data-act="ship"]'), 'ticking Delivered marks it')
     p.click('#sheet [data-act="ship"]'); check(not p.is_checked('#sheet [data-act="ship"]'), 'unticking takes the mark off')
     p.click('#sheet [data-act="ship"]'); close(p); synced(p)
@@ -301,12 +303,12 @@ with sync_playwright() as pw:
     ctx.set_offline(True)
     new_sale(p); pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.click('button:has-text("Issue invoice no. 6")')
     check('waiting' in p.inner_text('#sheet') and 'Delete this invoice' in p.inner_text('#sheet'), 'offline invoice is marked waiting and can still be deleted')
-    name, magic, pages = pdf(p, 'invoice-6-offline'); check(magic == b'%PDF-', 'PDF works offline'); close(p)
+    name, size = save_img(p, 'invoice-6-offline'); check(size and size[0] == 1190, 'the image works offline'); close(p)
     check(stock_map(p)['Grandista Son Goku'] == 4, 'offline invoice already counts against stock')
     ctx.set_offline(False); p.click('#syncBtn'); synced(p)
     check(len([r for r in rows('Invoices') if r[0] == 6]) == 1 and len([r for r in rows('Movements') if r[7] == '6']) == 1, 'offline invoice reached the sheet once')
 
-    # ---- shop details and logo appear on the PDF; long invoices paginate
+    # ---- shop details and logo appear on the image
     logo = f'{SHOTS}/logo.png'
     p.evaluate("""() => { const c = document.createElement('canvas'); c.width = 300; c.height = 120; const x = c.getContext('2d'); x.fillStyle = '#e4572e'; x.fillRect(0, 0, 300, 120); x.fillStyle = '#fff'; x.font = '700 48px sans-serif'; x.fillText('SHOP', 70, 78); window._logo = c.toDataURL('image/png'); }""")
     import base64; open(logo, 'wb').write(base64.b64decode(p.evaluate('window._logo').split(',')[1]))
@@ -315,12 +317,8 @@ with sync_playwright() as pw:
     check(p.input_value('#sShop') == 'Sample Toy Shop', 'typed shop fields survive the logo upload'); p.screenshot(path=f'{SHOTS}/15-settings.png')
     p.click('#sheet [data-act="savePrefs"]')
     check(home(p) and p.inner_text('#title') == 'Sample Toy Shop', 'with a shop name set, Home is headed by it')
-    tab(p, 'Sales'); p.click('.item:has-text("No. 4")'); pdf(p, 'invoice-4-branded'); close(p)
-    p.click('.item:has-text("No. 1")'); pdf(p, 'receipt-1-branded'); close(p)
-    many = p.evaluate("""async () => { const v = live().invs.find(x => x.no === 4); const big = { ...v, lines: Array.from({ length: 45 }, (_, i) => ({ ...v.lines[0], name: 'Sample toy with a fairly long product name, variant ' + (i + 1) })) }; const b = await docPdf(big); return Array.from(new Uint8Array(await b.arrayBuffer())); }""")
-    open(f'{SHOTS}/long.pdf', 'wb').write(bytes(many)); info = subprocess.run(['pdfinfo', f'{SHOTS}/long.pdf'], capture_output=True, text=True).stdout
-    subprocess.run(['pdftoppm', '-r', '50', '-png', f'{SHOTS}/long.pdf', f'{SHOTS}/long'])
-    check(int(re.search(r'Pages:\s+(\d+)', info).group(1)) >= 2, 'a 45-line invoice runs onto more pages')
+    tab(p, 'Sales'); p.click('.item:has-text("No. 4")'); save_img(p, 'invoice-4-branded'); close(p)
+    p.click('.item:has-text("No. 1")'); save_img(p, 'receipt-1-branded'); close(p)
 
     # ---- invoice number already used in the sheet (second phone): renumbered, both kept
     ctx2.set_offline(True)
@@ -354,11 +352,33 @@ with sync_playwright() as pw:
     check(ep[11:13] == ['Cancelled', 0], f'full refund in the sheet: {ep[11:13]}')
     check('promised beyond supply' not in home(p), 'a cancelled pre-order is no longer owed')
 
-    # ---- the invoice PDF is drawn with literal colours: the same bytes in light and dark
-    pdf_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const b = await docPdf(v); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
-    light, dark = p.evaluate(pdf_bytes, 'light'), p.evaluate(pdf_bytes, 'dark')
-    check(len(light) > 1000 and light == dark, f'PDF bytes identical in light and dark ({len(light)} bytes)')
+    # ---- the invoice image is drawn with literal colours: the same bytes in light and dark
+    png_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const [b] = await docPngs(v); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
+    light, dark = p.evaluate(png_bytes, 'light'), p.evaluate(png_bytes, 'dark')
+    check(len(light) > 1000 and light == dark and png_size(bytes(light)) is not None, f'image bytes identical in light and dark ({len(light)} bytes)')
     p.evaluate("prefs.theme = 'auto'; applyTheme()")
+
+    # ---- a 40-line invoice continues on a second image: both download with no tab, the second repeats the column header with its page number
+    cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = cl.new_page(); q.on('pageerror', lambda e: errors.append('long ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
+    q.evaluate("""() => {
+      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, min: null, active: true }, false);
+      dirty(); qAdd('invoice', { invoice: { id: 'vlong', no: nextNo(), date: todayISO(), custId: custFor('Ana Reyes', ''), lines: Array.from({ length: 40 }, (_, i) => ({ sku: 'L' + (i + 1), qty: 1, list: 100, price: 100, cost: null })), preId: '' } }); commit();
+      const fill = CanvasRenderingContext2D.prototype.fillText; window._drawn = [];
+      CanvasRenderingContext2D.prototype.fillText = function (s, ...a) { window._drawn.push(String(s)); return fill.call(this, s, ...a); };
+    }""")
+    tab(q, 'Sales'); q.click('.item:has-text("No. 1")')
+    got, tabs = [], []; q.on('download', lambda d: got.append(d)); cl.on('page', lambda t: tabs.append(t))
+    q.click('button:has-text("Save image")')
+    for _ in range(50):
+        if len(got) == 2: break
+        q.wait_for_timeout(100)
+    for d in got: d.save_as(f'{SHOTS}/{d.suggested_filename}')
+    sizes = [png_size(open(f'{SHOTS}/{d.suggested_filename}', 'rb').read()) for d in got]
+    check([d.suggested_filename for d in got] == ['Invoice-1-1.png', 'Invoice-1-2.png'] and not tabs and '2 images downloaded' in q.inner_text('#toast'), f'a 40-line invoice downloads two images and opens no tab: {[d.suggested_filename for d in got]}')
+    check(all(s and s[0] == 1190 and s[1] <= 2048 for s in sizes) and len(sizes) == 2, f'each image is a PNG 1190 px wide and at most 2048 px tall: {sizes}')
+    drawn = q.evaluate('window._drawn')
+    check(drawn.count('ITEM') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
+    cl.close()
 
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
     cx = b.new_context(viewport={'width': 390, 'height': 844}); q = cx.new_page(); q.on('pageerror', lambda e: errors.append('needs ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
