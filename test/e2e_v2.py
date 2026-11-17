@@ -359,7 +359,7 @@ with sync_playwright() as pw:
     check('promised beyond supply' not in home(p), 'a cancelled pre-order is no longer owed')
 
     # ---- the invoice image is drawn with literal colours: the same bytes in light and dark
-    png_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const [b] = await docPngs(v); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
+    png_bytes = "async t => { prefs.theme = t; applyTheme(); const v = live().invs.find(x => x.no === 3); const [b] = await docPngs(drawDoc(v)); return Array.from(new Uint8Array(await b.arrayBuffer())); }"
     light, dark = p.evaluate(png_bytes, 'light'), p.evaluate(png_bytes, 'dark')
     check(len(light) > 1000 and light == dark and png_size(bytes(light)) is not None, f'image bytes identical in light and dark ({len(light)} bytes)')
     p.evaluate("prefs.theme = 'auto'; applyTheme()")
@@ -384,7 +384,7 @@ with sync_playwright() as pw:
     check(all(s and s[0] == 1190 and s[1] <= 2048 for s in sizes) and len(sizes) == 2, f'each image is a PNG 1190 px wide and at most 2048 px tall: {sizes}')
     drawn = q.evaluate('window._drawn')
     check(drawn.count('ITEM') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
-    check(q.query_selector('#imgCopy') is not None and not q.is_visible('#imgCopy'), 'Copy image is hidden for a document with several images')
+    check(q.evaluate('canCopyImg') and not q.is_visible('#sheet button:has-text("Copy image")'), 'Copy image is hidden for a document with several images')
     cl.close()
 
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less

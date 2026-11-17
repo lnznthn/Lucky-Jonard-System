@@ -53,7 +53,6 @@ nav.tabs button.on{color:var(--text);border-top-color:var(--text)}
 .btn.sm:active:not([disabled]){box-shadow:0 1px 0 var(--raise-edge)}
 .btn.big{width:100%}
 .btn[disabled]{opacity:.5;cursor:default}
-.btn[hidden]{display:none}
 .tbtn{min-height:44px;padding:0;border:0;background:transparent;color:var(--text);font-size:15px;font-weight:500;text-decoration:underline;text-underline-offset:4px;text-align:left;align-self:flex-start}
 .tbtn.danger{color:var(--danger)}
 .tbtn.c{align-self:center}
@@ -1038,13 +1037,13 @@ function openInv(id) {
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
       <div class="links"><button class="btn primary" style="flex:1" data-act="retSave">Record return</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   }
-  prepImg(v).then(bs => { const c = $('#imgCopy'); if (c && c.dataset.id === id) c.hidden = bs.length > 1; });
+  const im = prepImg(v);
   openSheet(`
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
     <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
-    <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg ? `<button class="btn" id="imgCopy" data-act="imgCopy" data-id="${esc(id)}" hidden>Copy image</button>` : ''}</div>
+    <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg && im.n === 1 ? `<button class="btn" data-act="imgCopy" data-id="${esc(id)}">Copy image</button>` : ''}</div>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
     ${myRets.length ? sec('Returns', `<div class="list">${myRets.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.name)} × ${r.qty} · ${esc(r.outcome)}${waitTag(r)}</div><div class="sub">${esc(fmtDay(r.date))}${r.refund ? ' · refunded ' + money(r.refund) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div></div>${r.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(r.q.id)}" data-stay="1">Delete</button>` : ''}</div>`).join('')}</div>`) : ''}
@@ -1151,8 +1150,9 @@ function receiveOrd() {
 /* ---------- Invoice image: the invoice or receipt drawn on a canvas and saved as PNG ---------- */
 const loadImg = src => new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
 /** One canvas per image, 595 pt wide at scale 2 (1190 px), cropped to its content and at most 1024 pt (2048 px) tall.
- *  A longer document continues on further images that repeat the column header and carry the page number. */
-async function drawDoc(v) {
+ *  A longer document continues on further images that repeat the column header and carry the page number.
+ *  Synchronous, so the number of images is known during a tap: the logo gets a fixed box and is drawn by docPngs(). */
+function drawDoc(v) {
   const W = 595, H = 1024, M = 48, S = 2, R = W - M, sale = v.type === SALE, shop = prefs.shop;
   const pre = v.preId && live().pres.find(p => p.id === v.preId), contact = contactOf(v);
   const pages = [], ends = []; let x, y;
@@ -1163,10 +1163,8 @@ async function drawDoc(v) {
   const page = () => { if (pages.length) ends.push(y); const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
   const head = () => { text('ITEM', M, y, { size: 8, color: '#6f6b76', bold: true }); text('QTY', 372, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('PRICE', 455, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('AMOUNT', R, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); y += 7; rule(y); y += 16; };
   page();
-  // Header: shop on the left, document title on the right.
-  let ly = y;
-  const logo = shop.logo ? await loadImg(shop.logo) : null;
-  if (logo) { const k = Math.min(150 / logo.width, 56 / logo.height, 1); x.drawImage(logo, M, ly, logo.width * k, logo.height * k); ly += logo.height * k + 16; } else ly += 14;
+  // Header: shop on the left, under the logo's 150 x 56 pt box when there is one; document title on the right.
+  let ly = y + (shop.logo ? 72 : 14);
   if (shop.name) { text(shop.name, M, ly, { size: 15, bold: true }); ly += 15; }
   font(9.5); wrap(shop.contact || '', 250).filter(Boolean).forEach(l => { text(l, M, ly, { size: 9.5, color: '#6f6b76' }); ly += 13; });
   let ry = y + 16;
@@ -1201,25 +1199,30 @@ async function drawDoc(v) {
     return out;
   });
 }
-const docPngs = async v => Promise.all((await drawDoc(v)).map(c => new Promise(res => c.toBlob(res, 'image/png'))));
+/** The images as PNG blobs, with the logo drawn into its box at the top left of the first (its context is still in points). */
+async function docPngs(cs) {
+  const logo = prefs.shop.logo && await loadImg(prefs.shop.logo);
+  if (logo) { const k = Math.min(150 / logo.width, 56 / logo.height, 1); cs[0].getContext('2d').drawImage(logo, 48, 48, logo.width * k, logo.height * k); }
+  return Promise.all(cs.map(c => new Promise(res => c.toBlob(res, 'image/png'))));
+}
 const imgName = (v, i, n) => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no + (n > 1 ? '-' + (i + 1) : '') + '.png';
-/** Makes the images as soon as the document is opened, so the Save or Copy tap itself has nothing to wait for. */
+/** Makes the images as soon as the document is opened, so the Save or Copy tap itself has nothing to wait for.
+ *  Returns { n: number of images, p: promise of the PNGs }. */
 function prepImg(v) {
   const pre = v.preId && live().pres.find(p => p.id === v.preId);
   const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
-  if (!ui.img || ui.img.sig !== sig) { const c = ui.img = { sig }; c.p = docPngs(v).then(bs => { c.n = bs.length; return bs; }); }
-  return ui.img.p;
+  if (!ui.img || ui.img.sig !== sig) { const cs = drawDoc(v); ui.img = { sig, n: cs.length, p: docPngs(cs) }; }
+  return ui.img;
 }
 /** Save image: one image opens in a new tab, opened during the tap (a tab opened after waiting for the image would be
  *  blocked) and then pointed at the PNG; it downloads when no tab can open. Several images all download, with no tab. */
 async function saveImg(id) {
   const v = live().invs.find(x => x.id === id); if (!v) return;
-  const w = ui.img && ui.img.n > 1 ? null : window.open('', '_blank');
+  const im = prepImg(v), w = im.n > 1 ? null : window.open('', '_blank');
   try {
-    const bs = await prepImg(v), urls = bs.map(b => URL.createObjectURL(b));
+    const bs = await im.p, urls = bs.map(b => URL.createObjectURL(b));
     setTimeout(() => urls.forEach(u => URL.revokeObjectURL(u)), 10 * 60000);
-    if (urls.length === 1 && w && !w.closed) { w.location.href = urls[0]; return; }
-    if (w) w.close();
+    if (w && !w.closed) { w.location.href = urls[0]; return; }
     urls.forEach((url, i) => { const a = document.createElement('a'); a.href = url; a.download = imgName(v, i, urls.length); document.body.appendChild(a); a.click(); a.remove(); });
     toast(urls.length > 1 ? `${urls.length} images downloaded` : 'Image downloaded');
   } catch (e) { if (w) w.close(); toast('Could not make the image: ' + e.message); }
@@ -1228,7 +1231,7 @@ const canCopyImg = !!(navigator.clipboard && navigator.clipboard.write && window
 /** Copy image: Safari allows the write only when the ClipboardItem is made during the tap, so it gets a promise of the PNG. */
 async function copyImg(id) {
   const v = live().invs.find(x => x.id === id); if (!v) return;
-  try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': prepImg(v).then(bs => bs[0]) })]); toast('Copied. Paste it into the chat.'); }
+  try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': prepImg(v).p.then(bs => bs[0]) })]); toast('Copied. Paste it into the chat.'); }
   catch (e) { toast('Could not copy the image: ' + e.message); }
 }
 
