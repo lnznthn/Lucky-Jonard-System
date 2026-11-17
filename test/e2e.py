@@ -34,7 +34,7 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/01-empty.png')
 
     # ---- photo count import: new items, skipped row, bad row
-    photo = "Hot Wheels 5-Pack\tCars\t12\t₱299\t\nBarbie Dreamhouse\tDolls\t2\t₱5,499\tonly 2 visible\nBlocks 500pc\tBlocks\t?\t\t\nPlush Bear Large\tPlush\t4\t650\t\nBroken Row\tCars\tabc\t\t"
+    photo = "Hot Wheels 5-Pack\t12\t₱299\t\nBarbie Dreamhouse\t2\t₱5,499\tonly 2 visible\nBlocks 500pc\t?\t\t\nPlush Bear Large\t4\t650\t\nBroken Row\tabc\t\t"
     paste_import(p, 'count', photo)
     txt = p.inner_text('#impOut')
     check(txt.count('New product') == 3, 'preview: 3 new products')
@@ -55,7 +55,7 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/03-stock.png')
 
     # ---- second photo: name variant matches, similar name needs confirmation, unchanged row
-    paste_import(p, 'count', "Hot Wheels 5 Pack\tCars\t10\nBarbie Dreamhouse Playset\tDolls\t3\nPlush Bear Large\tPlush\t4")
+    paste_import(p, 'count', "Hot Wheels 5 Pack\t10\nBarbie Dreamhouse Playset\t3\nPlush Bear Large\t4")
     txt = p.inner_text('#impOut')
     check('stock 12 → counted 10 (−2)' in txt, 'recount shows delta for exact-normalised name')
     check('Looks like “Barbie Dreamhouse”' in txt and 'Apply 1 change' in txt, 'similar name is held back by default')
@@ -101,7 +101,7 @@ with sync_playwright() as pw:
     check('₱699' in p.inner_text('.item:has-text("Plush Bear Large")'), 'edit saved: new price shows')
 
     # ---- add item by hand with starting stock; duplicate name refused
-    tab(p, 'Inventory'); p.click('button:has-text("Add product")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fCat', 'Trains'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
+    tab(p, 'Inventory'); p.click('button:has-text("Add product")'); p.fill('#fName', 'Toy Train Set'); p.fill('#fStart', '6'); p.click('#sheet button.primary:has-text("Save")')
     check(stock_map(p).get('Toy Train Set') == 6, 'manual item with starting stock 6')
     p.click('button:has-text("Add product")'); p.fill('#fName', 'toy train  set'); p.click('#sheet button.primary:has-text("Save")')
     check('already exists' in p.inner_text('#toast'), 'duplicate name is refused')

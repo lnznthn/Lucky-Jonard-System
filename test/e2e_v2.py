@@ -34,9 +34,9 @@ with sync_playwright() as pw:
 
     # ---- photo import carries the toy details; the release-date flag is its own field
     T = '\t'
-    paste_import(p, 'count', T.join(['Grandista Son Goku', 'Figures', '2', '', '', 'Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Y']) + '\n'
-        + T.join(['Maximatic Luffy', 'Figures', '1', '', 'name guessed from artwork', 'Bandai Spirits', 'Banpresto', 'Maximatic', 'Monkey D. Luffy', 'sometime', '']) + '\n'
-        + 'Plain Toy\tFigures\t1')
+    paste_import(p, 'count', T.join(['Grandista Son Goku', '2', '', '', 'Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Y']) + '\n'
+        + T.join(['Maximatic Luffy', '1', '', 'name guessed from artwork', 'Bandai Spirits', 'Banpresto', 'Maximatic', 'Monkey D. Luffy', 'sometime', '']) + '\n'
+        + 'Plain Toy\t1')
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/01-import-details.png')
     check('Banpresto / Grandista / Son Goku · released 2019-06 (to verify)' in txt, 'preview shows brand, line, character and the verify flag')
     check('Release date “sometime” not understood' in txt and 'Apply 3 changes' in txt, 'an unreadable release date is left blank, row still applies')
@@ -66,7 +66,7 @@ with sync_playwright() as pw:
     check(it['Grandista Son Goku'][3] == 1800 and it['Grandista Son Goku'][11:13] == ['2019-06-20', ''], 'edit clears the flag and sets the verified date')
 
     # ---- a later paste fills blank details only, and never overwrites what is on file
-    paste_import(p, 'count', T.join(['Plain Toy', 'Figures', '1', '', '', 'Sega', 'Gigo', '', 'Zoro', '2023', '']) + '\n' + T.join(['Grandista Son Goku', 'Figures', '2', '', '', 'Other Maker', '', '', '', '', '']))
+    paste_import(p, 'count', T.join(['Plain Toy', '1', '', '', 'Sega', 'Gigo', '', 'Zoro', '2023', '']) + '\n' + T.join(['Grandista Son Goku', '2', '', '', 'Other Maker', '', '', '', '', '']))
     txt = p.inner_text('#impOut')
     check('Details' in txt and 'adds manufacturer, brand, character, release date' in txt and 'Apply 1 change' in txt, 'blank details are offered, existing ones are not')
     apply(p, 'Apply 1 change'); synced(p)
@@ -74,7 +74,7 @@ with sync_playwright() as pw:
     check(it['Plain Toy'][7:9] == ['Sega', 'Gigo'] and it['Grandista Son Goku'][7] == 'Bandai Spirits', 'details filled without overwriting')
 
     # ---- receive mode: supplier paperwork adds stock at its cost, one unit per row
-    paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tFigures\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')
+    paste_import(p, 'receive', 'Grandista Son Goku\t3\t1,200\nGigo Zoro\t2\t900\tSega\tGigo\t\tRoronoa Zoro\t2023-11\t\nBad Row\tx\t5')
     txt = p.inner_text('#impOut'); p.screenshot(path=f'{SHOTS}/03-receive-preview.png')
     check('+3 at ₱1,200 each' in txt and 'New product' in txt and 'Needs a name · 1' in txt and 'Apply 2 changes' in txt, 'receive preview')
     p.click('#impOut details[data-grp="name"] summary'); check('Problem' in p.inner_text('#impOut') and 'must be a whole number' in p.inner_text('#impOut'), 'the bad receive row is under Needs a name')
@@ -328,7 +328,7 @@ with sync_playwright() as pw:
     # ---- a 40-line invoice continues on a second image: both download with no tab, the second repeats the column header with its page number
     cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = page(cl, 'long '); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
-      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, active: true }, false);
+      for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, price: 100, active: true }, false);
       dirty(); qAdd('invoice', { invoice: { id: 'vlong', no: nextNo(), date: todayISO(), custId: custFor('Ana Reyes', ''), lines: Array.from({ length: 40 }, (_, i) => ({ sku: 'L' + (i + 1), qty: 1, list: 100, price: 100, cost: null })), preId: '' } }); commit();
       const fill = CanvasRenderingContext2D.prototype.fillText; window._drawn = [];
       CanvasRenderingContext2D.prototype.fillText = function (s, ...a) { window._drawn.push(String(s)); return fill.call(this, s, ...a); };
@@ -351,7 +351,7 @@ with sync_playwright() as pw:
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
     cx = b.new_context(viewport={'width': 390, 'height': 844}); q = page(cx, 'needs '); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
-      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, active: true }, extra), false);
+      const it = (sku, name, extra) => qItem(Object.assign({ sku, name, price: 100, active: true }, extra), false);
       const mv = (sku, qty) => qMove({ id: 'm' + uid(), date: todayISO(), sku, dir: 'In', qty, reason: 'Opening', ref: '', note: '', cost: null });
       const pre = (sku, cust, qty, paid) => { const c = custFor(cust, '0917'); qAdd('pre', { pre: { id: 'p' + uid(), date: todayISO(), custId: c, sku, qty, price: 100, paid, note: '', invId: 'v' + uid(), no: nextNo() } }); dirty(); };
       it('A', 'Alpha'); mv('A', 9); it('B', 'Bravo', { price: null }); mv('B', 1); it('C', 'Charlie', { relCheck: true, rel: '2024' }); mv('C', 5); it('D', 'Delta'); dirty();

@@ -313,7 +313,7 @@ if (prefs.tab === 'move') prefs.tab = 'home';
 prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
-let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
+let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
   sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
@@ -379,10 +379,9 @@ function live() {
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  const cats = [...new Set(list.filter(i => i.active).map(catOf))].sort((a, b) => a.localeCompare(b));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
   const inbox = docs.inbox.filter(r => !handled.has(r.row));
-  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, cats, all, custs, orders, pres, invs, rets, inbox };
+  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, orders, pres, invs, rets, inbox };
   return _live;
 }
 /**
@@ -717,7 +716,6 @@ function renderStock() {
     <div><label for="q">Search</label><div style="display:flex;gap:12px;align-items:flex-start"><input id="q" type="search" placeholder="Name, brand, character or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn sm" data-act="newItem">Add product</button></div></div>
     <div class="stack">
     <div class="seg">${[['all', 'All'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
-    ${L.cats.length > 1 && !wide() ? `<div class="seg" aria-label="Category">${['All', ...L.cats].map(c => `<button class="${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${c === 'All' ? 'Every category' : esc(c)}</button>`).join('')}</div>` : ''}
     <div class="links"><p class="hint" style="flex:1">${STOCK_FILTERS[ui.filter] ? 'Showing only: ' + STOCK_FILTERS[ui.filter] : `${plural(act.length, 'product')} · ${plural(units, 'unit')}${value ? ' · ' + money(Math.round(value)) + ' at retail' : ''}`}</p>${STOCK_FILTERS[ui.filter] ? '<button class="tbtn" data-act="filter" data-f="all">Show all</button>' : ''}<button class="tbtn" data-act="tab" data-t="activity">Activity</button></div>
     <div id="stockList"></div></div>`;
   renderStockList();
@@ -726,8 +724,7 @@ function renderStockList() {
   const L = live(), q = norm(ui.q), w = wide();
   let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
   const scope = rows;
-  if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
-  if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
+  if (q) rows = rows.filter(i => norm([i.name, i.sku, i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (STOCK_TEST[ui.filter]) rows = rows.filter(STOCK_TEST[ui.filter]);
   const box = $('#stockList'); if (!box) return;
   if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
@@ -737,7 +734,7 @@ function renderStockList() {
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
     const s = status(i), n = nums(i.sku);
-    return row(esc(i.name), `${esc(catOf(i))} · ${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
+    return row(esc(i.name), `${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
   }).join('')}</div>${more}`;
 }
 /** Inventory on desktop: every field of a product, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
@@ -763,7 +760,7 @@ function openItem(sku) {
   const said = s === 'out' ? 'Out of stock.' : s === 'neg' ? 'Below zero: run a count.' : '';
   openSheet(`
     <div class="top"><h2>${esc(i.name)}</h2>${closeBtn}</div>
-    <p class="hint">${esc(catOf(i))} · SKU ${esc(i.sku)} · ${i.price != null ? money(i.price) : 'no price yet'}${i.active ? '' : ' · archived'}</p>
+    <p class="hint">SKU ${esc(i.sku)} · ${i.price != null ? money(i.price) : 'no price yet'}${i.active ? '' : ' · archived'}</p>
     ${sec('Units', `<div class="strip"><span class="cell ${s}"><small>On hand</small><b class="onhand">${n.have}</b></span><span class="cell"><small>Incoming</small><b>${n.inc}</b></span><span class="cell"><small>Owed</small><b>${n.owed}</b></span><span class="cell ${n.ltp < 0 ? 'neg' : ''}"><small>Left to promise</small><b>${n.ltp}</b></span></div>`)}
     <p class="hint">${LTP_TEXT}</p>
     ${said ? `<p class="hint">${said}</p>` : ''}
@@ -817,8 +814,7 @@ function openItemEditor(sku) {
   openSheet(`
     <div class="top"><h2>${i ? 'Edit product' : 'New product'}</h2>${closeBtn}</div>
     <div><label for="fName">Name</label><input id="fName" value="${v('name')}" autocomplete="off"></div>
-    <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
-      <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
+    <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div>
     ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0" data-units="f.c"></div>${costFields('f.c', 0)}`}
     <details ${i && (i.mfr || i.brand || i.line || i.chr || i.rel) ? 'open' : ''}>${summary('Product details')}<div class="stack">
       <div class="row2"><div><label for="fMfr">Manufacturer</label><input id="fMfr" value="${v('mfr')}" autocomplete="off"></div><div><label for="fBrand">Brand</label><input id="fBrand" value="${v('brand')}" autocomplete="off"></div></div>
@@ -833,7 +829,7 @@ function openItemEditor(sku) {
     ${i ? (i.active ? `<button class="tbtn danger" data-act="archive" data-sku="${esc(i.sku)}">Archive</button>` : `<button class="btn" data-act="archive" data-sku="${esc(i.sku)}">Restore</button>`) : ''}`);
 }
 function saveItem(sku) {
-  const name = $('#fName').value.trim().replace(/\s+/g, ' '), cat = $('#fCat').value.trim() || 'General';
+  const name = $('#fName').value.trim().replace(/\s+/g, ' ');
   const price = $('#fPrice').value === '' ? null : Number($('#fPrice').value);
   const det = { mfr: $('#fMfr').value.trim(), brand: $('#fBrand').value.trim(), line: $('#fLine').value.trim(), chr: $('#fChr').value.trim(), rel: parseRel($('#fRel').value), relCheck: $('#fRelCheck').checked };
   if (!name) return toast('Give the product a name.');
@@ -843,7 +839,7 @@ function saveItem(sku) {
   if (clash) return toast(`“${clash.name}” already exists.`);
   if (sku) {
     const cur = live().map.get(sku), patch = {};
-    if (name !== cur.name) patch.name = name; if (cat !== catOf(cur)) patch.cat = cat;
+    if (name !== cur.name) patch.name = name;
     if (price !== cur.price) patch.price = price;
     ['mfr', 'brand', 'line', 'chr', 'rel'].forEach(k => { if (det[k] !== (cur[k] || '')) patch[k] = det[k]; });
     if (det.relCheck !== !!cur.relCheck) patch.relCheck = det.relCheck;
@@ -856,7 +852,7 @@ function saveItem(sku) {
     const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
     if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
     const costs = readCosts('f.c', start); if (!costs) return toast('Cost must be zero or more.');
-    qItem(Object.assign({ sku: nsku, name, cat, price, active: true }, det), nsku === $('#fSku').dataset.sug);
+    qItem(Object.assign({ sku: nsku, name, price, active: true }, det), nsku === $('#fSku').dataset.sug);
     qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs);
     closeSheet(); commit(); toast(`${name} added`);
   }
@@ -1331,7 +1327,7 @@ async function copyImg(id) {
 function splitLine(line) { const sep = ['\t', '|', ';'].find(x => line.includes(x)); return sep ? line.split(sep).map(s => s.trim()) : null; }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
-const DETAILS = [['cat', 'category'], ['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
+const DETAILS = [['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
 /** Reads the toy-detail columns of a pasted row into r. */
 function readDetails(r, mfr, brand, line, chr, rel, verify) {
   r.mfr = (mfr || '').trim(); r.brand = (brand || '').trim(); r.line = (line || '').trim(); r.chr = (chr || '').trim();
@@ -1350,14 +1346,14 @@ function detailPatch(it, r) {
 }
 const detailNames = p => DETAILS.filter(([k]) => k in p).map(d => d[1]).join(', ');
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
-const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
+const newItemFrom = r => ({ sku: nextSku(), name: r.name, price: r.price, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
 const unnamed = name => /^unidentified/i.test(String(name || '').trim());
-/** One Count row from its columns: Name, Category, Count, Price, Note, then the item details. */
+/** One Count row from its columns: Name, Count, Price, Note, then the product details, then the Cost each from the Inbox or Correct this row. */
 function countRow(c) {
-  const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), cost: parsePrice(c[11]), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
-  readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
+  const [name = '', cnt = '', price = '', note = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), count: null, price: parsePrice(price), cost: parsePrice(c[10]), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
   if (cnt.trim() === '' || cnt.trim() === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; return r; }
@@ -1369,7 +1365,7 @@ function countRow(c) {
 }
 /** The rows of a pasted block, each made from its columns by row(); a first line that head() takes for a header is left out. */
 const pasted = (text, head, row) => cleanLines(text).flatMap((line, idx) => { const c = splitLine(line); return !c ? [{ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }] : idx === 0 && head(c) ? [] : [row(c)]; });
-function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[2] || '').trim()), countRow); settleCount(rows); return rows; }
+function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[1] || '').trim()), countRow); settleCount(rows); return rows; }
 /** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
 const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
@@ -1394,11 +1390,11 @@ function settleCount(rows) {
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
-/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note, then the Price typed in Correct this row. */
+/** One Receive row from its columns: Name, Qty, Cost each, the product details, Note, then the Price typed in Correct this row. */
 function recvRow(c) {
-  const [name = '', q = '', cost = '', cat = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[11]), note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
-  readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
+  const [name = '', q = '', cost = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[10]), note: (c[9] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[3], c[4], c[5], c[6], c[7], c[8]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
   if (!/^\d+$/.test(q.trim()) || Number(q) < 1) { r.status = 'bad'; r.msg = `Quantity “${q}” must be a whole number, 1 or more.`; return r; }
@@ -1454,9 +1450,9 @@ function parseMoves(text) {
 }
 const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
 const IMP = {
-  count: { name: 'Count from photo', cols: 'Name⇥Category⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
+  count: { name: 'Count from photo', cols: 'Name⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
     hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Products missing from the paste are left alone.' },
-  receive: { name: 'Receive', cols: 'Name⇥Qty⇥Cost each⇥Category⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify⇥Note', parse: parseReceive,
+  receive: { name: 'Receive', cols: 'Name⇥Qty⇥Cost each⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify⇥Note', parse: parseReceive,
     hint: 'Send Claude a photo of the supplier’s invoice or packing list, then paste its answer here. Each row adds stock at its cost. A product with a supplier order on the way closes that order.' },
   moves: { name: 'Movements', cols: 'Date⇥Product⇥In/Out⇥Qty⇥Reason⇥Note', parse: parseMoves,
     hint: 'Paste rows of <b>date, product, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.' },
@@ -1489,7 +1485,7 @@ function inboxLoad() {
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
   ui.rdate = todayISO();
   ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
-    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
+    const cols = (mode === 'count' ? [g.name, g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
@@ -1498,9 +1494,9 @@ function inboxLoad() {
   return true;
 }
 // The columns of a Count and a Receive row by field (Count is the quantity in both). Receive has no Price column, so a typed price goes last.
-const ROW_COLS = { count: ['name', 'cat', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'cat', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
+const ROW_COLS = { count: ['name', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
 /** A row's columns with what was typed in Correct this row (src.fix holds only the fields changed there). */
-const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 12) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
+const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 11) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
 /** A review row from its source columns with the owner's correction and "Use" choice applied. */
 function impRow(mode, src) {
   const r = (mode === 'count' ? countRow : recvRow)(fixedCols(mode, src)), use = src.use && live().map.get(src.use);
@@ -1597,10 +1593,10 @@ function prowHtml(imp, i) {
     if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${costNote(r)}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
     else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
     else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
+    else if (r.status === 'new') detail = `New${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
   } else if (imp.mode === 'receive') {
     if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${costNote(r)}`;
+    else if (r.status === 'new') detail = `New · +${r.qty}${costNote(r)}`;
   } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
   const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
   const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
@@ -1622,7 +1618,7 @@ function openFix(i) {
     ${fld('name', 'Name')}
     ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
     ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
-    <div class="row2">${fld('cat', 'Category', ' placeholder="General"')}${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}</div>
+    ${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}
     <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
     <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
     ${fld('rel', 'Release date', ' placeholder="2024-07-15, 2024-07 or 2024"')}
@@ -1712,39 +1708,37 @@ function applyMoves(rows) {
 /** Reads the pasted block into the preview. */
 function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }
 function buildPrompt() {
-  const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${catOf(i)} | ${stockOf(i.sku)}`).join('\n') || '(empty: no products yet)';
+  const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${stockOf(i.sku)}`).join('\n') || '(empty: no products yet)';
   const details = `- Manufacturer, Brand, Product line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
 - Release date: your best guess, as YYYY-MM-DD, YYYY-MM or YYYY.
 - Verify: write Y when the release date needs checking (the product is a reissue, or the date is a guess). Leave it blank for a first issue you are confident about.
 - A variant (chase, exclusive colour, reissue) is a separate product with its own name. Never merge it into the regular release.`;
   if (ui.mode === 'receive') return `Read the attached supplier invoice or packing list and list every product on it.
 Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
-Name<TAB>Qty<TAB>Cost each<TAB>Category<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify<TAB>Note
+Name<TAB>Qty<TAB>Cost each<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify<TAB>Note
 
 Rules:
 - Name: the specific product name. When the product is already in the catalog below, reuse its exact name.
 - Qty: units received, as a whole number.
 - Cost each: the unit cost on the paperwork as a plain number. Divide a line total by the quantity when only the total is shown. Blank when not shown.
-- Category: reuse a catalog category when one fits.
 ${details}
 - Note: a short remark, blank when there is nothing to say.
 
-Catalog (Name | Category | In stock):
+Catalog (Name | In stock):
 ${cat}`;
   return `Read the attached photo (boxes, or the stockroom shelves) and list every product you can identify.
 Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
-Name<TAB>Category<TAB>Count<TAB>Price<TAB>Note<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify
+Name<TAB>Count<TAB>Price<TAB>Note<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify
 
 Rules:
 - Name: the specific product name as printed on the box. When the product is already in the catalog below, reuse its exact name.
-- Category: reuse a catalog category when one fits.
 - Count: units visible, as a whole number. Write ? when you cannot count reliably.
 - Price: leave blank unless the owner told you the selling price.
 - Note: a short remark such as "back row hidden, estimate" or "name guessed from artwork". Blank when there is nothing to say.
 ${details}
 - If the same product appears in several places, add the counts into one line.
 
-Catalog (Name | Category | In stock):
+Catalog (Name | In stock):
 ${cat}`;
 }
 
@@ -1806,7 +1800,6 @@ document.addEventListener('click', async ev => {
     case 'settings': openSettings(); break;
     case 'close': closeSheet(); break;
     case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; render(); break; }
-    case 'cat': ui.cat = d.c; renderStock(); break;
     case 'filter': ui.filter = d.f; renderStock(); break;
     case 'newItem': openItemEditor(null); break;
     case 'item': openItem(d.sku); break;
@@ -1858,7 +1851,7 @@ document.addEventListener('click', async ev => {
     case 'homeGo': {
       if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
       else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
-      else { ui.filter = d.to; ui.cat = 'All'; ui.q = ''; ui.tf = {}; go('stock'); }
+      else { ui.filter = d.to; ui.q = ''; ui.tf = {}; go('stock'); }
       break;
     }
     case 'sellNew': ui.sellSeg = 'new'; render(); window.scrollTo(0, 0); break;
@@ -1948,7 +1941,7 @@ document.addEventListener('click', async ev => {
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
     case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }

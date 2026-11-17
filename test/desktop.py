@@ -81,7 +81,6 @@ with sync_playwright() as pw:
                 {'type': 'Count', 'name': 'Delta Bust', 'qty': 3, 'cost': 250, 'mfr': 'Bandai', 'chr': 'Son Goku', 'rel': '2024-07-15'},
                 {'type': 'Count', 'name': 'Epsilon Statue', 'qty': 1, 'cost': 100, 'rel': '2023-12-31'}])
     p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update inventory · 4')"); tab(p, 'Update inventory'); apply(p, 'Apply 4 changes'); synced(p)
-    p.click('#stockList tbody tr:has-text("alpha Plush")'); p.click('button:has-text("Edit details")'); p.fill('#fCat', 'Plush'); p.click('#sheet button.primary:has-text("Save")')
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
     # Stock: a read-only table of every field; a header sorts and a second click reverses; a filter row under the header.
     tab(p, 'Inventory'); T = '[data-tbl="stock"]'; cols = heads('stock')
@@ -115,12 +114,12 @@ with sync_playwright() as pw:
         p.fill('#q', ''); return out
     opts = p.eval_on_selector('[data-tf="mfr"]', 'e => [...e.options].map(o => o.textContent)')
     check(opts == ['Any', 'Bandai', 'Sega'], f'a filter offers the values in use plus Any: {opts}')
-    for f, q, want in [({'cat': 'Plush'}, '', {'alpha Plush'}), ({'cat': 'General'}, 'goku', {'Grandista Son Goku', 'Delta Bust'}), ({'cat': 'Plush'}, 'goku', set()), ({'mfr': 'Bandai'}, '', {'alpha Plush', 'Delta Bust'}), ({'mfr': 'Bandai'}, 'delta', {'Delta Bust'}),
+    for f, q, want in [({'mfr': 'Bandai'}, '', {'alpha Plush', 'Delta Bust'}), ({'mfr': 'Bandai'}, 'delta', {'Delta Bust'}),
                        ({'brand': 'Banpresto'}, 'luffy', {'Maximatic Monkey D. Luffy'}), ({'line': 'Grandista'}, 'zoro', set()), ({'chr': 'Son Goku'}, 'bust', {'Delta Bust'}),
                        ({'from': '2024', 'to': '2024-07'}, '', {'alpha Plush', 'Beta Figure', 'Delta Bust'}), ({'from': '2024-07-15'}, '', {'Delta Bust'}), ({'to': '2023'}, '', {'Grandista Son Goku', 'Epsilon Statue'}), ({'from': '2024'}, 'beta', {'Beta Figure'})]:
         got = shown(f, q); check(got == want, f'filter {f} with search "{q}" shows {sorted(want)}: {sorted(got)}')
-    tf('cat', 'Plush'); p.fill('#q', 'goku')
-    check(p.inner_text(f'{T} tbody') == 'Nothing matches.' and p.input_value('[data-tf="cat"]') == 'Plush', 'when nothing matches, the filter row stays so the filter can be undone'); tf('cat', ''); p.fill('#q', '')
+    tf('mfr', 'Sega'); p.fill('#q', 'goku')
+    check(p.inner_text(f'{T} tbody') == 'Nothing matches.' and p.input_value('[data-tf="mfr"]') == 'Sega', 'when nothing matches, the filter row stays so the filter can be undone'); tf('mfr', ''); p.fill('#q', '')
     tab(p, 'Home'); p.click('#view [data-to="nocost"]'); a = set(names()); tf('brand', 'Banpresto'); b2 = set(names()); p.fill('#q', 'luffy'); c = set(names())
     check(a == {'Grandista Son Goku', 'Maximatic Monkey D. Luffy', 'Gigo Roronoa Zoro', 'Beta Figure'} and b2 == {'Grandista Son Goku', 'Maximatic Monkey D. Luffy'} and c == {'Maximatic Monkey D. Luffy'}, f'a Home shortcut, a column filter and the search combine: {a} {b2} {c}')
     tf('brand', ''); p.fill('#q', ''); p.click('#view button:has-text("Show all")')
