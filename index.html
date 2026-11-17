@@ -42,6 +42,7 @@ svg{flex:none;display:block}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;background:var(--bg);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:6}
 nav.tabs .in{display:flex;width:100%;max-width:720px}
 nav.tabs .brand{display:none}
+nav.tabs .navtog,nav.tabs .bd{display:none}
 nav.tabs button{flex:1;min-height:60px;border:0;border-top:2px solid transparent;margin-top:-1px;background:none;color:var(--muted);font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 nav.tabs button.on{color:var(--text);border-top-color:var(--text)}
 /* Buttons: a solid lower layer marks something to press; pressing moves the face down onto it. */
@@ -164,36 +165,54 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   nav.tabs .brand{display:block;font:400 28px/1 var(--display);letter-spacing:.02em;padding:6px 14px 22px}
   nav.tabs button{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;min-height:44px;padding:0 14px;border-top:0;margin:0;font-size:15px}
   nav.tabs button.on{font-weight:600}
+  nav.tabs .navtog{display:flex;align-items:center;justify-content:flex-start;min-height:36px;padding:0 14px;border:0;background:none;color:var(--muted)}
+  html[data-mini] .app{margin-left:64px}
+  html[data-mini] nav.tabs{width:64px;padding:18px 8px}
+  html[data-mini] nav.tabs .navtog{justify-content:center;padding:0}
+  html[data-mini] nav.tabs .brand,html[data-mini] nav.tabs .lb{display:none}
+  html[data-mini] nav.tabs #tabs button{position:relative;justify-content:center;padding:0}
+  html[data-mini] nav.tabs .bd{display:block;position:absolute;top:4px;right:4px;min-width:16px;padding:0 4px;border-radius:8px;background:var(--text);color:var(--bg);font-size:11px;line-height:16px;text-align:center}
   .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
-  /* Tables: hairline rows like the lists; the header stays in view, and a wide table scrolls sideways inside its own box. */
+  /* Tables: one style for every table. 13 px text, rows about 30 px, a fixed width per column kind (tableTag()), long text cut with an ellipsis;
+     the header stays in view, and a wide table scrolls sideways inside its own box. */
   .tbl{overflow:auto;max-height:calc(100dvh - 92px);border:1px solid var(--line)}
-  .sec>.tbl{border:0;margin-top:10px}
-  .tbl table{width:100%;border-collapse:separate;border-spacing:0}
+  .sec .tbl{border:0}.sec>.tbl{margin-top:10px}
+  .tbl table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px;line-height:18px}
   .tbl thead{position:sticky;top:0;z-index:1}
-  .tbl th,.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
-  .tbl th{background:var(--bg);font-size:13px;font-weight:500;color:var(--muted)}
+  .tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tbl th{background:var(--bg);font-weight:500;color:var(--muted);white-space:normal;line-height:16px;padding-top:8px;padding-bottom:8px}
   .tbl th[aria-sort]{color:var(--text)}
-  .tbl th button{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0;border:0;background:none;color:inherit;font:inherit}
-  .tbl th svg.up{transform:rotate(180deg)}
+  .tbl .th{display:flex;align-items:center;gap:2px}
+  .tbl th button{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit}
+  .tbl .sb{flex:1;min-width:0}
+  .tbl .sb svg{display:inline-block;vertical-align:-3px}   /* after a space, so it moves under a label that fills the column */
+  .tbl th:not([aria-sort]) .sb svg{display:none}
+  .tbl th[aria-sort="ascending"] .sb svg{transform:rotate(180deg)}
+  .tbl .tf{display:flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;color:var(--muted)}
+  .tbl .tf.on{color:var(--on-accent);background:var(--accent)}
   .tbl .n{text-align:right;font-variant-numeric:tabular-nums}
-  .tbl .w{white-space:normal;min-width:14em}
-  .tbl .st .tag{margin-left:0}
+  .tbl td .hint,.tbl td .tbtn,.tbl td.empty{font-size:13px}
+  .tbl td .tbtn{min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-weight:400}
+  .tbl td input[type=checkbox]{width:16px;height:16px;vertical-align:middle}
+  .tbl td input[data-rcost]{min-height:0;height:24px;margin:-3px 0;padding:0 6px;font-size:13px;text-align:right}
   .tbl tr.off td{color:var(--muted)}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
   .tbl tr:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
-  .tbl .filt th{padding:0 6px 8px}
-  .tbl .filt select,.tbl .filt input{min-height:40px;padding:0 8px}
-  .tbl .rng{display:flex;gap:6px}.tbl .rng input{width:6.5em}
+  /* A column filter: tick boxes, or a from and to date, under the header button that opened it. */
+  .pop{position:fixed;z-index:15;width:240px;max-height:min(440px,calc(100dvh - 140px));overflow:auto;padding:6px 12px 10px;background:var(--raise);border:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+  .pop[hidden]{display:none}
+  .pop .links{column-gap:16px}.pop .tbtn{min-height:32px;font-size:13px}
+  .pop .check{min-height:30px;gap:8px;font-size:13px;margin:0}.pop .check input{width:16px;height:16px}
+  .pop label{margin:6px 0 4px}.pop input:not([type=checkbox]){min-height:36px;font-size:13px}
   /* New sale: the customer in one row, the lines as a table, the total and the button at the right. */
   .frow{display:flex;gap:12px}.frow>div{flex:1;min-width:0}.frow>div:nth-child(3){flex:.8}.frow>div:nth-child(4){flex:1.5}
   .tbl.lines{max-height:none;container-type:inline-size}
-  .lines th,.lines td{padding:8px;vertical-align:middle}
-  .lines td:first-child{width:40%;min-width:260px}
-  .lines .picked{min-height:48px;padding:0 14px}.lines .picked .hint{display:none}
-  .lines input[type=number]{width:120px;text-align:right}
+  .lines td:first-child{white-space:normal}
+  .lines .picked{min-height:36px;padding:0 10px}.lines .picked .name{font-size:13px}.lines .picked .hint{display:none}
+  .lines input{min-height:36px;font-size:13px;padding:0 8px}.lines input[type=number]{text-align:right}
   .lines tr:has(+ .note) td{border-bottom:0}
-  .lines .note td{padding:0 8px 12px}
+  .lines .note td{padding:0 8px 12px;white-space:normal;overflow:visible}
   .lines .note td>*{position:sticky;left:8px;max-width:calc(100cqw - 16px)}   /* a notice stays in view while the lines scroll sideways */
   .send{align-self:flex-end;width:min(100%,400px);display:flex;flex-direction:column;gap:20px}
   .layer{align-items:center}
@@ -214,13 +233,14 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   </header>
   <main id="view"></main>
 </div>
-<nav class="tabs" aria-label="Main"><div class="in" id="tabs"></div></nav>
+<nav class="tabs" aria-label="Main"><button class="navtog" id="navTog" data-act="navMini" aria-controls="tabs"></button><div class="in" id="tabs"></div></nav>
 <div class="layer" id="layer" hidden><div class="scrim" data-act="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast" role="status"></div>
+<div class="pop" id="pop" role="dialog" hidden></div>
 
 <script>
 'use strict';
-const VERSION = '2.3.0';
+const VERSION = '2.4.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -276,9 +296,12 @@ const ICON = {
   activity: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><path d="M13 4v6h4V4zM7 14v6h4v-6z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
+  filter: '<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   minus: '<path d="M5 12h14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  sidebarShut: '<path d="M4 4h16v16H4zM9 4v16M16 9l-3 3 3 3"/>',
+  sidebarOpen: '<path d="M4 4h16v16H4zM9 4v16M13 9l3 3-3 3"/>',
 };
 const icon = (k, size = 20, cls = '') => `<svg aria-hidden="true" class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter">${ICON[k]}</svg>`;
 const CHEV = icon('chev', 18, 'chev'), DOWN = icon('chev', 16);
@@ -313,7 +336,7 @@ if (prefs.tab === 'move') prefs.tab = 'home';
 prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
-let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
+let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
   sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
@@ -375,18 +398,25 @@ function live() {
       }
     }
   }
+  // Unit SKUs as Code.gs writes them (see unit_()): a pending In of one unit shows the next number of its product until the sheet has it.
+  const nos = new Map();
+  all.forEach(m => {
+    if (m.dir !== 'In' || (m.q && m.q.status !== 'pending')) return;
+    const had = /-(\d+)$/.exec(m.unit || ''), n = nos.get(m.sku) || 0;
+    if (had) nos.set(m.sku, Math.max(n, +had[1]));
+    else { nos.set(m.sku, n + m.qty); if (m.q && m.qty === 1) m.unit = m.sku + '-' + (n + 1); }
+  });
   const incoming = new Map(), owed = new Map();
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  const cats = [...new Set(list.filter(i => i.active).map(catOf))].sort((a, b) => a.localeCompare(b));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
   const inbox = docs.inbox.filter(r => !handled.has(r.row));
-  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, cats, all, custs, orders, pres, invs, rets, inbox };
+  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, orders, pres, invs, rets, inbox };
   return _live;
 }
 /**
- * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost }, one per unit),
+ * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost, unit }, one per unit),
  * the deficit an Out could not take, and stock (units less deficit; one of the two is always zero). An In covers the
  * deficit first. An Out takes from the front, but a Correction that reverses an In takes that In's units first.
  */
@@ -395,7 +425,7 @@ function fifo(list) {
   list.forEach(m => {
     const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
     let n = m.qty;
-    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost }); }
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit }); }
     else {
       if (m.reason === 'Correction') s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
@@ -405,7 +435,6 @@ function fifo(list) {
   return by;
 }
 const onHand = sku => live().fifo.get(sku) || { units: [], deficit: 0, stock: 0 };
-const catOf = i => i.cat || 'General';
 const itemName = sku => (live().map.get(sku) || { name: sku }).name;
 const stockOf = sku => onHand(sku).stock;
 /** Cost of the units on hand: the sum of the known costs, and how many have none. */
@@ -478,8 +507,8 @@ const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.
 const entrySkus = q => skuRecs(q).map(o => o.sku);
 function describe(q) {
   switch (q.kind) {
-    case 'item': return `New item “${q.item.name}” (${q.item.sku})`;
-    case 'edit': return `Edit of ${q.sku}`;
+    case 'item': return `New product “${q.item.name}”`;
+    case 'edit': return `Edit of ${itemName(q.sku)}`;
     case 'cust': return `Customer “${q.cust.name}”`;
     case 'order': return `Supplier order for ${itemName(q.order.sku)}`;
     case 'receive': return 'Receiving a supplier order';
@@ -538,7 +567,7 @@ async function syncNow(manual) {
       queue = queue.filter(q => !(res.get(q.id) && res.get(q.id).ok));
       batch.forEach(b => { const q = queue.find(x => x.id === b.id); if (!q) return; const r = res.get(q.id); q.status = 'failed'; q.error = r ? r.error : 'The sheet did not answer for this entry'; });
       // Whatever is still queued for a toy the sheet refused must not be sent against another toy's SKU.
-      queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySkus(q).includes(f.item.sku)) { q.status = 'failed'; q.error = 'Its item was refused'; } }));
+      queue.filter(f => f.kind === 'item' && f.status === 'failed').forEach(f => queue.forEach(q => { if (q.status === 'pending' && q.kind !== 'item' && entrySkus(q).includes(f.item.sku)) { q.status = 'failed'; q.error = 'Its product was refused'; } }));
       applySnapshot(data.sync); saveQueue(); pushed = true;
     }
     if (!pushed) applySnapshot(await api('sync', { have: meta }));
@@ -591,27 +620,27 @@ function copyText(text) {
 const closeBtn = `<button class="icon" data-act="close" aria-label="Close">${icon('close', 22)}</button>`;
 const waitTag = d => (d.q ? '<span class="tag warn">waiting</span>' : d.w ? '<span class="tag warn">change waiting</span>' : '');
 
-/* ---------- item picker used by the Move screen and the invoice and supplier order forms ---------- */
+/* ---------- product picker used by the Move screen and the invoice and supplier order forms ---------- */
 function pickerHtml(k, sku) {
   const it = sku && live().map.get(sku);
   return it
     ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(pickSub(it.sku))}</div></div><button class="tbtn" data-act="pkClear" data-k="${k}">Change</button></div>`
-    : `<input type="search" data-pk="${k}" placeholder="Search by name or SKU" autocomplete="off" aria-label="Item"><div class="sug" data-sug="${k}"></div>`;
+    : `<input type="search" data-pk="${k}" placeholder="Search by name" autocomplete="off" aria-label="Product"><div class="sug" data-sug="${k}"></div>`;
 }
 function renderPk(k, text) {
   const box = $(`[data-sug="${k}"]`); if (!box) return;
   const n = norm(text); if (!n) { box.innerHTML = ''; return; }
-  const rows = live().list.filter(i => i.active && norm([i.name, i.sku, i.brand, i.line, i.chr].join(' ')).includes(n)).slice(0, 8);
-  box.innerHTML = rows.length ? rows.map(i => `<button data-act="pk" data-k="${k}" data-sku="${esc(i.sku)}"><b>${esc(i.name)}</b> <span class="hint">${esc(i.sku)} · ${stockOf(i.sku)} in stock</span></button>`).join('') : `<button disabled>No match. Add it from Stock with Add item.</button>`;
+  const rows = live().list.filter(i => i.active && norm([i.name, i.brand, i.line, i.chr].join(' ')).includes(n)).slice(0, 8);
+  box.innerHTML = rows.length ? rows.map(i => `<button data-act="pk" data-k="${k}" data-sku="${esc(i.sku)}"><b>${esc(i.name)}</b> <span class="hint">${stockOf(i.sku)} in stock</span></button>`).join('') : `<button disabled>No match. Add it from Inventory with Add product.</button>`;
 }
 function rerender() { if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn(); else render(); }
 const custList = () => `<datalist id="custList">${[...live().custs.values()].map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`;
 
 /* ---------- rendering ---------- */
-const TABS = [['home', 'Home'], ['stock', 'Stock'], ['sell', 'Sales'], ['orders', 'Orders']];
+const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Orders']];
 // Routes with no phone tab, and the tab that stays lit while they show.
 const ROUTE_TAB = { import: 'home', move: 'stock', activity: 'stock' };
-const TITLES = { home: 'Home', stock: 'Stock', sell: 'Sales', orders: 'Orders', import: 'Update stock', move: 'Stock in and out', activity: 'Activity' };
+const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Orders', import: 'Update inventory', move: 'Stock in and out', activity: 'Activity' };
 function pageTitle() {
   if (prefs.tab === 'home') return prefs.shop.name || APP_NAME;
   if (prefs.tab === 'sell' && !wide() && ui.sellSeg === 'new') return 'New sale';
@@ -627,32 +656,59 @@ function render() {
   $('#backBtn').setAttribute('aria-label', 'Close ' + pageTitle());
   view().className = 'v-' + prefs.tab;
   const lit = w ? prefs.tab : ROUTE_TAB[prefs.tab] || prefs.tab;
-  const tabs = w ? [...TABS, ['import', 'Update stock' + (waiting ? ' · ' + waiting : '')], ['activity', 'Activity']] : TABS;
-  $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}>${icon(k, 20)}${esc(n)}</button>`).join('');
+  const tabs = w ? [...TABS, ['import', 'Update inventory', waiting], ['activity', 'Activity']] : TABS;
+  document.documentElement.toggleAttribute('data-mini', w && !!prefs.navMini);
+  $('#navTog').innerHTML = icon(prefs.navMini ? 'sidebarOpen' : 'sidebarShut', 20);
+  $('#navTog').setAttribute('aria-label', prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'); $('#navTog').title = prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'; $('#navTog').setAttribute('aria-expanded', String(!prefs.navMini));
+  $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n, c]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}${w ? ` title="${esc(n)}" aria-label="${esc(n + (c ? ' · ' + c : ''))}"` : ''}>${icon(k, 20)}<span class="lb">${esc(n)}${c ? ' · ' + c : ''}</span>${c ? `<span class="bd">${c}</span>` : ''}</button>`).join('');
   keepScroll(({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]);
   if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn();
   renderSync();
 }
 const view = () => $('#view');
 const mqWide = matchMedia('(min-width: 900px)'), wide = () => mqWide.matches;
-mqWide.addEventListener('change', () => render());
+mqWide.addEventListener('change', () => { closePop(); render(); });
 /** A list row: title, one muted line, and on the right a chevron or the one number that matters. */
 const row = (title, sub, attrs, right) => `<button class="item" ${attrs}><div class="main"><div class="name">${title}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${right == null ? CHEV : right}</button>`;
 const sec = (title, inner, extra, cls) => `<section class="sec ${cls || ''}"><h2>${title}${extra || ''}</h2>${inner}</section>`;
 const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
 /**
- * A desktop table. cols are [header, sort value, cell html (default: the value as text), class ('n' numbers, 'w' wraps)];
- * a column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
+ * A desktop table. cols are [header, sort value, cell html (default: the value as text), kind, filter]. The kind ('tick', 'num', 'money',
+ * 'date', 'txt' (the default) or 'name') fixes the column's width (COL_W), numbers and money align right, and text cut short carries its
+ * full value as a title. A column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
  * text ignores case, numbers sort as numbers, ISO dates as text (2024, then 2024-07, then 2024-07-15), blanks last either way.
- * attrs(row) gives a row its data-act, so a click opens its sheet (only those rows take focus); head adds rows under the header; max caps the rows shown.
+ * filter names the column's filter in ui.tf; its header button opens openTf(). attrs(row) gives a row its data-act, so a click opens its sheet
+ * (only those rows take focus); max caps the rows shown. TBL keeps what each table was drawn from, so a sort or a filter redraws only its body.
  */
-function table(id, cols, rows, attrs, head, max) {
+const TBL = {};
+// Width in px per column kind; a 'name' column takes the room left (at least 200 px). No width depends on the rows shown.
+const COL_W = { tick: 36, num: 80, money: 112, date: 128, txt: 128, name: 0 };
+const isNum = k => k === 'num' || k === 'money';
+const tableTag = kinds => `<table style="min-width:${kinds.reduce((s, k) => s + (COL_W[k] || 200), 0)}px"><colgroup>${kinds.map(k => `<col${COL_W[k] ? ` style="width:${COL_W[k]}px"` : ''}>`).join('')}</colgroup>`;
+const plain = h => String(h).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();   // a cell's text, still escaped, for its title
+function table(id, cols, rows, attrs, max) {
+  TBL[id] = { cols, rows, attrs, max };
   const s = ui.sort[id];
-  if (s) { const v = cols[s.k][1]; rows = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
-  return `<div class="tbl" data-tbl="${id}"><table><thead><tr>${cols.map(([h, v, , c], k) => `<th class="${c || ''}" ${s && s.k === k ? `aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}>${v ? `<button data-act="sort" data-t="${id}" data-k="${k}">${h}${s && s.k === k ? icon('chev', 14, s.d > 0 ? 'up' : '') : ''}</button>` : h}</th>`).join('')}</tr>${head || ''}</thead>
-    <tbody>${rows.length ? rows.slice(0, max).map(r => { const a = attrs(r); return `<tr ${/data-act/.test(a) ? 'tabindex="0" ' : ''}${a}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
+  return `<div class="tbl" data-tbl="${id}">${tableTag(cols.map(c => c[3] || 'txt'))}<thead><tr>${cols.map(([h, v, , k, f], j) => `<th${isNum(k) ? ' class="n"' : ''}${s && s.k === j ? ` aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}><div class="th">${v ? `<button class="sb" data-act="sort" data-t="${id}" data-k="${j}">${h} ${icon('chev', 14)}</button>` : h}${f ? `<button class="tf${tfOn(f) ? ' on' : ''}" data-act="tfOpen" data-k="${f}" aria-label="Filter ${h}">${icon('filter', 14)}</button>` : ''}</div></th>`).join('')}</tr></thead>
+    <tbody>${tableBody(id)}</tbody></table></div>`;
 }
-/** Rebuilds part of the page while every table keeps its scroll position (a sort, a filter or a sync must not jump it back). */
+function tableBody(id) {
+  const { cols, rows, attrs, max } = TBL[id], s = ui.sort[id];
+  let list = rows;
+  if (s) { const v = cols[s.k][1]; list = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
+  if (!list.length) return `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`;
+  return list.slice(0, max).map(r => { const a = attrs(r); return `<tr ${/data-act/.test(a) ? 'tabindex="0" ' : ''}${a}>${cols.map(([, v, html, k]) => {
+    const h = html ? html(r) : esc(v(r)), t = isNum(k) || k === 'tick' ? '' : plain(h);
+    return `<td${isNum(k) ? ' class="n"' : ''}${t ? ` title="${t}"` : ''}>${h}</td>`; }).join('')}</tr>`; }).join('');
+}
+/** Draws a table's body again after a sort or a filter and marks the sorted header; the header, the widths and an open filter stay as they are. */
+function redrawTable(id) {
+  const e = $(`[data-tbl="${id}"]`), s = ui.sort[id]; if (!e || !TBL[id]) return;
+  e.querySelector('tbody').innerHTML = tableBody(id);
+  e.querySelectorAll('thead th').forEach((th, k) => { if (s && s.k === k) th.setAttribute('aria-sort', s.d > 0 ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort'); });
+  e.querySelectorAll('.tf').forEach(b => b.classList.toggle('on', tfOn(b.dataset.k)));
+}
+/** Rebuilds part of the page while every table keeps its scroll position (a sync must not jump it back). */
 function keepScroll(fn) { const at = [...document.querySelectorAll('[data-tbl]')].map(e => [e.dataset.tbl, e.scrollLeft, e.scrollTop]); fn(); at.forEach(([id, l, t]) => { const e = $(`[data-tbl="${id}"]`); if (e) { e.scrollLeft = l; e.scrollTop = t; } }); }
 const relCell = x => esc(x.rel) + (x.rel && x.relCheck ? '<span class="tag warn">to verify</span>' : '');
 
@@ -668,29 +724,29 @@ function needsRows() {
   const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
-  if (ready.length >= 4) out.push(row(`Ship ${ready.length} pre-orders now in stock`, 'The items have arrived', 'data-act="homeGo" data-to="pre"'));
+  if (ready.length >= 4) out.push(row(`Ship ${ready.length} pre-orders now in stock`, 'The products have arrived', 'data-act="homeGo" data-to="pre"'));
   else {
     // One row per customer, oldest first; a second ready pre-order for the same customer shows after the first is invoiced.
     const by = new Map(); ready.forEach(p => { const k = p.custId || p.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(p); });
     by.forEach(ps => { const p = ps[0]; out.push(row(`Ship ${esc(p.cust)}’s pre-order`, `${esc(p.name)} × ${p.qty}${p.balance > 0 ? ' · balance ' + money(p.balance) : ''}${ps.length > 1 ? ' · ' + (ps.length - 1) + ' more ready' : ''}`, `data-act="fulfil" data-id="${esc(p.id)}"`)); });
   }
   if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="tab" data-t="import"'));
-  if (short.length) out.push(row(`Order stock for ${plural(short.length, 'item')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
+  if (short.length) out.push(row(`Order stock for ${plural(short.length, 'product')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
   if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
   if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, p) => s + p.balance, 0)))} on ${plural(owing.length, 'pre-order')}`, 'Balances still open', 'data-act="homeGo" data-to="pre"'));
-  if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'item')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
+  if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'product')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
   if (nocost) out.push(row(`Add the cost of ${plural(nocost, 'unit')}`, 'Without it, the margin on a sale stays unknown', 'data-act="homeGo" data-to="nocost"'));
   if (verify.length) out.push(row(`Check ${plural(verify.length, 'release date')}`, 'Best guesses still to confirm', 'data-act="homeGo" data-to="verify"'));
   return out;
 }
 function renderHome() {
   const L = live(), today = todayISO(), month = today.slice(0, 7), act = L.list.filter(i => i.active), waiting = L.inbox.length;
-  const upd = 'Update stock' + (waiting ? ' · ' + waiting : '');
+  const upd = 'Update inventory' + (waiting ? ' · ' + waiting : '');
   const sales = L.invs.filter(v => v.type === SALE), tS = sales.filter(v => v.date === today), mS = sales.filter(v => v.date.slice(0, 7) === month);
   const sum = list => Math.round(list.reduce((s, v) => s + v.total, 0));
   let margin = 0, known = true, some = false; mS.forEach(v => v.lines.forEach(l => { if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } }));
   const refunds = r2(L.rets.filter(r => r.date.slice(0, 7) === month).reduce((s, r) => s + (r.refund || 0), 0));
-  const say = [known ? '' : some ? '* Leaves out items sold with no cost on file.' : 'No margin yet: the items sold have no cost on file.', refunds ? money(refunds) + ' refunded this month.' : ''].filter(Boolean).join(' ');
+  const say = [known ? '' : some ? '* Leaves out products sold with no cost on file.' : 'No margin yet: the products sold have no cost on file.', refunds ? money(refunds) + ' refunded this month.' : ''].filter(Boolean).join(' ');
   const rows = needsRows(), cap = !wide() && rows.length > 5 && !ui.homeMore;
   const needs = sec('Needs you', rows.length
     ? `<div class="list">${(cap ? rows.slice(0, 4) : rows).join('')}</div>${!wide() && rows.length > 5 ? `<button class="more ${cap ? '' : 'up'}" data-act="homeMore">${cap ? 'See ' + (rows.length - 4) + ' more' : 'See less'}${DOWN}</button>` : ''}`
@@ -703,58 +759,75 @@ function renderHome() {
     </div><div>${needs}</div></div>`;
 }
 
-/* Stock */
+/* Inventory */
 function renderStock() {
   const L = live(), act = L.list.filter(i => i.active);
   let units = 0, value = 0;
   act.forEach(i => { const n = Math.max(stockOf(i.sku), 0); units += n; if (i.price != null) value += n * i.price; });
   if (!L.list.length) {
-    view().innerHTML = `<div class="empty"><h3>No items yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Update stock.</p>
-      <div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`;
+    view().innerHTML = `<div class="empty"><h3>No products yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Update inventory.</p>
+      <div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="tab" data-t="import">Update inventory</button></div></div>`;
     return;
   }
   view().innerHTML = `
-    <div><label for="q">Search</label><div style="display:flex;gap:12px;align-items:flex-start"><input id="q" type="search" placeholder="Name, brand, character or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn sm" data-act="newItem">Add item</button></div></div>
+    <div><label for="q">Search</label><div style="display:flex;gap:12px;align-items:flex-start"><input id="q" type="search" placeholder="Name, brand or character" value="${esc(ui.q)}" autocomplete="off"><button class="btn sm" data-act="newItem">Add product</button></div></div>
     <div class="stack">
     <div class="seg">${[['all', 'All'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
-    ${L.cats.length > 1 && !wide() ? `<div class="seg" aria-label="Category">${['All', ...L.cats].map(c => `<button class="${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${c === 'All' ? 'Every category' : esc(c)}</button>`).join('')}</div>` : ''}
-    <div class="links"><p class="hint" style="flex:1">${STOCK_FILTERS[ui.filter] ? 'Showing only: ' + STOCK_FILTERS[ui.filter] : `${plural(act.length, 'item')} · ${plural(units, 'unit')}${value ? ' · ' + money(Math.round(value)) + ' at retail' : ''}`}</p>${STOCK_FILTERS[ui.filter] ? '<button class="tbtn" data-act="filter" data-f="all">Show all</button>' : ''}<button class="tbtn" data-act="tab" data-t="activity">Activity</button></div>
+    <div class="links"><p class="hint" style="flex:1">${STOCK_FILTERS[ui.filter] ? 'Showing only: ' + STOCK_FILTERS[ui.filter] : `${plural(act.length, 'product')} · ${plural(units, 'unit')}${value ? ' · ' + money(Math.round(value)) + ' at retail' : ''}`}</p>${STOCK_FILTERS[ui.filter] ? '<button class="tbtn" data-act="filter" data-f="all">Show all</button>' : ''}<button class="tbtn" data-act="tab" data-t="activity">Activity</button></div>
     <div id="stockList"></div></div>`;
   renderStockList();
 }
+const stockScope = () => live().list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
 function renderStockList() {
-  const L = live(), q = norm(ui.q), w = wide();
-  let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
-  const scope = rows;
-  if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
-  if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
+  const q = norm(ui.q), w = wide();
+  let rows = stockScope();
+  if (q) rows = rows.filter(i => norm([i.name, i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (STOCK_TEST[ui.filter]) rows = rows.filter(STOCK_TEST[ui.filter]);
   const box = $('#stockList'); if (!box) return;
-  if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
+  if (w) {
+    const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to);
+    rows = rows.filter(i => TF_KEYS.every(k => !tfOn(k) || ui.tf[k].includes(i[k] || '')) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t)));
+    // A search or a column filter redraws only the rows: the header, the widths and an open filter stay put.
+    if (box.querySelector('[data-tbl="stock"]')) { TBL.stock.rows = rows.map(stockRow); redrawTable('stock'); }
+    else box.innerHTML = stockTable(rows) + '<p class="hint" id="stockMore"></p>';
+    $('#stockMore').textContent = rows.length > 400 ? 'Showing the first 400. Search to narrow down.' : '';
+    return;
+  }
   const more = rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : '';
-  // The table keeps its filter row when nothing matches, so a filter can be undone.
-  if (w) return keepScroll(() => { box.innerHTML = stockTable(rows, scope) + more; });
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
     const s = status(i), n = nums(i.sku);
-    return row(esc(i.name), `${esc(catOf(i))} · ${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
+    return row(esc(i.name), `${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
   }).join('')}</div>${more}`;
 }
-/** Stock on desktop: every field of an item, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
-function stockTable(list, scope) {
-  const rows = list.map(i => ({ i, n: nums(i.sku), c: onHand(i.sku).units.map(x => x.cost).filter(x => x != null), v: stockCost(i.sku).value }));
-  const pick = (k, get, label) => { const v = k === 'cat' ? (ui.cat === 'All' ? '' : ui.cat) : ui.tf[k] || '';
-    return `<th><select data-tf="${k}" aria-label="${label}"><option value="">Any</option>${[...new Set(scope.map(get).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></th>`; };
-  const rel = (k, ph) => `<input data-tf="${k}" value="${esc(ui.tf[k] || '')}" placeholder="${ph}" aria-label="Release date ${ph.toLowerCase()}" autocomplete="off">`;
-  const filt = `<tr class="filt"><th></th><th></th>${pick('cat', catOf, 'Category')}${[['mfr', 'Manufacturer'], ['brand', 'Brand'], ['line', 'Product line'], ['chr', 'Character']].map(([k, l]) => pick(k, i => i[k], l)).join('')}<th><div class="rng">${rel('from', 'From')}${rel('to', 'To')}</div></th>${'<th></th>'.repeat(7)}</tr>`;
-  return table('stock', [['Name', r => r.i.name, null, 'w'], ['SKU', r => r.i.sku], ['Category', r => catOf(r.i)], ['Manufacturer', r => r.i.mfr], ['Brand', r => r.i.brand], ['Product line', r => r.i.line], ['Character', r => r.i.chr],
-    ['Release date', r => r.i.rel, r => relCell(r.i)], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'n'],
-    ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'n'], ['Incoming', r => r.n.inc, null, 'n'], ['Owed', r => r.n.owed, null, 'n'],
-    [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'n'],
-    ['Unit cost', r => r.c.length ? Math.min(...r.c) : null, r => r.c.length ? esc(prefs.cur + costsText(r.c)) : '–', 'n'],
-    ['Stock cost', r => r.c.length ? r.v : null, r => r.c.length ? money(r.v) : '–', 'n']],
-    rows, r => `data-act="item" data-sku="${esc(r.i.sku)}"`, filt, 400);
+const stockRow = i => ({ i, n: nums(i.sku), c: onHand(i.sku).units.map(x => x.cost).filter(x => x != null), v: stockCost(i.sku).value });
+/** Inventory on desktop: every field of a product, sortable, for reading only. Manufacturer, Brand, Product line, Character and Release date filter from their headers. */
+function stockTable(list) {
+  return table('stock', [['Name', r => r.i.name, null, 'name'], ['Manufacturer', r => r.i.mfr, null, 'txt', 'mfr'], ['Brand', r => r.i.brand, null, 'txt', 'brand'], ['Product line', r => r.i.line, null, 'txt', 'line'], ['Character', r => r.i.chr, null, 'txt', 'chr'],
+    ['Release date', r => r.i.rel, r => relCell(r.i), 'date', 'rel'], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'money'],
+    ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'num'], ['Incoming', r => r.n.inc, null, 'num'], ['Owed', r => r.n.owed, null, 'num'],
+    [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'num'],
+    ['Unit cost', r => r.c.length ? Math.min(...r.c) : null, r => r.c.length ? esc(prefs.cur + costsText(r.c)) : '–', 'money'],
+    ['Stock cost', r => r.c.length ? r.v : null, r => r.c.length ? money(r.v) : '–', 'money']],
+    list.map(stockRow), r => `data-act="item" data-sku="${esc(r.i.sku)}"`, 400);
 }
+/* The Inventory column filters (desktop): ui.tf.mfr, brand, line and chr hold the ticked values, and none ticked means no filter; ui.tf.from and to bound the release date. */
+const TF_KEYS = ['mfr', 'brand', 'line', 'chr'];
+const tfOn = k => k === 'rel' ? !!(ui.tf.from || ui.tf.to) : !!(ui.tf[k] && ui.tf[k].length);
+const tfValues = k => [...new Set(stockScope().map(i => i[k] || ''))].sort((a, b) => !a - !b || a.localeCompare(b, undefined, { sensitivity: 'base' }));   // blank last
+/** Opens a column's filter under its header button. It stays open while ticking and closes on a click elsewhere or Escape; each change redraws only the rows. */
+function openTf(btn) {
+  const pop = $('#pop'), k = btn.dataset.k, on = ui.tf[k] || [];
+  if (!pop.hidden && pop.dataset.k === k) return closePop();
+  pop.innerHTML = k === 'rel'
+    ? `<div><label for="tfFrom">From</label><input id="tfFrom" data-tf="from" value="${esc(ui.tf.from || '')}" placeholder="2024, 2024-07 or 2024-07-15" autocomplete="off"></div><div><label for="tfTo">To</label><input id="tfTo" data-tf="to" value="${esc(ui.tf.to || '')}" placeholder="2024, 2024-07 or 2024-07-15" autocomplete="off"></div>`
+    : `<div class="links"><button class="tbtn" data-act="tfAll" data-k="${k}">All</button><button class="tbtn" data-act="tfAll" data-k="${k}" data-none="1">None</button></div>
+      ${tfValues(k).map(v => `<label class="check"><input type="checkbox" data-tfv="${k}" value="${esc(v)}" ${on.includes(v) ? 'checked' : ''}>${v ? esc(v) : '<span class="hint">Blank</span>'}</label>`).join('')}`;
+  const r = btn.getBoundingClientRect();
+  Object.assign(pop.style, { left: Math.min(r.left, innerWidth - 256) + 'px', top: r.bottom + 4 + 'px' });
+  pop.setAttribute('aria-label', btn.getAttribute('aria-label')); pop.dataset.k = k; pop.hidden = false;
+}
+const closePop = () => { $('#pop').hidden = true; };
 function openItem(sku) {
   const L = live(), i = L.map.get(sku); if (!i) return;
   const n = nums(sku), s = status(i), u = onHand(sku), c = stockCost(sku);
@@ -763,7 +836,7 @@ function openItem(sku) {
   const said = s === 'out' ? 'Out of stock.' : s === 'neg' ? 'Below zero: run a count.' : '';
   openSheet(`
     <div class="top"><h2>${esc(i.name)}</h2>${closeBtn}</div>
-    <p class="hint">${esc(catOf(i))} · SKU ${esc(i.sku)} · ${i.price != null ? money(i.price) : 'no price yet'}${i.active ? '' : ' · archived'}</p>
+    <p class="hint">${i.price != null ? money(i.price) : 'no price yet'}${i.active ? '' : ' · archived'}</p>
     ${sec('Units', `<div class="strip"><span class="cell ${s}"><small>On hand</small><b class="onhand">${n.have}</b></span><span class="cell"><small>Incoming</small><b>${n.inc}</b></span><span class="cell"><small>Owed</small><b>${n.owed}</b></span><span class="cell ${n.ltp < 0 ? 'neg' : ''}"><small>Left to promise</small><b>${n.ltp}</b></span></div>`)}
     <p class="hint">${LTP_TEXT}</p>
     ${said ? `<p class="hint">${said}</p>` : ''}
@@ -772,7 +845,7 @@ function openItem(sku) {
     <button class="tbtn" data-act="editItem" data-sku="${esc(sku)}">Edit details</button>
     ${det.length || i.rel ? `<dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}</dl>` : ''}
     ${sec('Units on hand', u.deficit ? `<p class="hint" style="padding:22px 14px 14px">Below zero by ${u.deficit}. Units that arrive next cover this first.</p>`
-      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
+      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${x.unit ? esc(x.unit) + ' · ' : ''}${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
       : '<p class="hint" style="padding:22px 14px 14px">None on hand.</p>')}
     ${u.units.length ? `<p class="hint">${[c.none < u.units.length ? 'Cost of stock on hand ' + money(c.value) + '.' : '', c.none ? (c.none === 1 ? '1 unit has' : c.none + ' units have') + ' no cost yet.' : ''].filter(Boolean).join(' ')}</p>` : ''}
     ${sec('Recent movements', recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div>` : '<p class="hint" style="padding:22px 14px 14px">None yet.</p>')}
@@ -802,7 +875,7 @@ function readCosts(path, n) {
   return out.some(x => x != null && (isNaN(x) || x < 0)) ? undefined : out;
 }
 
-/** A cost changed on the item sheet: one cost entry for that unit's In movement, the last one typed winning. */
+/** A cost changed on the product sheet: one cost entry for that unit's In movement, the last one typed winning. */
 function setUnitCost(moveId, val) {
   const cost = val.trim() === '' ? null : Number(val), m = live().all.find(x => x.id === moveId);
   if (cost != null && (isNaN(cost) || cost < 0)) { toast('Cost must be zero or more.'); return rerender(); }
@@ -810,53 +883,47 @@ function setUnitCost(moveId, val) {
   qLast('cost', 'moveId', { moveId, cost }); commit(); toast('Saved');
 }
 
-/* Item editor */
+/* Product editor */
 function openItemEditor(sku) {
   const i = sku ? live().map.get(sku) : null, v = k => esc(i && i[k] ? i[k] : '');
   if (!i) ui.f = { c: newCosts() };
   openSheet(`
-    <div class="top"><h2>${i ? 'Edit item' : 'New item'}</h2>${closeBtn}</div>
+    <div class="top"><h2>${i ? 'Edit product' : 'New product'}</h2>${closeBtn}</div>
     <div><label for="fName">Name</label><input id="fName" value="${v('name')}" autocomplete="off"></div>
-    <div class="row2"><div><label for="fCat">Category</label><input id="fCat" list="catList" value="${esc(i ? catOf(i) : '')}" placeholder="General" autocomplete="off"><datalist id="catList">${live().cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
-      <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div></div>
+    <div><label for="fPrice">Price (${esc(prefs.cur)})</label><input id="fPrice" type="number" inputmode="decimal" min="0" step="any" value="${i && i.price != null ? i.price : ''}"></div>
     ${i ? '' : `<div><label for="fStart">Starting stock</label><input id="fStart" type="number" inputmode="numeric" min="0" step="1" value="0" data-units="f.c"></div>${costFields('f.c', 0)}`}
-    <details ${i && (i.mfr || i.brand || i.line || i.chr || i.rel) ? 'open' : ''}>${summary('Item details')}<div class="stack">
+    <details ${i && (i.mfr || i.brand || i.line || i.chr || i.rel) ? 'open' : ''}>${summary('Product details')}<div class="stack">
       <div class="row2"><div><label for="fMfr">Manufacturer</label><input id="fMfr" value="${v('mfr')}" autocomplete="off"></div><div><label for="fBrand">Brand</label><input id="fBrand" value="${v('brand')}" autocomplete="off"></div></div>
       <div class="row2"><div><label for="fLine">Product line</label><input id="fLine" value="${v('line')}" autocomplete="off"></div><div><label for="fChr">Character</label><input id="fChr" value="${v('chr')}" autocomplete="off"></div></div>
       <div><label for="fRel">Release date</label><input id="fRel" value="${v('rel')}" placeholder="2024-07-15, 2024-07 or 2024" autocomplete="off"></div>
       <label class="check"><input id="fRelCheck" type="checkbox" ${i && i.relCheck ? 'checked' : ''}> Release date still needs checking</label>
     </div></details>
-    <details>${summary('SKU')}<div class="stack">
-      <div><label for="fSku">SKU or barcode</label><input id="fSku" value="${esc(i ? i.sku : nextSku())}" data-sug="${esc(i ? '' : nextSku())}" ${i ? 'disabled' : ''} autocomplete="off"></div>
-    </div></details>
     <button class="btn primary big" data-act="saveItem" ${i ? `data-sku="${esc(i.sku)}"` : ''}>Save</button>
     ${i ? (i.active ? `<button class="tbtn danger" data-act="archive" data-sku="${esc(i.sku)}">Archive</button>` : `<button class="btn" data-act="archive" data-sku="${esc(i.sku)}">Restore</button>`) : ''}`);
 }
 function saveItem(sku) {
-  const name = $('#fName').value.trim().replace(/\s+/g, ' '), cat = $('#fCat').value.trim() || 'General';
+  const name = $('#fName').value.trim().replace(/\s+/g, ' ');
   const price = $('#fPrice').value === '' ? null : Number($('#fPrice').value);
   const det = { mfr: $('#fMfr').value.trim(), brand: $('#fBrand').value.trim(), line: $('#fLine').value.trim(), chr: $('#fChr').value.trim(), rel: parseRel($('#fRel').value), relCheck: $('#fRelCheck').checked };
-  if (!name) return toast('Give the item a name.');
+  if (!name) return toast('Give the product a name.');
   if (price != null && (isNaN(price) || price < 0)) return toast('Price must be zero or more.');
   if (det.rel == null) return toast('Release date should look like 2024-07-15, 2024-07 or 2024.');
   const clash = live().list.find(x => norm(x.name) === norm(name) && x.sku !== sku);
   if (clash) return toast(`“${clash.name}” already exists.`);
   if (sku) {
     const cur = live().map.get(sku), patch = {};
-    if (name !== cur.name) patch.name = name; if (cat !== catOf(cur)) patch.cat = cat;
+    if (name !== cur.name) patch.name = name;
     if (price !== cur.price) patch.price = price;
     ['mfr', 'brand', 'line', 'chr', 'rel'].forEach(k => { if (det[k] !== (cur[k] || '')) patch[k] = det[k]; });
     if (det.relCheck !== !!cur.relCheck) patch.relCheck = det.relCheck;
     if (Object.keys(patch).length) qEdit(sku, patch);
     closeSheet(); commit(); toast('Saved');
   } else {
-    const nsku = $('#fSku').value.trim();
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(nsku)) return toast('SKU can use letters, digits, dots, dashes and underscores.');
-    if (live().map.has(nsku)) return toast('That SKU is already used.');
     const start = $('#fStart') && $('#fStart').value !== '' ? Number($('#fStart').value) : 0;
     if (!Number.isInteger(start) || start < 0) return toast('Starting stock must be a whole number.');
     const costs = readCosts('f.c', start); if (!costs) return toast('Cost must be zero or more.');
-    qItem(Object.assign({ sku: nsku, name, cat, price, active: true }, det), nsku === $('#fSku').dataset.sug);
+    const nsku = nextSku();   // the Product ID is never shown; the sheet renumbers it if another phone took it
+    qItem(Object.assign({ sku: nsku, name, price, active: true }, det), true);
     qIns({ id: 'm' + uid(), date: todayISO(), sku: nsku, dir: 'In', reason: 'Opening', ref: '', note: '' }, costs);
     closeSheet(); commit(); toast(`${name} added`);
   }
@@ -867,7 +934,7 @@ const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason:
 function renderMove() {
   const m = ui.mv || (ui.mv = newMv());
   view().innerHTML = `
-    <div><div class="lbl">Item</div>${pickerHtml('mv', m.sku)}</div>
+    <div><div class="lbl">Product</div>${pickerHtml('mv', m.sku)}</div>
     <div class="seg"><button class="${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In: stock arrives</button><button class="${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out: stock leaves</button></div>
     <div class="row2">
       <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}" data-units="mv.c"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
@@ -889,7 +956,7 @@ function updateMvHint() {
 }
 function saveMove() {
   const m = ui.mv, it = m.sku && live().map.get(m.sku);
-  if (!it) return toast('Pick an item first.');
+  if (!it) return toast('Pick a product first.');
   const qty = Number(m.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   const date = parseDate(m.date); if (!date) return toast('Check the date.');
   const costs = m.dir === 'In' ? readCosts('mv.c', qty) : []; if (!costs) return toast('Cost must be zero or more.');
@@ -928,9 +995,9 @@ function renderActList() {
   rows.sort(cmpMove);
   if (!rows.length) { box.innerHTML = `<p class="empty">No movements yet.</p>`; return; }
   const older = rows.length > ui.aN ? `<button class="btn" data-act="more">Show ${rows.length - ui.aN} older</button>` : '';
-  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date))], ['Item', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'w'],
-    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'n'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'n'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'w']],
-    rows, m => `data-act="move" data-id="${esc(m.id)}"`, '', ui.aN) + older; return; }
+  if (wide()) { box.innerHTML = table('moves', [['Date', m => m.date, m => esc(fmtDay(m.date)), 'date'], ['Product', m => itemName(m.sku), m => esc(itemName(m.sku)) + moveTag(m), 'name'],
+    ['Reason', m => m.reason], ['In or Out', m => m.dir], ['Qty', m => m.qty, null, 'num'], ['Cost', m => m.cost, m => m.cost == null ? '' : money(m.cost), 'money'], ['Ref', m => m.ref], ['Note', m => m.note, null, 'name']],
+    rows, m => `data-act="move" data-id="${esc(m.id)}"`, ui.aN) + older; return; }
   const shown = rows.slice(0, ui.aN); let out = '', day = '';
   shown.forEach(m => { if (m.date !== day) { if (day) out += '</div></section>'; day = m.date; out += `<section class="sec"><h2>${esc(fmtDay(day))}</h2><div class="list">`; } out += moveRow(m); });
   box.innerHTML = out + '</div></section>' + older;
@@ -941,7 +1008,7 @@ function openMove(id) {
   const reversed = live().all.some(x => x.ref === m.id && x.reason === 'Correction');
   openSheet(`
     <div class="top"><h2>${signed(m.dir, m.qty)} ${esc(itemName(m.sku))}</h2>${closeBtn}</div>
-    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd><dt>SKU</dt><dd>${esc(m.sku)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
+    <dl class="kv"><dt>Date</dt><dd>${esc(m.date)}</dd><dt>Direction</dt><dd>${m.dir}</dd><dt>Reason</dt><dd>${esc(m.reason)}</dd>${m.cost != null ? `<dt>Cost each</dt><dd>${money(m.cost)}</dd>` : ''}${m.note ? `<dt>Note</dt><dd>${esc(m.note)}</dd>` : ''}${m.ref ? `<dt>${m.reason === 'Correction' ? 'Corrects' : m.reason === 'Sale' ? 'Invoice' : 'Ref'}</dt><dd>${esc(m.ref)}</dd>` : ''}<dt>Status</dt><dd>${q ? (q.status === 'failed' ? 'Refused by the sheet: ' + esc(q.error || 'unknown reason') : 'Waiting to sync') : 'In the sheet'}</dd></dl>
     ${own
       ? `${q.status === 'failed' ? `<button class="btn primary big" data-act="retryOne" data-qid="${esc(q.id)}">Retry</button>` : ''}<button class="tbtn danger" data-act="dropQ" data-qid="${esc(q.id)}">Delete</button>`
       : q ? '' : `<button class="btn big" data-act="reverse" data-id="${esc(m.id)}" ${reversed ? 'disabled' : ''}>${reversed ? 'Already reversed' : 'Reverse this movement'}</button>`}
@@ -976,23 +1043,23 @@ const noCost = l => onHand(l.sku).units.slice(0, lineQty(l)).filter(u => u.cost 
 function invBalance() { const t = invTotal(), p = ui.inv.paid === '' ? t : Number(ui.inv.paid); return Math.max(0, r2(t - (isNaN(p) ? 0 : p))); }
 function invHint() {
   const L = live(), ls = ui.inv.lines.filter(l => l.sku && L.map.get(l.sku));
-  if (!ls.length) return 'Pick an item, then type the customer’s name.';
+  if (!ls.length) return 'Pick a product, then type the customer’s name.';
   const units = ls.reduce((s, l) => s + lineQty(l), 0);
-  return `Takes ${ls.length === 1 ? units + ' ' + L.map.get(ls[0].sku).name : plural(units, 'unit') + ' of ' + ls.length + ' items'} out of stock and opens the invoice.`;
+  return `Takes ${ls.length === 1 ? units + ' ' + L.map.get(ls[0].sku).name : plural(units, 'unit') + ' of ' + ls.length + ' products'} out of stock and opens the invoice.`;
 }
 function renderSell() {
-  const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
+  const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or product" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
   // Desktop: New sale across the page, the invoice list under it. Phone: the list, or the New sale form in its place.
   view().innerHTML = wide() ? `<section class="sec pad"><h2>New sale</h2>${form}</section>${list}` : ui.sellSeg === 'new' ? form : `<button class="btn primary big" data-act="sellNew">New sale</button>${list}`;
   renderInvForm(); renderInvList();   // each draws only into its own box, if the page has it
 }
 function invNotice(l, several) {
   const it = live().map.get(l.sku), have = Math.max(stockOf(l.sku), 0), free = freeOf(l.sku);
-  const t = several ? `${esc(it.name)} is not in stock. A pre-order holds one item: remove the other items to save it as a pre-order, or sell it now.`
+  const t = several ? `${esc(it.name)} is not in stock. A pre-order holds one product: remove the other products to save it as a pre-order, or sell it now.`
     : have <= 0 ? 'Not in stock, so this is saved as a pre-order'
     : free <= 0 ? `The ${have} on hand ${have === 1 ? 'is' : 'are'} owed to earlier pre-orders, so this is saved as a pre-order`
     : `Only ${free} ${free === 1 ? 'is' : 'are'} free to sell, so this is saved as a pre-order`;
-  return `<div class="notice" id="invNotice"><span class="t">${t}</span>${several ? '' : '<span class="hint">Stock moves when the item arrives and you invoice it.</span>'}<button class="tbtn" data-act="invForce" data-v="sale">It is here, sell it now</button></div>`;
+  return `<div class="notice" id="invNotice"><span class="t">${t}</span>${several ? '' : '<span class="hint">Stock moves when the product arrives and you invoice it.</span>'}<button class="tbtn" data-act="invForce" data-v="sale">It is here, sell it now</button></div>`;
 }
 function invForced(l) {
   const have = stockOf(l.sku), q = lineQty(l);
@@ -1002,17 +1069,17 @@ function invForced(l) {
 }
 function invNoCost(l) {
   const n = noCost(l); if (!n) return '';
-  return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this item has' : n + ' units of this item have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
+  return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this product has' : n + ' units of this product have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
 }
 function renderInvForm() {
   const box = $('#sellBody'); if (!box) return;
   const f = ui.inv, L = live(), pre = preOf(f), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
   // Nothing to sell yet: say so and offer the one step that fixes it.
-  if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No items to sell yet</h3><p>Add an item with its price, or send Claude photos and review them under Update stock.</p><div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`; return; }
+  if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No products to sell yet</h3><p>Add a product with its price, or send Claude photos and review them under Update inventory.</p><div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="tab" data-t="import">Update inventory</button></div></div>`; return; }
   const banner = pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : '';
   const notes = l => `${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}`;
-  const add = pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another item</button>';
+  const add = pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another product</button>';
   const cust = `<div><label for="iCust">Customer</label><input id="iCust" data-b="inv.cust" data-cust="inv" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div>
       <div><label for="iContact">Phone or Messenger</label><input id="iContact" data-b="inv.contact" value="${esc(f.contact)}" placeholder="${pm ? 'Required for a pre-order' : 'Optional'}" autocomplete="off"></div>`;
   const paid = pm ? `<div><label for="iPaid">Paid now (${esc(prefs.cur)})</label><input id="iPaid" type="number" inputmode="decimal" min="0" step="any" data-b="inv.paid" value="${esc(f.paid)}" placeholder="Leave blank when paid in full"></div>` : '';
@@ -1024,8 +1091,8 @@ function renderInvForm() {
       : `<button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p>`}</div>`;
   if (wide()) {   // the customer in one row, the lines as table rows with any notice under its line, the total and button at the right
     box.innerHTML = `${banner}<div class="frow">${cust}${date}${paid}${note}</div>
-    <div class="tbl lines"><table><thead><tr><th>Item</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
-      <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
+    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'money', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
+      <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td title="${l.sku ? esc(pickSub(l.sku)) : ''}"><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
         <td class="n"><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}" aria-label="Quantity"></td>
         <td class="n"><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}" aria-label="Price each"></td>
         <td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
@@ -1036,11 +1103,11 @@ function renderInvForm() {
   box.innerHTML = `
     ${banner}
     <div class="stack">${f.lines.map((l, i) => `
-      <div class="lbl" style="margin:0">Item${several ? ' ' + (i + 1) : ''}</div>${pickerHtml('inv.lines.' + i, l.sku)}
+      <div class="lbl" style="margin:0">Product${several ? ' ' + (i + 1) : ''}</div>${pickerHtml('inv.lines.' + i, l.sku)}
       ${notes(l)}
       <div class="row2"><div><label for="q${i}">Quantity</label><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}"></div>
         <div><label for="p${i}">Price each (${esc(prefs.cur)})</label><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}"></div></div>
-      ${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove this item</button>` : ''}`).join('')}
+      ${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove this product</button>` : ''}`).join('')}
       ${add}</div>
     <div class="stack"><div class="row2">${cust}</div>
       ${paid}
@@ -1052,7 +1119,7 @@ function issueInvoice() {
   const f = ui.inv, L = live();
   const lines = [], seen = new Set();
   for (const l of f.lines) {
-    const it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick an item first.');
+    const it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick a product first.');
     if (seen.has(it.sku)) return toast(`“${it.name}” is listed twice. Put it on one line.`);
     seen.add(it.sku);
     const qty = Number(l.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
@@ -1072,12 +1139,12 @@ function issueInvoice() {
 /** Pre-order mode of the form: queues the same cust + pre entries the sheet expects, then opens the receipt. */
 function savePreOrder() {
   const f = ui.inv, L = live();
-  if (f.lines.length > 1) return toast('A pre-order holds one item. Remove the other items, or sell it now.');
-  const l = f.lines[0], it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick an item first.');
+  if (f.lines.length > 1) return toast('A pre-order holds one product. Remove the other products, or sell it now.');
+  const l = f.lines[0], it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick a product first.');
   const qty = Number(l.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   const price = linePrice(l); if (price == null || isNaN(price) || price < 0) return toast('Type the price.');
   const name = f.cust.trim(); if (!name) return toast('Add the customer’s name.');
-  if (!f.contact.trim()) return toast('Add the customer’s phone or Messenger, so they can be told when the item arrives.');
+  if (!f.contact.trim()) return toast('Add the customer’s phone or Messenger, so they can be told when the product arrives.');
   const tot = r2(qty * price), paid = f.paid === '' ? tot : Number(f.paid);
   if (isNaN(paid) || paid < 0) return toast('Amount paid must be zero or more.');
   if (paid > tot) return toast('Amount paid is more than the total.');
@@ -1096,8 +1163,8 @@ function renderInvList() {
   if (q) rows = rows.filter(v => norm([v.no, v.cust, v.date, v.type, ...v.lines.map(l => l.name)].join(' ')).includes(q));
   if (!rows.length) { box.innerHTML = `<p class="empty">${q ? 'Nothing matches.' : 'No invoices yet.'}</p>`; return; }
   const items = v => (v.lines[0] ? v.lines[0].name : '') + (v.lines.length > 1 ? ' and ' + (v.lines.length - 1) + ' more' : ''), sale = v => v.type === SALE;
-  if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'n'], ['Date', v => v.date, v => esc(fmtDay(v.date))], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v)], ['Items', items, null, 'w'],
-    ['Total', v => v.total, v => money(v.total), 'n'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'n'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, '', 300); return; }
+  if (wide()) { box.innerHTML = table('invs', [['No', v => v.no, null, 'num'], ['Date', v => v.date, v => esc(fmtDay(v.date)), 'date'], ['Customer', v => v.cust, v => esc(v.cust) + (sale(v) ? '' : '<span class="tag">receipt</span>') + waitTag(v), 'name'], ['Products', items, null, 'name'],
+    ['Total', v => v.total, v => money(v.total), 'money'], ['Margin', marginOf, v => marginOf(v) != null ? money(marginOf(v)) : sale(v) ? '–' : '', 'money'], ['Delivered', v => sale(v) ? (v.ship ? 'Yes' : 'No') : '']], rows, v => `data-act="inv" data-id="${esc(v.id)}"`, 300); return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 300).map(v => row(`No. ${v.no} · ${esc(v.cust)}${v.type === RECEIPT ? '<span class="tag">receipt</span>' : v.ship ? '<span class="tag">delivered</span>' : ''}${waitTag(v)}`, `${esc(fmtDay(v.date))} · ${esc(items(v))}`, `data-act="inv" data-id="${esc(v.id)}"`, `<span class="amt">${money(v.total)}</span>`)).join('')}</div>`;
 }
 function openInv(id) {
@@ -1110,7 +1177,7 @@ function openInv(id) {
     const opts = v.lines.filter(l => returnable(v, l.sku) > 0);
     if (!opts.some(l => l.sku === s.sku)) s.sku = opts[0] ? opts[0].sku : '';
     retForm = sec('Return', `
-      ${opts.length > 1 ? `<div><label for="rSku">Item coming back</label><select id="rSku" data-b="sub.sku" data-redraw="1">${opts.map(l => `<option value="${esc(l.sku)}" ${l.sku === s.sku ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : `<p class="hint">Returning <b>${esc(opts[0] ? opts[0].name : '')}</b></p>`}
+      ${opts.length > 1 ? `<div><label for="rSku">Product coming back</label><select id="rSku" data-b="sub.sku" data-redraw="1">${opts.map(l => `<option value="${esc(l.sku)}" ${l.sku === s.sku ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : `<p class="hint">Returning <b>${esc(opts[0] ? opts[0].name : '')}</b></p>`}
       <div class="stack" style="gap:4px"><div class="seg">${Object.keys(RETURN_STOCK).map(o => `<button class="${s.outcome === o ? 'on' : ''}" data-act="subSet" data-k="outcome" data-v="${o}">${o}</button>`).join('')}</div><p class="hint" style="padding-top:6px">${RETURN_HINT[s.outcome]}</p></div>
       <div class="row2"><div><label for="rQty">Quantity (up to ${returnable(v, s.sku)})</label><input id="rQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label for="rRefund">Refund (${esc(prefs.cur)})</label><input id="rRefund" type="number" inputmode="decimal" min="0" step="any" data-b="sub.refund" value="${esc(s.refund)}" placeholder="0"></div></div>
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
@@ -1121,7 +1188,7 @@ function openInv(id) {
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
-    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${margin != null ? 'Margin ' + money(margin) : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
+    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${margin != null ? 'Margin ' + money(margin) : 'Margin unknown: a product has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
     <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg && im.n === 1 ? `<button class="btn" data-act="imgCopy" data-id="${esc(id)}">Copy image</button>` : ''}</div>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
@@ -1154,10 +1221,10 @@ function preListHtml() {
   const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
   // Desktop: one table, ready to ship first; Status sorts in that order too.
   const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
-  const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>';
+  const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. A product that is not free to sell is saved as a pre-order.</p>';
   if (wide()) return `${how}
-    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date))], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p)], ['Contact', contactOf], ['Item', p => p.name, null, 'w'], ['Qty', p => p.qty, null, 'n'],
-      ['Price', p => p.price, p => money(p.price), 'n'], ['Paid', p => p.paid, p => money(p.paid), 'n'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'n'], ['Status', rank, p => said[rank(p)]]],
+    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date)), 'date'], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p), 'name'], ['Contact', contactOf], ['Product', p => p.name, null, 'name'], ['Qty', p => p.qty, null, 'num'],
+      ['Price', p => p.price, p => money(p.price), 'money'], ['Paid', p => p.paid, p => money(p.paid), 'money'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'money'], ['Status', rank, p => said[rank(p)]]],
       [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
   return `${how}
     ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
@@ -1176,8 +1243,8 @@ function openPre(id) {
   openSheet(`
     <div class="top"><h2>Pre-order · ${esc(p.cust)}</h2>${closeBtn}</div>
     <p class="hint">${esc(contactOf(p))} ${waitTag(p)}</p>
-    <dl class="kv"><dt>Item</dt><dd>${esc(p.name)} × ${p.qty}</dd><dt>Price</dt><dd>${money(p.price)} each, ${money(tot)} total</dd><dt>Paid</dt><dd>${money(p.paid)}</dd><dt>Balance</dt><dd>${p.balance > 0 ? '<b>' + money(p.balance) + '</b>' : 'Nothing left to pay'}</dd><dt>Date</dt><dd>${esc(p.date)}</dd>
-      <dt>Status</dt><dd>${open ? (ready ? 'Ready to ship: the item is in stock' : 'Waiting for stock') : esc(p.status)}${p.status === PRE_CANCEL ? (p.kept ? ', kept ' + money(p.kept) : ', refunded in full') : ''}${p.invNo ? ', invoice no. ' + p.invNo : ''}</dd>${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}</dl>
+    <dl class="kv"><dt>Product</dt><dd>${esc(p.name)} × ${p.qty}</dd><dt>Price</dt><dd>${money(p.price)} each, ${money(tot)} total</dd><dt>Paid</dt><dd>${money(p.paid)}</dd><dt>Balance</dt><dd>${p.balance > 0 ? '<b>' + money(p.balance) + '</b>' : 'Nothing left to pay'}</dd><dt>Date</dt><dd>${esc(p.date)}</dd>
+      <dt>Status</dt><dd>${open ? (ready ? 'Ready to ship: the product is in stock' : 'Waiting for stock') : esc(p.status)}${p.status === PRE_CANCEL ? (p.kept ? ', kept ' + money(p.kept) : ', refunded in full') : ''}${p.invNo ? ', invoice no. ' + p.invNo : ''}</dd>${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}</dl>
     ${open ? `<p class="hint">${esc(fourText(p.sku))}</p>` : ''}
     ${sub || (open ? `<div class="actions"><button class="btn ${ready ? 'primary' : ''}" data-act="fulfil" data-id="${esc(id)}">Issue invoice</button>${p.balance > 0 ? `<button class="btn" data-act="subOn" data-id="${esc(id)}" data-m="pay">Add payment</button>` : ''}</div><button class="tbtn danger" data-act="subOn" data-id="${esc(id)}" data-m="cancel">Cancel</button>` : '')}
     ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (image)</button>` : ''}
@@ -1188,8 +1255,8 @@ function ordListHtml() {
   const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
   const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), none = 'No supplier orders yet. Add one when stock is ordered and paid for.';
   if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
-    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date))], ['Item', o => o.name, o => esc(o.name) + waitTag(o), 'w'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'n'],
-      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : ''], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
+    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'num'],
+      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
       [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">${none}</p>`}`;
   return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
     ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
@@ -1200,7 +1267,7 @@ function openOrdForm() {
   const f = ui.f || (ui.f = newOrd());
   openSheet(`
     <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
-    <div><div class="lbl">Item</div>${pickerHtml('f', f.sku)}</div>
+    <div><div class="lbl">Product</div>${pickerHtml('f', f.sku)}</div>
     <div class="row2"><div><label for="oQty">Quantity ordered</label><input id="oQty" type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="f.expected" value="${esc(f.expected)}"></div></div>
     <details ${f.note ? 'open' : ''}>${summary('Note')}<div class="stack"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
     <div class="stack"><button class="btn primary big" data-act="ordSave">Save order</button>
@@ -1208,7 +1275,7 @@ function openOrdForm() {
 }
 function saveOrd() {
   const f = ui.f, it = f.sku && live().map.get(f.sku);
-  if (!it) return toast('Pick an item first.');
+  if (!it) return toast('Pick a product first.');
   const qty = Number(f.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   const expected = f.expected ? parseDate(f.expected) : ''; if (expected == null) return toast('Check the expected date.');
   qAdd('order', { order: { id: 'o' + uid(), date: todayISO(), sku: it.sku, qty, expected, note: f.note.trim() } });
@@ -1331,7 +1398,7 @@ async function copyImg(id) {
 function splitLine(line) { const sep = ['\t', '|', ';'].find(x => line.includes(x)); return sep ? line.split(sep).map(s => s.trim()) : null; }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
-const DETAILS = [['cat', 'category'], ['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
+const DETAILS = [['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
 /** Reads the toy-detail columns of a pasted row into r. */
 function readDetails(r, mfr, brand, line, chr, rel, verify) {
   r.mfr = (mfr || '').trim(); r.brand = (brand || '').trim(); r.line = (line || '').trim(); r.chr = (chr || '').trim();
@@ -1350,14 +1417,14 @@ function detailPatch(it, r) {
 }
 const detailNames = p => DETAILS.filter(([k]) => k in p).map(d => d[1]).join(', ');
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
-const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
+const newItemFrom = r => ({ sku: nextSku(), name: r.name, price: r.price, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
 const unnamed = name => /^unidentified/i.test(String(name || '').trim());
-/** One Count row from its columns: Name, Category, Count, Price, Note, then the item details. */
+/** One Count row from its columns: Name, Count, Price, Note, then the product details, then the Cost each from the Inbox or Correct this row. */
 function countRow(c) {
-  const [name = '', cat = '', cnt = '', price = '', note = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), count: null, price: parsePrice(price), cost: parsePrice(c[11]), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
-  readDetails(r, c[5], c[6], c[7], c[8], c[9], c[10]);
+  const [name = '', cnt = '', price = '', note = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), count: null, price: parsePrice(price), cost: parsePrice(c[10]), note: note.trim(), match: null, similar: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
   if (cnt.trim() === '' || cnt.trim() === '?') { r.status = 'skip'; r.msg = 'No count given, skipped.'; return r; }
@@ -1369,7 +1436,7 @@ function countRow(c) {
 }
 /** The rows of a pasted block, each made from its columns by row(); a first line that head() takes for a header is left out. */
 const pasted = (text, head, row) => cleanLines(text).flatMap((line, idx) => { const c = splitLine(line); return !c ? [{ status: 'bad', msg: 'Columns must be separated by tabs (or |).', name: line.slice(0, 40), on: false }] : idx === 0 && head(c) ? [] : [row(c)]; });
-function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[2] || '').trim()), countRow); settleCount(rows); return rows; }
+function parseCount(text) { const rows = pasted(text, c => /^(count|qty|quantity|stock|on hand)/i.test((c[1] || '').trim()), countRow); settleCount(rows); return rows; }
 /** The cost of each of the n units a row adds: as typed in Correct this row as far as that goes, then the row's Cost each. */
 const unitCosts = (r, n) => { const t = (r.src && r.src.fix && r.src.fix.costs) || []; return Array.from({ length: Math.max(n, 0) }, (_, k) => k < t.length ? t[k] : r.cost); };
 /** Decides each row's status from the current stock, so remapping a row only needs one call. */
@@ -1394,11 +1461,11 @@ function settleCount(rows) {
     if (r.relMsg) r.msg = (r.msg ? r.msg + ' ' : '') + r.relMsg;
   });
 }
-/** One Receive row from its columns: Name, Qty, Cost each, Category, the item details, Note, then the Price typed in Correct this row. */
+/** One Receive row from its columns: Name, Qty, Cost each, the product details, Note, then the Price typed in Correct this row. */
 function recvRow(c) {
-  const [name = '', q = '', cost = '', cat = ''] = c;
-  const r = { name: name.replace(/\s+/g, ' ').trim(), cat: cat.trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[11]), note: (c[10] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
-  readDetails(r, c[4], c[5], c[6], c[7], c[8], c[9]);
+  const [name = '', q = '', cost = ''] = c;
+  const r = { name: name.replace(/\s+/g, ' ').trim(), qty: 0, cost: parsePrice(cost), price: parsePrice(c[10]), note: (c[9] || '').trim(), match: null, similar: null, order: null, on: false, status: '', msg: '', src: { cols: c } };
+  readDetails(r, c[3], c[4], c[5], c[6], c[7], c[8]);
   if (!r.name) { r.status = 'bad'; r.msg = 'No name.'; return r; }
   if (unnamed(r.name)) { r.status = 'skip'; r.msg = 'Not identified yet. Give it a name to record it.'; return r; }
   if (!/^\d+$/.test(q.trim()) || Number(q) < 1) { r.status = 'bad'; r.msg = `Quantity “${q}” must be a whole number, 1 or more.`; return r; }
@@ -1436,7 +1503,7 @@ function parseMoves(text) {
     const fail = m => Object.assign(r, { status: 'bad', msg: m });
     if (!r.date) return fail(`Date “${d}” not understood. Use 2026-11-15 or 11/15/26.`);
     r.item = findItem(nm);
-    if (!r.item) { const s = similarItem(nm); return fail(`No item matches “${nm}”.` + (s ? ` Did you mean “${s.name}”?` : '')); }
+    if (!r.item) { const s = similarItem(nm); return fail(`No product matches “${nm}”.` + (s ? ` Did you mean “${s.name}”?` : '')); }
     if (!r.dir) return fail('Direction must be In or Out.');
     if (r.qty < 1) return fail('Quantity must be a whole number, 1 or more.');
     const want = rs.trim(); r.reason = want ? [...IN_ONLY, ...OUT_ONLY, ...EITHER].find(x => x.toLowerCase() === want.toLowerCase()) || '' : defaultReason(r.dir);
@@ -1447,19 +1514,19 @@ function parseMoves(text) {
     seenKey.add(k);
     const bal = (run.has(r.item.sku) ? run.get(r.item.sku) : stockOf(r.item.sku)) + (r.dir === 'In' ? r.qty : -r.qty);
     run.set(r.item.sku, bal);
-    if (dup) { r.status = 'dup'; r.msg = 'Same date, item, direction, quantity and reason already exist. Tick to add anyway.'; }
+    if (dup) { r.status = 'dup'; r.msg = 'Same date, product, direction, quantity and reason already exist. Tick to add anyway.'; }
     else { r.on = true; if (bal < 0) { r.status = 'warn'; r.msg = `Stock would drop to ${bal}.`; } }
     return r;
   });
 }
-const STATUS_LABEL = { new: 'New item', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
 const IMP = {
-  count: { name: 'Count from photo', cols: 'Name⇥Category⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
-    hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Items missing from the paste are left alone.' },
-  receive: { name: 'Receive', cols: 'Name⇥Qty⇥Cost each⇥Category⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify⇥Note', parse: parseReceive,
-    hint: 'Send Claude a photo of the supplier’s invoice or packing list, then paste its answer here. Each row adds stock at its cost. An item with a supplier order on the way closes that order.' },
-  moves: { name: 'Movements', cols: 'Date⇥Item⇥In/Out⇥Qty⇥Reason⇥Note', parse: parseMoves,
-    hint: 'Paste rows of <b>date, item, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.' },
+  count: { name: 'Count from photo', cols: 'Name⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
+    hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Products missing from the paste are left alone.' },
+  receive: { name: 'Receive', cols: 'Name⇥Qty⇥Cost each⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify⇥Note', parse: parseReceive,
+    hint: 'Send Claude a photo of the supplier’s invoice or packing list, then paste its answer here. Each row adds stock at its cost. A product with a supplier order on the way closes that order.' },
+  moves: { name: 'Movements', cols: 'Date⇥Product⇥In/Out⇥Qty⇥Reason⇥Note', parse: parseMoves,
+    hint: 'Paste rows of <b>date, product, In/Out, qty, reason, note</b>, tab-separated. Reason and note are optional.' },
 };
 /**
  * Loads the rows Claude left in the sheet into the review, one Type at a time. The key holds the rows' content,
@@ -1489,7 +1556,7 @@ function inboxLoad() {
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
   ui.rdate = todayISO();
   ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
-    const cols = (mode === 'count' ? [g.name, '', g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, '', g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
+    const cols = (mode === 'count' ? [g.name, g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
@@ -1498,9 +1565,9 @@ function inboxLoad() {
   return true;
 }
 // The columns of a Count and a Receive row by field (Count is the quantity in both). Receive has no Price column, so a typed price goes last.
-const ROW_COLS = { count: ['name', 'cat', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'cat', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
+const ROW_COLS = { count: ['name', 'count', 'price', 'note', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'cost'], receive: ['name', 'count', 'cost', 'mfr', 'brand', 'line', 'chr', 'rel', 'verify', 'note', 'price'] };
 /** A row's columns with what was typed in Correct this row (src.fix holds only the fields changed there). */
-const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 12) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
+const fixedCols = (mode, src) => { const c = src.cols.slice(), f = src.fix || {}; while (c.length < 11) c.push(''); ROW_COLS[mode].forEach((k, j) => { if (k in f) c[j] = f[k]; }); return c; };
 /** A review row from its source columns with the owner's correction and "Use" choice applied. */
 function impRow(mode, src) {
   const r = (mode === 'count' ? countRow : recvRow)(fixedCols(mode, src)), use = src.use && live().map.get(src.use);
@@ -1536,11 +1603,11 @@ function renderImport() {
   const open = ui.manual == null ? !cfg.url : ui.manual;
   view().innerHTML = `
     <p>Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
-    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One item by hand', 'Stock in or out for one item', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new item', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
+    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
     <div class="seg">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
     <p class="hint">${m.hint}</p>
-    ${ui.mode !== 'moves' ? `<button class="btn" data-act="copyPrompt">Copy the prompt and item list for Claude</button>` : ''}
+    ${ui.mode !== 'moves' ? `<button class="btn" data-act="copyPrompt">Copy the prompt and product list for Claude</button>` : ''}
     <textarea id="impText" rows="7" spellcheck="false" placeholder="${m.cols}" aria-label="Rows to import"></textarea>
     ${ui.mode === 'receive' ? `<div><label for="impDate">Received on</label><input id="impDate" type="date" value="${esc(ui.rdate)}"></div>` : ''}
     <div class="links"><button class="btn primary" style="flex:1" data-act="impParse">Preview</button><button class="tbtn" data-act="impClear">Clear</button></div>
@@ -1564,7 +1631,7 @@ function renderImpOut() {
     const fold = (k, line, idx, dflt) => `<details class="grp" data-grp="${k}" ${(imp.open[k] != null ? imp.open[k] : dflt) ? 'open' : ''}>${summary(line)}${list(idx, k)}</details>`;
     const left = imp.src === 'inbox' ? 'They stay in the Inbox.' : 'They are not recorded.';
     body = [
-      g.check.length ? sec('Check these · ' + g.check.length, list(g.check, 'check'), '', 'grp-check') : '',
+      g.check.length ? sec('Check these · ' + g.check.length, fold('check', `${plural(g.check.length, 'row')} to decide on before they are recorded.`, g.check, true), '', 'grp-check') : '',
       g.ready.length ? sec('Ready · ' + g.ready.length, g.ready.length > 8 ? fold('ready', readyLine(imp, g.ready), g.ready, false) : list(g.ready, 'ready'), '', 'grp-ready') : '',
       g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
     ].join('');
@@ -1575,18 +1642,30 @@ function renderImpOut() {
 function impTable(imp, idx, k) {
   const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
   const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
-  return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`],
-    ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? `<div class="hint">Recorded as “${esc(r.match.name)}”</div>` : '') + (r.similar && !r.match ? `<div><button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button></div>` : ''); }, 'w'],
-    ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? `<div class="hint">${esc(why(r))}</div>` : ''}`; }, 'w st'],
-    [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'n'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => { const c = costNote(R(i)).replace(/^ (at|·) /, ''); return has(i).length ? esc(c) : `<span class="hint">${c}</span>`; }, 'n'],   // the phone row's wording
-    ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i))], ['Note', i => R(i).note, null, 'w']],
+  // One cost each for every unit the row adds, typed in place (setRowCost()); units with different costs show the range and open Correct this row.
+  const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
+    return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
+      : `<input type="number" inputmode="decimal" min="0" step="any" data-rcost="${i}" value="${c[0] == null ? '' : c[0]}" aria-label="Cost each of ${esc(r.name)}">`; };
+  return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`, 'tick'],
+    ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? ` <span class="hint">recorded as “${esc(r.match.name)}”</span>` : ''); }, 'name'],
+    ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
+      + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
+    [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'],
+    ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
 }
-/** What a folded Ready group holds, for example "172 new items, 3 count changes, 11 with new details". */
+/** The cost each typed in a review row: every unit the row adds takes it, blank allowed. It changes the review only, like Correct this row. */
+function setRowCost(t) {
+  const imp = ui.imp, i = +t.dataset.rcost, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  if (t.value.trim() && parsePrice(t.value) == null) { t.value = r.costs[0] == null ? '' : r.costs[0]; return toast('Cost must be zero or more.'); }
+  const fix = { ...r.src.fix, cost: t.value.trim() }; delete fix.costs;
+  r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);   // the field already shows the value, so nothing is redrawn and a click elsewhere still lands
+}
+/** What a folded Ready group holds, for example "172 new products, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
   const rows = idx.map(i => imp.rows[i]), k = st => rows.filter(r => r.status === st).length, det = rows.filter(r => r.match && (r.adds || r.status === 'details')).length;
-  return [k('new') ? plural(k('new'), 'new item') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
+  return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
 /** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
 const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
@@ -1597,10 +1676,10 @@ function prowHtml(imp, i) {
     if (r.status === 'count') detail = `${esc(r.match.name)}: stock ${r.have} → counted ${r.count} (${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})${costNote(r)}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
     else if (r.status === 'same') detail = `${esc(r.match.name)}: already ${r.count}`;
     else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')}${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
+    else if (r.status === 'new') detail = `New${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
   } else if (imp.mode === 'receive') {
     if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-    else if (r.status === 'new') detail = `New · ${esc(r.cat || 'General')} · +${r.qty}${costNote(r)}`;
+    else if (r.status === 'new') detail = `New · +${r.qty}${costNote(r)}`;
   } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
   const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
   const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
@@ -1622,13 +1701,13 @@ function openFix(i) {
     ${fld('name', 'Name')}
     ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
     ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
-    <div class="row2">${fld('cat', 'Category', ' placeholder="General"')}${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}</div>
+    ${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}
     <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
     <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
     ${fld('rel', 'Release date', ' placeholder="2024-07-15, 2024-07 or 2024"')}
     <label class="check"><input id="fxRelCheck" type="checkbox" ${r.relCheck ? 'checked' : ''}> Release date still needs checking</label>
     ${fld('note', 'Note', ' placeholder="Optional"')}
-    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" data-have="${stockOf(sim.sku)}" ${src.use ? 'checked' : ''}> Use the existing item “${esc(sim.name)}”</label>` : ''}
+    ${sim ? `<label class="check"><input type="checkbox" id="fxUse" data-have="${stockOf(sim.sku)}" ${src.use ? 'checked' : ''}> Use the existing product “${esc(sim.name)}”</label>` : ''}
     <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
 }
 function saveFix(i, simSku) {
@@ -1653,7 +1732,7 @@ function openImpResult() {
   const pend = queued('pending');
   const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
   openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
-    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new item')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'item')} with new details`}.</p>
+    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new product')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'product')} with new details`}.</p>
     ${x.inbox ? `<p id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
@@ -1712,39 +1791,37 @@ function applyMoves(rows) {
 /** Reads the pasted block into the preview. */
 function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }
 function buildPrompt() {
-  const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${catOf(i)} | ${stockOf(i.sku)}`).join('\n') || '(empty: no items yet)';
+  const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${stockOf(i.sku)}`).join('\n') || '(empty: no products yet)';
   const details = `- Manufacturer, Brand, Product line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
 - Release date: your best guess, as YYYY-MM-DD, YYYY-MM or YYYY.
 - Verify: write Y when the release date needs checking (the product is a reissue, or the date is a guess). Leave it blank for a first issue you are confident about.
 - A variant (chase, exclusive colour, reissue) is a separate product with its own name. Never merge it into the regular release.`;
   if (ui.mode === 'receive') return `Read the attached supplier invoice or packing list and list every product on it.
 Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
-Name<TAB>Qty<TAB>Cost each<TAB>Category<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify<TAB>Note
+Name<TAB>Qty<TAB>Cost each<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify<TAB>Note
 
 Rules:
 - Name: the specific product name. When the product is already in the catalog below, reuse its exact name.
 - Qty: units received, as a whole number.
 - Cost each: the unit cost on the paperwork as a plain number. Divide a line total by the quantity when only the total is shown. Blank when not shown.
-- Category: reuse a catalog category when one fits.
 ${details}
 - Note: a short remark, blank when there is nothing to say.
 
-Catalog (Name | Category | In stock):
+Catalog (Name | In stock):
 ${cat}`;
   return `Read the attached photo (boxes, or the stockroom shelves) and list every product you can identify.
 Reply with ONE code block, one product per line, columns separated by a TAB character, no header row:
-Name<TAB>Category<TAB>Count<TAB>Price<TAB>Note<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify
+Name<TAB>Count<TAB>Price<TAB>Note<TAB>Manufacturer<TAB>Brand<TAB>Product line<TAB>Character<TAB>Release date<TAB>Verify
 
 Rules:
 - Name: the specific product name as printed on the box. When the product is already in the catalog below, reuse its exact name.
-- Category: reuse a catalog category when one fits.
 - Count: units visible, as a whole number. Write ? when you cannot count reliably.
 - Price: leave blank unless the owner told you the selling price.
 - Note: a short remark such as "back row hidden, estimate" or "name guessed from artwork". Blank when there is nothing to say.
 ${details}
 - If the same product appears in several places, add the counts into one line.
 
-Catalog (Name | Category | In stock):
+Catalog (Name | In stock):
 ${cat}`;
 }
 
@@ -1764,7 +1841,7 @@ function openSettings() {
     ${sec('Preferences', `<div><div class="lbl">Theme</div><div class="seg">${[['auto', 'Device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => `<button class="${prefs.theme === k ? 'on' : ''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
       <div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="4"></div>`, '', 'pad')}
     <button class="btn primary big" data-act="savePrefs">Save invoice details and preferences</button>
-    ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Items and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
+    ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Products and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
       <button class="tbtn danger" data-act="wipe">Erase data on this device</button><p class="hint" style="margin-top:-12px">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p>`, '', 'pad')}
     <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings');
 }
@@ -1789,9 +1866,12 @@ const tsv = rows => rows.map(r => r.map(cell).join('\t')).join('\n');
 /** Opens a page: kept as the current tab on this device, with any sheet closed and the page at the top. */
 function go(t) { prefs.tab = t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); }
 document.addEventListener('click', async ev => {
-  const el = ev.target.closest('[data-act]'); if (!el) return;
+  if (!$('#pop').hidden && !ev.target.closest('#pop, [data-act="tfOpen"]')) closePop();
+  // A field inside a table row (a review row's cost) is typed in; it does not open the row.
+  const el = ev.target.closest('[data-act]'); if (!el || (el.tagName === 'TR' && ev.target.closest('input'))) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
+    case 'navMini': prefs.navMini = !prefs.navMini; savePrefs(); render(); break;
     case 'tab':
       if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
       if (d.t === 'home') ui.homeMore = false;
@@ -1805,8 +1885,9 @@ document.addEventListener('click', async ev => {
     case 'sync': syncNow(true); break;
     case 'settings': openSettings(); break;
     case 'close': closeSheet(); break;
-    case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; render(); break; }
-    case 'cat': ui.cat = d.c; renderStock(); break;
+    case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; redrawTable(d.t); break; }
+    case 'tfOpen': openTf(el); break;
+    case 'tfAll': ui.tf[d.k] = d.none ? [] : tfValues(d.k); $('#pop').querySelectorAll('[data-tfv]').forEach(x => { x.checked = !d.none; }); renderStockList(); break;
     case 'filter': ui.filter = d.f; renderStock(); break;
     case 'newItem': openItemEditor(null); break;
     case 'item': openItem(d.sku); break;
@@ -1831,7 +1912,7 @@ document.addEventListener('click', async ev => {
     case 'retryOne': { const q = queue.find(x => x.id === d.qid); if (q) { q.status = 'pending'; delete q.error; } closeSheet(); commit(); break; }
     case 'retryAll': queue.forEach(q => { if (q.status === 'failed') { q.status = 'pending'; delete q.error; } }); commit(); syncNow(true); break;
 
-    // toy picker and small sub-forms
+    // product picker and small sub-forms
     case 'pk': {
       const o = getPath(d.k), it = live().map.get(d.sku); if (!o || !it) break;
       o.sku = d.sku; if (o.price === '' && it.price != null) o.price = it.price;
@@ -1858,7 +1939,7 @@ document.addEventListener('click', async ev => {
     case 'homeGo': {
       if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
       else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
-      else { ui.filter = d.to; ui.cat = 'All'; ui.q = ''; ui.tf = {}; go('stock'); }
+      else { ui.filter = d.to; ui.q = ''; ui.tf = {}; go('stock'); }
       break;
     }
     case 'sellNew': ui.sellSeg = 'new'; render(); window.scrollTo(0, 0); break;
@@ -1948,8 +2029,8 @@ document.addEventListener('click', async ev => {
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
-    case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost)).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.unit])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
@@ -1967,8 +2048,7 @@ document.addEventListener('input', ev => {
     return;
   }
   if (t.dataset.pk) { renderPk(t.dataset.pk, t.value); return; }
-  // The Stock filter row redraws the table under the field being used; Category is the same filter as the phone's tabs.
-  if (t.dataset.tf) { const k = t.dataset.tf; if (k === 'cat') ui.cat = t.value || 'All'; else ui.tf[k] = t.value; renderStockList(); const n = $(`[data-tf="${k}"]`); n.focus(); if (n.tagName === 'INPUT') n.setSelectionRange(n.value.length, n.value.length); return; }
+  if (t.dataset.tf) { ui.tf[t.dataset.tf] = t.value; renderStockList(); return; }   // the release date range in its filter
   switch (t.id) {
     case 'q': ui.q = t.value; renderStockList(); break;
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
@@ -1984,6 +2064,8 @@ document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.dataset.rcost) setRowCost(t);
+  if (t.dataset.tfv) { ui.tf[t.dataset.tfv] = [...$('#pop').querySelectorAll('[data-tfv]:checked')].map(x => x.value); renderStockList(); }
   if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
   // A known customer's name brings their contact with it.
@@ -1992,7 +2074,7 @@ document.addEventListener('change', ev => {
 document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; if (ev.target.dataset && ev.target.dataset.grp && ui.imp) ui.imp.open[ev.target.dataset.grp] = ev.target.open; }, true);
 // Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
 document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(impParse, 0); });
-document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closePop(); if (!$('#layer').hidden) closeSheet(); } if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
 window.addEventListener('online', () => scheduleSync());
 

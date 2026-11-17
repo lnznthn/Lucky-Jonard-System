@@ -30,7 +30,7 @@ def pick(p, key, text): p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug=
 def close(p): p.click('button[aria-label="Close"]')
 def stock_names(p): return [e.inner_text().strip() for e in p.query_selector_all('#stockList .item .name')]
 def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
+    tab(p, 'Inventory'); p.click('#view .seg button[data-f="all"]')
     return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
 def paste_import(p, mode, text):
     update_stock(p)
