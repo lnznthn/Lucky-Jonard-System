@@ -14,7 +14,7 @@
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
  */
-var VERSION_ = '2.4.0';
+var VERSION_ = '2.5.0';
 var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
@@ -82,7 +82,7 @@ var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k
 /**
  * Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data.
  * It also brings a 2.3 sheet to 2.4: Items becomes Products without Category and Reorder at, In rows get their unit SKU,
- * and Browse is made again when its header is not the current one.
+ * and Browse is made again when its header is not the current one. And a 2.4 sheet to 2.5, see upgrade25_().
  */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
@@ -90,6 +90,7 @@ function setup() {
   if (pr) ['Category', 'Reorder at'].forEach(function (h) { var c = pr.getRange(1, 1, 1, pr.getMaxColumns()).getValues()[0].indexOf(h); if (c >= 0) pr.deleteColumn(c + 1); });
   asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
   asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:K']).getRange('J:J').setNumberFormat('#,##0.00');
+  locked_(function () { upgrade25_(ss); });
   Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
   asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:O']);
   var br = ss.getSheetByName('Browse');
@@ -111,6 +112,33 @@ function setup() {
   writeOnHand_();
   writeBrowse_();
   Logger.log('Setup done. Key: ' + props.getProperty('KEY'));
+}
+
+/**
+ * 2.4 to 2.5. Invoices and Invoice lines are rewritten in the 2.5 layout, each only while it still has its 2.4 header, so a second
+ * run changes nothing: Invoices lose Type and Pre-order ID and get Paid = Total and Balance 0; Invoice lines get Line (1..n per
+ * invoice, in sheet order), Status Delivered and Delivered on = the invoice date. Each tab is read, given its 2.5 header and
+ * formats (a column that held text and now holds numbers gets a number format), then written back in one call.
+ * Supplier orders has no rows in a 2.4 sheet and only gets its header, with Cost each (a text column in 2.4) as a number.
+ * Pre-orders is deleted when it has no rows below the header. Suppliers is made by setup() like any other tab.
+ */
+function upgrade25_(ss) {
+  var inv = ss.getSheetByName('Invoices'), ln = ss.getSheetByName('Invoice lines'), so = ss.getSheetByName('Supplier orders'), po = ss.getSheetByName('Pre-orders'), day = {}, n = {};
+  var old = function (sh, col, head, width) {
+    if (!sh || s_(sh.getRange(1, col).getValue()) !== head) return null;
+    var last = lastRowOf_(sh, 2);
+    return last < 2 ? [] : sh.getRange(2, 1, last - 1, width).getValues();
+  };
+  var put = function (k, cols, fmt, rows) {
+    asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text).getRange(cols).setNumberFormat(fmt);
+    if (rows.length) sheet_(T_[k].name).getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  };
+  var iv = old(inv, 4, 'Type', 10), lv = old(ln, 3, 'Product ID', 8);
+  if (lv && inv) inv.getRange(1, 2, lastRowOf_(inv, 2), 2).getValues().forEach(function (v) { day[s_(v[0])] = dateStr_(v[1]); });
+  if (iv) put('inv', 'G:I', '#,##0.00', iv.map(function (v) { return [v[0], v[1], v[2], v[4], v[5], v[6], v[7], v[7], 0, v[8]]; }));
+  if (lv) put('line', 'C:C', '0', lv.map(function (v) { var id = s_(v[1]); n[id] = (n[id] || 0) + 1; return [v[0], v[1], n[id], v[2], v[3], v[4], v[5], v[6], v[7], 'Delivered', '', '', day[id] || '']; }));
+  if (old(so, 2, 'Date', 1)) put('order', 'I:I', '#,##0.00', []);
+  if (po && lastRowOf_(po) < 2) ss.deleteSheet(po);
 }
 
 /** Prints the connection key in the execution log (View > Logs). */

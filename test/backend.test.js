@@ -15,7 +15,7 @@ const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { 
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
-assert.equal(call('ping').ok, true);
+assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.5.0');
 assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -575,4 +575,25 @@ const cellsV = () => V.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(
 const beforeV = cellsV(); V.sheet('Browse').filter = { range: 'A1:Q' };
 vm.runInContext('setup()', V.b);
 assert.deepEqual([cellsV(), V.b.props.moveRev, V.sheet('Browse').filter], [beforeV, '1', { range: 'A1:Q' }], 'running setup() again changes nothing');
+
+// ---------- 2.5: setup() upgrades a 2.4 sheet in place: Invoices and Invoice lines in the new layout, an empty Pre-orders tab goes, Suppliers comes ----------
+const X = bench(), ivX = X.sheet('Invoices'), lnX = X.sheet('Invoice lines'), preX = X.b.ss.insertSheet('Pre-orders');
+X.b.ss.deleteSheet(X.sheet('Suppliers')); preX.set(1, 1, 'ID'); X.sheet('Supplier orders').set(1, 2, 'Date');
+ivX.cells = {}; lnX.cells = {};
+[['No', 'ID', 'Date', 'Type', 'Customer ID', 'Customer', 'Contact', 'Total', 'Shipping', 'Pre-order ID']].forEach(h => h.forEach((v, j) => ivX.set(1, j + 1, v)));
+[['Invoice no', 'Invoice ID', 'Product ID', 'Product', 'Qty', 'Listed price', 'Charged price', 'Unit cost']].forEach(h => h.forEach((v, j) => lnX.set(1, j + 1, v)));
+ivX.putRows([[1, 'x1', '2026-11-03', 'Sale', 'cx', 'Cora', '+63 917', 300, 'Delivered', '']]);
+lnX.putRows([[1, 'x1', 'X1', 'Ex One', 1, 120, 100, 50], [1, 'x1', 'X2', 'Ex Two', 2, '', 100, '']]);
+vm.runInContext('setup()', X.b);
+assert.deepEqual(ivX.rowsOf().map(x => x.slice(0, 11)), [[1, 'x1', '2026-11-03', 'cx', 'Cora', '+63 917', 300, 300, 0, 'Delivered', undefined]], 'the invoice row is carried over: no Type or Pre-order ID, Paid = Total, Balance 0');
+assert.deepEqual(lnX.rowsOf().map(x => x.slice(0, 14)), [[1, 'x1', 1, 'X1', 'Ex One', 1, 120, 100, 50, 'Delivered', '', '', '2026-11-03', undefined], [1, 'x1', 2, 'X2', 'Ex Two', 2, '', 100, '', 'Delivered', '', '', '2026-11-03', undefined]], 'lines numbered, Delivered on the invoice date');
+assert.deepEqual([ivX.cell(1, 4), lnX.cell(1, 3), lnX.cell(1, 13), X.sheet('Supplier orders').cell(1, 2), X.sheet('Pre-orders'), X.sheet('Suppliers').getRange(1, 1, 1, 4).getValues()[0], X.sheet('Suppliers').getProtections().map(p => p.warn)],
+  ['Customer ID', 'Line', 'Delivered on', 'Order ID', undefined, ['ID', 'Name', 'Contact', 'Note'], [true]], 'headers current, the empty Pre-orders tab deleted, Suppliers made and protected');
+assert.deepEqual(X.full().invs.map(v => [v.total, v.paid, v.balance, v.ship, v.lines.map(l => [l.line, l.sku, l.status, l.delivered])]), [[300, 300, 0, 'Delivered', [[1, 'X1', 'Delivered', '2026-11-03'], [2, 'X2', 'Delivered', '2026-11-03']]]]);
+const cellsX = () => X.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(x.cells).sort())]), beforeX = cellsX();
+vm.runInContext('setup()', X.b);
+assert.deepEqual(cellsX(), beforeX, 'running setup() again changes nothing');
+const preY = X.b.ss.insertSheet('Pre-orders'); preY.set(1, 1, 'ID'); preY.set(2, 1, 'po1');
+vm.runInContext('setup()', X.b);
+assert.equal(X.sheet('Pre-orders'), preY, 'a Pre-orders tab with rows stays');
 console.log('backend tests passed');
