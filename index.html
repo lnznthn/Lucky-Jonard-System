@@ -248,6 +248,8 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 'use strict';
 const VERSION = '2.6.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
+// One app serves every shop, each with its own sheet and back end: entries go only to a back end (VERSION_ in Code.gs) at this version or later.
+const BACKEND_MIN = '2.7.0';
 const LOGO_MAX = 120000;   // the longest logo data URL the back end keeps (in Script Properties, in chunks)
 // The longest value of each shop field the back end takes, with the name its refusal uses; Settings checks them first.
 const SHOP_MAX = { name: ['Shop name', 120], contact: ['Address', 500], foot: ['Notes', 500], cur: ['Currency', 4] };
@@ -347,7 +349,7 @@ let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
 let docs = Object.assign({ custs: [], sups: [], orders: [], invs: [], rets: [], inbox: [], pay: [] }, store.get('docs', {}));   // synced documents; pay is the sheet's Payment details tab
-let meta = store.get('meta', {});          // the pull's place in Movements and the logo's rev
+let meta = store.get('meta', {});          // the pull's place in Movements, the logo's rev and the back end's version (ver)
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
 if (prefs.tab === 'move') prefs.tab = 'home';
@@ -604,12 +606,18 @@ function applySnapshot(s) {
   // entry still waits, the values typed here stand and the logo's rev is kept, so the next sync after it lands brings what changed.
   const take = s.shop && !shopWaits();
   if (take) { prefs.shop = { name: s.shop.name || '', contact: s.shop.contact || '', foot: s.shop.foot || '', logo: s.logo == null ? prefs.shop.logo : s.logo }; prefs.cur = s.shop.cur || '₱'; savePrefs(); }
-  // moveRev changes when a cost is rewritten in Movements.
-  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev, logoRev: take ? s.shop.logoRev : meta.logoRev };
+  // moveRev changes when a cost is rewritten in Movements; ver is the back end's version, '' from one older than 2.7.
+  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev, logoRev: take ? s.shop.logoRev : meta.logoRev, ver: s.version || '' };
   ui.warn = s.warnings;   // problems the sheet found in its tabs, kept in memory until the next sync
   saveSynced(); dirty();
 }
 const wire = q => { const { status, error, ...w } = q; return w; };
+/** True when version a is below b, comparing major.minor.patch as numbers. */
+const verLess = (a, b) => { const x = String(a).split('.'), y = String(b).split('.'); for (let i = 0; i < 3; i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d < 0; } return false; };
+const sheetOld = () => !!meta.ver && verLess(meta.ver, BACKEND_MIN);
+/** Entries wait on this device while the shop's sheet runs a back end older than this app needs; everything else works as offline. */
+const held = () => !!cfg.url && sheetOld() && queued('pending') > 0;
+const heldText = () => `This shop’s sheet runs back end ${meta.ver}; this app needs ${BACKEND_MIN}. Update the sheet: paste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version.`;
 async function syncNow(manual) {
   if (ui.busy) return;
   if (!cfg.url) { if (manual) toast('Not connected yet. Everything is saved on this device.'); return; }
@@ -618,6 +626,9 @@ async function syncNow(manual) {
   const waitBefore = live().inbox.length;
   try {
     let batch, pushed = false;
+    // Before sending entries to a back end of unknown or older version, ask its version; an older one gets nothing, not even a pull.
+    if (queued('pending') && (!meta.ver || sheetOld())) { meta.ver = String((await api('ping')).version || ''); store.set('meta', meta); }
+    if (held()) throw Object.assign(new Error(heldText()), { held: true });
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
       const data = await api('add', { entries: batch.map(wire), have: meta });
       const res = new Map(data.results.map(r => [r.id, r]));
@@ -634,7 +645,7 @@ async function syncNow(manual) {
     else if (waitNow > waitBefore && !addOn()) toast(`${plural(waitNow, 'row')} from Claude to review`);
     else if (manual) toast('Synced');
   } catch (e) {
-    ui.err = e.message; if (manual || !e.network) toast(e.message);
+    ui.err = e.message; if (manual || !e.network && !e.held) toast(e.message);   // a held queue says so on Home, not at every sync
   } finally {
     ui.busy = false; dirty();
     // Do not rebuild the screen under someone who is typing; the next keystroke or tap refreshes it.
@@ -654,6 +665,7 @@ function renderSync() {
   let cls = 'sync', txt;   // plain text: attention colour while entries wait, danger when refused or failed
   if (!cfg.url) { txt = pend ? pend + ' saved here' : 'Local only'; if (failed) cls += ' err'; }
   else if (ui.busy) txt = 'Syncing';
+  else if (held()) { cls += ' err'; txt = 'Sheet out of date'; }
   else if (ui.err) { cls += ' err'; txt = 'Sync failed'; }
   else if (failed) { cls += ' err'; txt = failed + ' need attention'; }
   else if (pend) { cls += ' pending'; txt = pend + ' waiting'; }
@@ -783,6 +795,7 @@ function needsRows() {
   const ready = readyLines(), owing = L.invs.filter(v => v.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
   const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
+  if (held()) out.push(row(`Update the sheet: it runs back end ${esc(meta.ver)}, this app needs ${BACKEND_MIN}`, `Paste the new Code.gs, run Bodega > Set up or upgrade this sheet, publish a new version. ${plural(queued('pending'), 'entry waits', 'entries wait')} here until then.`, 'data-act="settings"'));
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
   // One row per customer, for their oldest invoice with ready lines; four customers or more make one row that opens the To follow list.
   const by = new Map(); ready.forEach(x => { const k = x.v.custId || x.v.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
@@ -2059,7 +2072,7 @@ function openSettings() {
   openSheet(`
     <div class="top"><h2>Settings</h2>${closeBtn}</div>
     ${sec('Connection', `<div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-      <p class="hint">${cfg.url ? (ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
+      <p class="hint">${cfg.url ? (held() ? esc(heldText()) : ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
       <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>`, '', 'pad')}
     ${sec('Shop', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" maxlength="${SHOP_MAX.name[1]}" autocomplete="off"></div>
       <div><label for="sContact">Address (one line each)</label><textarea id="sContact" rows="3" maxlength="${SHOP_MAX.contact[1]}">${esc(sh.contact)}</textarea></div>
@@ -2280,9 +2293,9 @@ document.addEventListener('click', async ev => {
       if (!/^https:\/\/|^http:\/\/localhost/.test(c.url) || !c.key) { toast('Paste the web app URL, then #, then the key.'); break; }
       const prev = cfg; cfg = c;
       try {
-        await api('ping');
-        if (c.url !== prev.url || c.key !== prev.key) meta = {};   // a new code may be another shop's sheet: its movements and logo (LOGO_REV counts per sheet) start afresh
-        store.set('meta', meta); store.set('cfg', cfg); closeSheet(); toast('Connected'); syncNow(false);
+        const ver = String((await api('ping')).version || '');
+        if (c.url !== prev.url || c.key !== prev.key) meta = {};   // a new code may be another shop's sheet: its movements, logo (LOGO_REV counts per sheet) and version start afresh
+        meta.ver = ver; store.set('meta', meta); store.set('cfg', cfg); closeSheet(); toast('Connected'); syncNow(false);
       }
       catch (e) { cfg = prev; toast(e.message); }
       break;
