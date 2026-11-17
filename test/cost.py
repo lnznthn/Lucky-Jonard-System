@@ -1,33 +1,12 @@
 # End-to-end test of units and cost (spec items 4 and 6): one cost per unit, FIFO sales, cost changes, deficits,
 # returns, reversals, the Needs you row and its Stock filter. Drives the app at phone size against the mock backend.
 # python3 test/cost.py  (needs the static server on APP_PORT and the mock backend on API_PORT, Chrome)
-import json, os, sys, urllib.request
+import json, os
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
-APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots-cost'
 os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-def rows(name): return dump()[name]['rows'][1:]
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
-def home(p): tab(p, 'Home'); return p.inner_text('#view')
-def new_sale(p): tab(p, 'Sales'); p.click('#view [data-act="sellNew"]') if p.is_visible('#view [data-act="sellNew"]') else None
-def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def connect(p): p.click('button[aria-label="Settings"]'); p.fill('#sCode', CODE); p.click('button:has-text("Test and save")')
-def pick(p, key, text): p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug="{key}"] button')
-def close(p): p.click('button[aria-label="Close"]')
-def stock_names(p): return [e.inner_text().strip() for e in p.query_selector_all('#stockList .item .name')]
-def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
-    return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
 def open_item(p, name): tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
 def units(p): return [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]
 def unit_cost(p, k, value): f = p.locator('#sheet [data-unit]').nth(k); f.fill(value); f.blur()   # a changed field saves when it loses focus
@@ -48,10 +27,9 @@ def issue(p): p.click('#view [data-act="invIssue"]'); text = p.inner_text('#shee
 def sku_of(p, name): return p.evaluate(f"live().list.find(i => i.name === {json.dumps(name)}).sku")
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
-    p = ctx.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx)
     p.goto(APP); connect(p); synced(p)
 
     # ---- more than 12 units: one Cost each field that opens into one field per unit
@@ -88,7 +66,7 @@ with sync_playwright() as pw:
     check('Margin\n₱1,700' in home(p), 'Home adds the margin of both sales')
 
     # ---- a cost changed on a unit on hand shows on the item sheet, in Browse and on a second device
-    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = page(ctx2, 'p2 ')
     p2.goto(APP); connect(p2); synced(p2)
     open_item(p2, 'Cost Alpha'); check(units(p2) == ['300', '400'], 'device 2 sees the two units'); close(p2)
     open_item(p, 'Cost Alpha'); unit_cost(p, 0, '350')
@@ -178,5 +156,4 @@ with sync_playwright() as pw:
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()

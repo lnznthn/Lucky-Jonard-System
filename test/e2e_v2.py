@@ -1,43 +1,12 @@
 # End-to-end test of the v2 flows: toy details, receipt cost, supplier orders, pre-orders, invoices with the image, returns.
 # python3 test/e2e_v2.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import datetime, json, os, re, sys, urllib.request
+import datetime, os, re
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
-APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots2'
 os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-def rows(name): return dump()[name]['rows'][1:]
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
-def update_stock(p): tab(p, 'Home'); p.click('#view button[data-t="import"]')
-def new_sale(p): tab(p, 'Sales'); p.click('#view [data-act="sellNew"]') if p.is_visible('#view [data-act="sellNew"]') else None
-def no_toy(p, where):
-    txt = p.evaluate("() => document.body.innerText + ' ' + [...document.querySelectorAll('[placeholder],[aria-label]')].filter(e => e.offsetParent || e.closest('#sheet')).map(e => (e.getAttribute('placeholder') || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')").replace('Plain Toy', '')
-    check('toy' not in txt.lower(), f'no “toy” in the text of {where}')
-def home(p): tab(p, 'Home'); return p.inner_text('#view')
-def stock_names(p): return [e.inner_text().strip() for e in p.query_selector_all('#stockList .item .name')]
 TODAY = datetime.date.today().isoformat()
-def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
-    return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
-def paste_import(p, mode, text):
-    update_stock(p)
-    if not p.is_visible('#impText'): p.click('#manual summary')
-    p.click(f'button[data-m="{mode}"]'); p.fill('#impText', text); p.click('button:has-text("Preview")')
-def connect(p, code=CODE):
-    p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
-def pick(p, key, text):
-    p.fill(f'[data-pk="{key}"]', text); p.click(f'[data-sug="{key}"] button')
-def close(p): p.click('button[aria-label="Close"]')
 def png_size(data):
     """Width and height from a PNG's IHDR chunk, or None when the bytes are not a PNG."""
     return (int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')) if data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR' else None
@@ -57,15 +26,10 @@ def save_img(p, name, blocked=False):
         t.close(); open(path, 'wb').write(bytes(data)); got = 'tab'
     return got, png_size(open(path, 'rb').read())
 
-def apply(p, label):
-    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
-    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
-    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, accept_downloads=True)
-    p = ctx.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx)
     p.goto(APP); connect(p); synced(p)
 
     # ---- photo import carries the toy details; the release-date flag is its own field
@@ -296,7 +260,7 @@ with sync_playwright() as pw:
     check(cp[11] == 'Cancelled' and cp[12] == 200 and len(rows('Movements')) == n_moves, f'cancellation in the sheet, stock untouched: {cp[11:13]}')
 
     # ---- a second phone sees the same documents
-    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = page(ctx2, 'p2 ')
     p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 stock matches: {stock_map(p2)}')
     tab(p2, 'Sales'); check(len(p2.query_selector_all('#invList .item')) == 5, 'device 2 lists all five documents')
@@ -362,7 +326,7 @@ with sync_playwright() as pw:
     p.evaluate("prefs.theme = 'auto'; applyTheme()")
 
     # ---- a 40-line invoice continues on a second image: both download with no tab, the second repeats the column header with its page number
-    cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = cl.new_page(); q.on('pageerror', lambda e: errors.append('long ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
+    cl = b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True); q = page(cl, 'long '); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
       for (let i = 1; i <= 40; i++) qItem({ sku: 'L' + i, name: 'Grandista figure ' + i, cat: 'Figures', price: 100, active: true }, false);
       dirty(); qAdd('invoice', { invoice: { id: 'vlong', no: nextNo(), date: todayISO(), custId: custFor('Ana Reyes', ''), lines: Array.from({ length: 40 }, (_, i) => ({ sku: 'L' + (i + 1), qty: 1, list: 100, price: 100, cost: null })), preId: '' } }); commit();
@@ -385,7 +349,7 @@ with sync_playwright() as pw:
     cl.close()
 
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less
-    cx = b.new_context(viewport={'width': 390, 'height': 844}); q = cx.new_page(); q.on('pageerror', lambda e: errors.append('needs ' + str(e))); q.goto(APP); q.wait_for_selector('#tabs button')
+    cx = b.new_context(viewport={'width': 390, 'height': 844}); q = page(cx, 'needs '); q.goto(APP); q.wait_for_selector('#tabs button')
     q.evaluate("""() => {
       const it = (sku, name, extra) => qItem(Object.assign({ sku, name, cat: 'Figures', price: 100, active: true }, extra), false);
       const mv = (sku, qty) => qMove({ id: 'm' + uid(), date: todayISO(), sku, dir: 'In', qty, reason: 'Opening', ref: '', note: '', cost: null });
@@ -417,5 +381,4 @@ with sync_playwright() as pw:
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()

@@ -51,7 +51,7 @@ Release 2.2.0 changes both `apps-script/Code.gs` and the app. The script no long
 node test/backend.test.js                 # Code.gs against an in-memory fake of Google's services
 python3 -m http.server 8765 &             # the app
 node test/mock-backend.js 8766 &          # the fake back end over HTTP
-for t in test/*.py; do python3 $t; done   # drive the app in Chrome (needs Playwright and Chrome)
+for t in test/*.py; do python3 $t; done   # drive the app in Chrome (needs Playwright and Chrome); common.py holds their shared steps
 ```
 
 All of these run against the mock backend, which runs `Code.gs` on a fake of Google's services. They do not prove behaviour on a real sheet.

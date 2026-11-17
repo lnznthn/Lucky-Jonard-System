@@ -1,51 +1,17 @@
 # End-to-end test: python3 test/e2e.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import json, os, sys, urllib.request
+import json, os, urllib.request
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
-APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots'
 os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
 def activity(p): tab(p, 'Stock'); p.click('#view button[data-t="activity"]')
-def update_stock(p): tab(p, 'Home'); p.click('#view button[data-t="import"]')
 def update_label(p): tab(p, 'Home'); return p.inner_text('#view button[data-t="import"]')
-# Product names in the test data that contain the word; everything else on screen must not say it.
-DATA_NAMES = ['Plain Toy', 'Toy Train Set']
-def no_toy(p, where):
-    txt = p.evaluate("() => document.body.innerText + ' ' + [...document.querySelectorAll('[placeholder],[aria-label]')].filter(e => e.offsetParent || e.closest('#sheet')).map(e => (e.getAttribute('placeholder') || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')")
-    for n in DATA_NAMES: txt = txt.replace(n, '')
-    check('toy' not in txt.lower(), f'no “toy” in the text of {where}')
-def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def post_inbox(rows):
-    urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rows).encode(), method='POST')).read()
-def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
-    return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
-def paste_import(p, mode, text):
-    update_stock(p)
-    if not p.is_visible('#impText'): p.click('#manual summary')
-    p.click(f'button[data-m="{mode}"]'); p.fill('#impText', text); p.click('button:has-text("Preview")')
-def connect(p, code=CODE):
-    p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
 
-def apply(p, label):
-    """Taps Apply, reads the result sheet that stays until closed, and closes it."""
-    p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); out = p.inner_text('#sheet')
-    p.click('#sheet .btn[data-act="close"]'); return out
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx1 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
-    p = ctx1.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx1)
     p.goto(APP)
     check(p.is_visible('#view button.primary:has-text("New sale")') and p.is_visible('#view button[data-t="import"]:has-text("Update stock")') and 'Nothing needs you.' in p.inner_text('#view'), 'empty Home still shows New sale and Update stock')
     p.click('#view button.primary:has-text("New sale")'); p.wait_for_timeout(200)
@@ -165,7 +131,7 @@ with sync_playwright() as pw:
     check(any(r[6] == 'Correction' and r[7] for r in dump()['Movements']['rows'][1:]), 'correction row with Ref is in the sheet')
 
     # ---- device 2 connects and sees the same numbers
-    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = page(ctx2, 'p2 ')
     p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 matches device 1: {stock_map(p2)}')
 
@@ -362,7 +328,7 @@ with sync_playwright() as pw:
     check(p.evaluate("document.documentElement.getAttribute('data-theme')") is None and bg(p) == '#FAFAFA', 'Device removes data-theme and follows the light device')
     p.click('button[aria-label="Close"]')
     for scheme, want in [('dark', '#0D0D0D'), ('light', '#FAFAFA')]:
-        cx = b.new_context(color_scheme=scheme); pp = cx.new_page(); pp.on('pageerror', lambda e: errors.append('theme ' + str(e))); pp.goto(APP); pp.wait_for_selector('#tabs button')
+        cx = b.new_context(color_scheme=scheme); pp = page(cx, 'theme '); pp.goto(APP); pp.wait_for_selector('#tabs button')
         check(bg(pp) == want, f'Device follows a {scheme} device: {bg(pp)}')
         pp.evaluate("prefs.theme = '" + ('light' if scheme == 'dark' else 'dark') + "'; savePrefs()"); pp.reload(); pp.wait_for_selector('#tabs button')
         check(bg(pp) == ('#FAFAFA' if scheme == 'dark' else '#0D0D0D'), f'an explicit choice overrides a {scheme} device')
@@ -374,5 +340,4 @@ with sync_playwright() as pw:
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()

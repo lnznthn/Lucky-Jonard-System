@@ -2,28 +2,13 @@
 # the row adds, typed values overwriting the item on file while Claude's values only fill blanks, the cost on the row's line,
 # and the Inbox row left as Claude wrote it. Drives the app at phone size against the mock backend.
 # python3 test/fix.py  (needs the static server on APP_PORT and the mock backend on API_PORT, Chrome)
-import json, os, sys, urllib.request
+import json, os
 from playwright.sync_api import sync_playwright
+from common import *
 
-APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
-APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots-fix'
 os.makedirs(SHOTS, exist_ok=True)
-fails = []
-def check(cond, msg):
-    print(('PASS ' if cond else 'FAIL ') + msg)
-    if not cond: fails.append(msg)
-def dump(): return json.load(urllib.request.urlopen(API + '/_dump'))
-def rows(name): return dump()[name]['rows'][1:]
-def post_inbox(rs): urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rs).encode(), method='POST')).read()
-key = urllib.request.urlopen(API + '/_reset').read().decode()
-CODE = f'{API}/exec#{key}'
-
-def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
-def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-def connect(p): p.click('button[aria-label="Settings"]'); p.fill('#sCode', CODE); p.click('button:has-text("Test and save")')
-def close(p): p.click('button[aria-label="Close"]')
-def review(p): p.click('#syncBtn'); synced(p); tab(p, 'Home'); p.click('#view button[data-t="import"]')
+def review(p): p.click('#syncBtn'); synced(p); update_stock(p)
 def idx(p, name): return p.evaluate(f"ui.imp.rows.findIndex(r => r.name === {json.dumps(name)})")
 def line(p, name): return p.inner_text(f'.prow:has(#imp{idx(p, name)})')
 def fix(p, name): p.click(f'#impOut [data-act="impFix"][data-i="{idx(p, name)}"]')
@@ -31,7 +16,6 @@ def labels(p): return [e.inner_text().strip() for e in p.query_selector_all('#sh
 def costs(p): return [e.input_value() for e in p.query_selector_all('#sheet [data-cost="f.c"]')]
 def cost(p, k, v): p.fill(f'#sheet [data-cost="f.c"][data-k="{k}"]', str(v))
 def save(p): p.click('#sheet button:has-text("Save")')
-def apply(p, label): p.click(f'button:has-text("{label}")'); p.wait_for_selector('#sheet h2:has-text("Applied")'); p.click('#sheet .btn[data-act="close"]')
 def units(p, name):
     tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
     out = [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]; close(p); return out
@@ -41,10 +25,9 @@ def inbox(): return [r[:12] for r in rows('Inbox')]   # every column Claude wrot
 FIELDS = ['Category', 'Price (₱)', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release date still needs checking', 'Note']
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    b = launch(pw)
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
-    p = ctx.new_page(); errors = []
-    p.on('pageerror', lambda e: errors.append(str(e))); p.on('dialog', lambda d: d.accept())
+    p = page(ctx)
     p.goto(APP); connect(p); synced(p)
 
     # ---- new items: Cost each prefills the fields, a row without a cost says so, typed costs and price are recorded
@@ -98,7 +81,7 @@ with sync_playwright() as pw:
     check(units(p, 'Fix Alpha') == ['100', '150', '310', '310', '330'], 'the added units join the back of the queue')
     check(units(p, 'Fix Bravo') == ['30'], 'the lower count removed the two oldest units')
     check(inbox() == before and [r[12] for r in rows('Inbox')][2:] == ['Done', 'Done', ''], 'after Apply the Inbox rows keep what Claude wrote; only the recorded ones are Done')
-    tab(p, 'Home'); p.click('#view button[data-t="import"]'); p.click('#view button[data-act="inboxDismiss"]'); synced(p)
+    update_stock(p); p.click('#view button[data-act="inboxDismiss"]'); synced(p)
 
     # ---- a Receive row: Qty in place of Count; a typed price and category make the new item
     post_inbox([{'type': 'Receive', 'name': 'Fix Alpha', 'qty': 2, 'cost': 400}, {'type': 'Receive', 'name': 'Fix Delta', 'qty': 1}])
@@ -117,5 +100,4 @@ with sync_playwright() as pw:
 
     check(not errors, f'no page errors: {errors}')
     b.close()
-print('\nFAILED:' if fails else '\nALL PASSED', *fails, sep='\n')
-sys.exit(1 if fails else 0)
+finish()
