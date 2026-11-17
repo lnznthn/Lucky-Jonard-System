@@ -98,6 +98,7 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 /* A unit on the product sheet: its SKU and date over its cost and condition on a phone, all in one row on a desktop. */
 .units .item{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:8px 12px}.units .main{grid-column:1/-1}
 .row2[data-costbox]{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}   /* a condition such as "Loose complete" needs the wider share */
+.row3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .step{display:flex;gap:8px}.step .btn{min-width:52px;min-height:48px;padding:0}
 .step input{text-align:center}
 .sug{display:flex;flex-direction:column;border:1px solid var(--line);border-top:0;background:var(--field)}
@@ -214,7 +215,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl.lines{max-height:none;container-type:inline-size}
   .lines td:first-child{white-space:normal}
   .lines .picked{min-height:36px;padding:0 10px}.lines .picked .name{font-size:13px}.lines .picked .hint{display:none}.lines .picked .tbtn{min-height:0;align-self:center;font-size:13px}
-  .lines input{min-height:36px;font-size:13px;padding:0 8px}.lines input[type=number]{text-align:right}
+  .lines input,.lines select{min-height:36px;font-size:13px;padding:0 8px}.lines input[type=number]{text-align:right}
   .lines tr:has(+ .note) td{border-bottom:0}
   .lines .note td{padding:0 8px 12px;white-space:normal;overflow:visible}
   .lines .note td>*{position:sticky;left:8px;max-width:calc(100cqw - 16px)}   /* a notice stays in view while the lines scroll sideways */
@@ -327,6 +328,10 @@ const DELIVERED = 'Delivered', FOLLOW = 'To follow', CANCELLED = 'Cancelled';
 // What a return does to stock, per outcome. Same table as RETURN_STOCK_ in Code.gs: change both together.
 const RETURN_STOCK = { 'Restock': 'In', 'Write-off': null };
 const RETURN_HINT = { 'Restock': 'Goes back into stock.', 'Write-off': 'Does not go back into stock.' };
+// An invoice's subtotal is its lines not Cancelled (skip leaves out one more, a line about to be cancelled). Its total is the subtotal less the
+// discount, never below zero, plus the shipping fee; Code.gs works it out the same way. An invoice from before 2.6 has neither (0).
+const subOf = (v, skip) => r2(v.lines.reduce((s, l) => s + (l.status === CANCELLED || l === skip ? 0 : l.qty * l.price), 0));
+const totalOf = (v, skip) => r2(Math.max(0, subOf(v, skip) - (v.disc || 0)) + (v.fee || 0));
 // The condition of each unit and what it means. Same list and order as CONDITIONS_ in Code.gs: change both together.
 // '' is a unit with none recorded (every unit from before 2.6); a new unit starts as MIB in every form.
 const CONDITIONS = { 'MISB': 'Mint in sealed box: factory sealed', 'MIB': 'Mint in box: opened, unit mint, box included', 'MOC': 'Mint on card: still on its blister card',
@@ -345,9 +350,10 @@ let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get(
 if (prefs.tab === 'move') prefs.tab = 'home';
 else if (prefs.tab === 'import') prefs.tab = 'stock';   // 2.4.1 had Update inventory as its own page
 prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
-// paid: '' means paid in full. On a line, follow is the owner's Pre-order choice (unset: on when the line asks more than is free to sell),
+// paid: '' means paid in full. disc is the discount field typed last ('pct' or 'amt') and its value; fee is the shipping fee ('' for none).
+// On a line, follow is the owner's Pre-order choice (unset: on when the line asks more than is free to sell),
 // ol the supplier-order line it waits for ('' for a date typed in exp; unset: the first open one).
-const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], paid: '' });
+const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], paid: '', disc: { by: 'pct', v: '' }, fee: '' });
 let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
   sellSeg: 'list', supTab: 'sups', iq: '', sf: 'all', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
@@ -369,9 +375,9 @@ function live() {
   const all = moves.map((m, i) => ({ ...m, _i: i }));
   const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, conds, q) => perUnit(m, costs, conds).forEach(x => push(x, q));
   const find = (list, id) => list.find(x => x.id === id);
-  // A line of an invoice, and the Sale movement that takes it out of stock: <invId>-<line>, Ref = invoice number.
+  // A line of an invoice, and the Sale movement that takes it out of stock: <invId>-<line>, Ref = invoice number, with the line's cost and condition.
   const lineOf = q => { const v = find(invs, q.invId), l = v && v.lines.find(x => x.line === q.line); return l && l.status === FOLLOW ? [v, l] : []; };
-  const sale = (v, line, sku, qty, date, cost, q) => push({ id: v.id + '-' + line, date, sku, dir: 'Out', qty, reason: 'Sale', ref: String(v.no), note: '', cost }, q);
+  const sale = (v, line, sku, qty, date, cost, cond, q) => push({ id: v.id + '-' + line, date, sku, dir: 'Out', qty, reason: 'Sale', ref: String(v.no), note: '', cost, cond }, q);
   const nameOf = sku => (map.get(sku) || { name: sku }).name, handled = new Set();
   for (const q of queue) {
     if (q.kind === 'move') { push(q.move, q); continue; }
@@ -395,20 +401,21 @@ function live() {
       case 'cost': all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); break;
       case 'cond': all.forEach(m => { if (m.id === q.moveId) m.cond = q.cond; }); break;
       case 'invoice': {
-        // To-follow lines leave no stock and have no cost yet; paid blank means paid in full.
-        const v = q.invoice, c = custs.get(v.custId) || {}, total = r2(v.lines.reduce((s, l) => s + l.qty * l.price, 0)), paid = blank(v.paid) ? total : v.paid;
-        invs.push({ no: v.no, id: v.id, date: v.date, custId: v.custId, cust: c.name || '', contact: c.contact || '', total, paid, balance: r2(total - paid), ship: '',
-          lines: v.lines.map((l, k) => ({ line: k + 1, sku: l.sku, name: nameOf(l.sku), qty: l.qty, list: l.list, price: l.price, cost: l.follow ? null : l.cost,
-            status: l.follow ? FOLLOW : DELIVERED, expected: l.follow ? l.expected || '' : '', orderLine: l.follow ? l.orderLine || '' : '', delivered: l.follow ? '' : v.date })), q });
-        const made = invs[invs.length - 1];
-        v.lines.forEach((l, k) => { if (!l.follow) sale(made, k + 1, l.sku, l.qty, v.date, l.cost, q); });
+        // To-follow lines leave no stock and have no cost or condition yet; paid blank means paid in full.
+        const v = q.invoice, c = custs.get(v.custId) || {};
+        const made = { no: v.no, id: v.id, date: v.date, custId: v.custId, cust: c.name || '', contact: c.contact || '', disc: v.disc || 0, fee: v.fee || 0, ship: '',
+          lines: v.lines.map((l, k) => ({ line: k + 1, sku: l.sku, name: nameOf(l.sku), qty: l.qty, list: l.list, price: l.price, cost: l.follow ? null : l.cost, cond: l.follow ? '' : l.cond || '',
+            status: l.follow ? FOLLOW : DELIVERED, expected: l.follow ? l.expected || '' : '', orderLine: l.follow ? l.orderLine || '' : '', delivered: l.follow ? '' : v.date })), q };
+        made.total = totalOf(made); made.paid = blank(v.paid) ? made.total : v.paid; made.balance = r2(made.total - made.paid);
+        invs.push(made);
+        made.lines.forEach(l => { if (l.status === DELIVERED) sale(made, l.line, l.sku, l.qty, v.date, l.cost, l.cond, q); });
         break;
       }
-      case 'deliver': { const [v, l] = lineOf(q); if (l) { Object.assign(l, { status: DELIVERED, cost: q.cost, delivered: q.date }); v.w = q; sale(v, l.line, l.sku, l.qty, q.date, q.cost, q); } break; }
+      case 'deliver': { const [v, l] = lineOf(q); if (l) { Object.assign(l, { status: DELIVERED, cost: q.cost, cond: q.cond || '', delivered: q.date }); v.w = q; sale(v, l.line, l.sku, l.qty, q.date, q.cost, l.cond, q); } break; }
       case 'follow': { const [v, l] = lineOf(q); if (l) { l.expected = q.expected || ''; l.orderLine = q.orderLine || ''; v.w = q; } break; }
       case 'pay': { const v = find(invs, q.invId); if (v) { v.paid = Math.min(q.paid, v.total); v.balance = r2(v.total - v.paid); v.w = q; } break; }
-      // The line's amount comes off the total, and the refund off what was paid.
-      case 'lineCancel': { const [v, l] = lineOf(q); if (l) { l.status = CANCELLED; v.total = r2(v.total - l.qty * l.price); v.paid = r2(v.paid - Math.min(q.refund || 0, v.paid)); v.balance = r2(v.total - v.paid); v.w = q; } break; }
+      // The total is worked out again without the line (totalOf()), and the refund comes off what was paid.
+      case 'lineCancel': { const [v, l] = lineOf(q); if (l) { l.status = CANCELLED; v.total = totalOf(v); v.paid = r2(v.paid - Math.min(q.refund || 0, v.paid)); v.balance = r2(v.total - v.paid); v.w = q; } break; }
       case 'ship': { const v = find(invs, q.invId); if (v) { v.ship = q.ship; v.w = q; } break; }
       case 'ret': {
         const r = q.ret, v = find(invs, r.invId);
@@ -783,8 +790,13 @@ function renderHome() {
   const upd = 'Add inventory' + (waiting ? ' · ' + waiting : '');
   const tS = L.invs.filter(v => v.date === today), mS = L.invs.filter(v => v.date.slice(0, 7) === month);
   const sum = list => Math.round(list.reduce((s, v) => s + v.total, 0));
-  // Margin counts the lines that have left stock; a line still to follow has no cost yet.
-  let margin = 0, known = true, some = false; mS.forEach(v => v.lines.forEach(l => { if (l.status !== DELIVERED) return; if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } }));
+  // Margin is each invoice's marginOf() (after its discount, without its shipping fee) once every line has a cost; until then (a line still to
+  // follow has none yet) it counts the delivered lines that have one.
+  let margin = 0, known = true, some = false;
+  mS.forEach(v => {
+    const m = marginOf(v); if (m != null && v.lines.some(l => l.status === DELIVERED)) { some = true; margin += m; return; }
+    v.lines.forEach(l => { if (l.status !== DELIVERED) return; if (l.cost == null) known = false; else { some = true; margin += l.qty * (l.price - l.cost); } });
+  });
   const refunds = r2(L.rets.filter(r => r.date.slice(0, 7) === month).reduce((s, r) => s + (r.refund || 0), 0));
   const say = [known ? '' : some ? '* Leaves out products sold with no cost on file.' : 'No margin yet: the products sold have no cost on file.', refunds ? money(refunds) + ' refunded this month.' : ''].filter(Boolean).join(' ');
   const rows = needsRows(), cap = !wide() && rows.length > 5 && !ui.homeMore;
@@ -1078,7 +1090,14 @@ function reverseMove(id) {
 
 /* ---------- Sales: the New sale form, the invoice list and the invoice ---------- */
 function linePrice(l) { const it = l.sku && live().map.get(l.sku); return l.price === '' ? (it && it.price != null ? it.price : null) : Number(l.price); }
-function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + lineQty(l) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
+function invSub() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + lineQty(l) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
+/** The discount in money: that % of the subtotal when the % was typed last, else the amount typed. */
+const invDisc = (sub = invSub()) => { const d = ui.inv.disc, n = d.v === '' ? 0 : Number(d.v); return d.by === 'pct' ? r2(sub * n / 100) : n; };
+const invFee = () => (ui.inv.fee === '' ? 0 : Number(ui.inv.fee));
+/** What the two discount fields show: the one typed last as typed, the other worked out from the subtotal, so a % keeps its amount up to date as lines change. */
+function discShown() { const d = ui.inv.disc, s = invSub(), n = Number(d.v); return d.v === '' ? ['', ''] : d.by === 'pct' ? [d.v, String(invDisc(s))] : [s ? String(r2(n / s * 100)) : '', d.v]; }
+/** The form's total, by the rule Code.gs applies: the subtotal less the discount (never below zero), plus the shipping fee. */
+function invTotal() { return r2(Math.max(0, invSub() - (invDisc() || 0)) + (invFee() || 0)); }
 const lineQty = l => parseInt(l.qty, 10) || 0;
 const lineAmt = l => { const p = linePrice(l); return p == null || isNaN(p) ? '–' : money(r2(lineQty(l) * p)); };
 /** A line's cost each on desktop, from the units it takes oldest first; "Add the cost" when one of them has none, as the phone's note does. */
@@ -1092,10 +1111,22 @@ const lineOl = x => { const ols = openLines(x.sku); return x.ol === '' ? '' : ol
 /** What x (sku, ol, exp) records on a to-follow line: the supplier-order line and its date, or the date typed (null when not understood). */
 const expOf = x => { const ol = lineOl(x), o = ol && live().orders.find(y => y.id === ol); return { ol, exp: o ? o.expected || '' : x.exp ? parseDate(x.exp) : '' }; };
 /** What decides the form's shape; when it changes while typing, the form is redrawn. */
-const invSig = () => ui.inv.lines.map((l, i) => l.sku ? [isFollow(i), noCost(l)].join() : '').join('|');
+const invSig = () => ui.inv.lines.map((l, i) => l.sku ? [isFollow(i), noCost(l), lineCond(l, i)].join() : '').join('|');
 /** How many of the units a sale line takes have no cost yet. */
 const noCost = l => onHand(l.sku).units.slice(0, lineQty(l)).filter(u => u.cost == null).length;
+/** The condition of in-stock line i: a dropdown showing condOut() of the units it takes, where a pick edits those units (setLineCond()).
+ *  '' for a to-follow line or a product with no units on hand. */
+const lineCond = (l, i) => l.sku && !isFollow(i) && onHand(l.sku).units.length ? condSel(`id="c${i}" data-lcond="${i}" aria-label="Condition"`, condOut(l.sku, lineQty(l))) : '';
+/** A condition picked on a sale line is the product's: it is saved on the oldest units on hand, the ones the line takes. */
+function setLineCond(i, cond) {
+  const l = ui.inv.lines[i]; if (!l || !l.sku || !cond) return;
+  if (setConds(onHand(l.sku).units.slice(0, lineQty(l)).map(u => u.id), cond)) { commit(); toast(`Condition saved on ${itemName(l.sku)}`); }
+}
 function invBalance() { const t = invTotal(), p = ui.inv.paid === '' ? t : Number(ui.inv.paid); return Math.max(0, r2(t - (isNaN(p) ? 0 : p))); }
+/** Subtotal, Discount and Shipping fee rows above a total, shown only when there is a discount or a fee. */
+const subRows = (sub, disc, fee) => disc > 0 || fee > 0 ? [['Subtotal', money(sub)], disc > 0 && ['Discount', '−' + money(disc)], fee > 0 && ['Shipping fee', money(fee)]].filter(Boolean).map(([t, v]) => `<div><span>${t}</span><b>${v}</b></div>`).join('') : '';
+/** The form's totals: the rows above, then Total, and Balance while a line is to follow. */
+const invTotHtml = later => subRows(invSub(), invDisc() || 0, invFee() || 0) + (later ? `<div><span>Total</span><b id="invTotal">${money(invTotal())}</b></div><div class="big"><span>Balance</span><b id="invBal">${money(invBalance())}</b></div>` : `<div class="big"><span>Total</span><b id="invTotal">${money(invTotal())}</b></div>`);
 function invHint() {
   const L = live(), ls = ui.inv.lines.map((l, i) => ({ l, i })).filter(x => x.l.sku && L.map.get(x.l.sku));
   if (!ls.length) return 'Pick a product, then type the customer’s name.';
@@ -1125,7 +1156,7 @@ function expHtml(path, x, k, inline) {
 }
 function renderInvForm() {
   const box = $('#sellBody'); if (!box) return;
-  const f = ui.inv, L = live(), several = f.lines.length > 1, fol = f.lines.map((l, i) => isFollow(i)), later = fol.some(Boolean);
+  const f = ui.inv, L = live(), several = f.lines.length > 1, fol = f.lines.map((l, i) => isFollow(i)), later = fol.some(Boolean), lc = f.lines.map(lineCond);
   ui.invSig = invSig();
   // Nothing to sell yet: say so and offer the one step that fixes it.
   if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No products to sell yet</h3><p>Add a product with its price, or send Claude photos and review them under Add inventory.</p><div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="homeGo" data-to="add">Add inventory${L.inbox.length ? ' · ' + L.inbox.length : ''}</button></div></div>`; return; }
@@ -1137,17 +1168,22 @@ function renderInvForm() {
   const paid = later ? `<div><label for="iPaid">Paid now (${esc(prefs.cur)})</label><input id="iPaid" type="number" inputmode="decimal" min="0" step="any" data-b="inv.paid" value="${esc(f.paid)}" placeholder="Leave blank when paid in full"></div>` : '';
   // On a phone the date sits behind "Dated today", whose wording follows the date; on desktop it is a field in the top row.
   const date = `<div><label for="iDate">Date</label><input id="iDate" type="date" data-b="inv.date" ${wide() ? '' : 'data-redraw="1"'} value="${esc(f.date)}"></div>`;
-  const end = `<div class="tot">${later ? `<div><span>Total</span><b id="invTotal">${money(invTotal())}</b></div><div class="big"><span>Balance</span><b id="invBal">${money(invBalance())}</b></div>` : `<div class="big"><span>Total</span><b id="invTotal">${money(invTotal())}</b></div>`}</div>
+  // Discount % and Discount (amount) are linked: the one typed last decides and the other follows the subtotal. Both it and the fee are optional.
+  const [pct, amt] = discShown(), inCur = `(${esc(prefs.cur)})`;
+  const extra = `<div class="row3"><div><label for="iPct">Discount %</label><input id="iPct" type="number" inputmode="decimal" min="0" max="100" step="any" data-disc="pct" value="${esc(pct)}" placeholder="Optional"></div>
+      <div><label for="iDisc">Discount ${inCur}</label><input id="iDisc" type="number" inputmode="decimal" min="0" step="any" data-disc="amt" value="${esc(amt)}" placeholder="Optional"></div>
+      <div><label for="iFee">Shipping fee ${inCur}</label><input id="iFee" type="number" inputmode="decimal" min="0" step="any" data-b="inv.fee" value="${esc(f.fee)}" placeholder="Optional"></div></div>`;
+  const end = `<div class="tot" id="invTot">${invTotHtml(later)}</div>
     <div class="stack"><button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p></div>`;
   if (wide()) {   // the customer in one row, the lines as table rows with a to-follow line's expected arrival under it, the total and button at the right
     box.innerHTML = `<div class="frow">${cust}${date}${paid}</div>
-    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'num', 'money', 'money', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th>Pre-order</th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Cost each</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
+    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'num', 'money', 'money', 'txt', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th>Pre-order</th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Cost each</th><th>Condition</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
       <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td title="${l.sku ? esc(pickSub(l.sku)) : ''}"><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td><td>${l.sku ? tog(i) : ''}</td>
         <td class="n"><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}" aria-label="Quantity"></td>
         <td class="n"><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}" aria-label="Price each"></td>
-        <td class="n" id="cost${i}">${fol[i] ? '' : lineCost(l)}</td><td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
-      ${fol[i] ? `<tr class="note"><td colspan="8">${expHtml('inv.lines.' + i, l, i, true)}</td></tr>` : ''}`).join('')}</tbody></table></div>
-    ${add}<div class="send">${end}</div>`;
+        <td class="n" id="cost${i}">${fol[i] ? '' : lineCost(l)}</td><td>${lc[i]}</td><td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
+      ${fol[i] ? `<tr class="note"><td colspan="9">${expHtml('inv.lines.' + i, l, i, true)}</td></tr>` : ''}`).join('')}</tbody></table></div>
+    ${add}<div class="send">${extra}${end}</div>`;
     return;
   }
   box.innerHTML = `
@@ -1156,15 +1192,16 @@ function renderInvForm() {
       ${l.sku && !fol[i] ? invNoCost(l) : ''}
       <div class="row2"><div><label for="q${i}">Quantity</label><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}"></div>
         <div><label for="p${i}">Price each (${esc(prefs.cur)})</label><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}"></div></div>
+      ${lc[i] ? `<div><label for="c${i}">Condition</label>${lc[i]}</div>` : ''}
       ${l.sku ? `<label class="check">${tog(i)} Pre-order</label>` : ''}${fol[i] ? expHtml('inv.lines.' + i, l, i) : ''}
       ${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove this product</button>` : ''}`).join('')}
       ${add}</div>
     <div class="stack"><div class="row2">${cust}</div>
-      ${paid}
+      ${extra}${paid}
       <details ${f.date !== todayISO() ? 'open' : ''}>${summary('Dated ' + esc(fmtDay(f.date).toLowerCase()))}<div class="stack">${date}</div></details></div>
     ${end}`;
 }
-/** One invoice: lines with Pre-order on are to follow (no stock movement and no cost yet); the others leave stock at their FIFO cost. */
+/** One invoice: lines with Pre-order on are to follow (no stock movement, no cost or condition yet); the others leave stock at their FIFO cost, with the condition of the units they take. */
 function issueInvoice() {
   const f = ui.inv, L = live(), lines = [], seen = new Set();
   for (const [i, l] of f.lines.entries()) {
@@ -1176,24 +1213,28 @@ function issueInvoice() {
     const qty = Number(l.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
     const price = linePrice(l);
     if (price == null || isNaN(price) || price < 0) return toast(`Type the price for “${it.name}”.`);
-    const line = { sku: it.sku, qty, list: it.price == null ? null : it.price, price: r2(price), cost: follow ? null : costOut(it.sku, qty), follow };
+    const line = { sku: it.sku, qty, list: it.price == null ? null : it.price, price: r2(price), cost: follow ? null : costOut(it.sku, qty), cond: follow ? '' : condOut(it.sku, qty), follow };
     if (follow) { const x = expOf(l); if (x.exp == null) return toast(`Check the expected date for “${it.name}”.`); Object.assign(line, { expected: x.exp, orderLine: x.ol }); }
     lines.push(line);
   }
-  const later = lines.some(l => l.follow), total = r2(lines.reduce((s, l) => s + l.qty * l.price, 0));
+  const later = lines.some(l => l.follow), sub = r2(lines.reduce((s, l) => s + l.qty * l.price, 0)), disc = r2(invDisc(sub)), fee = r2(invFee());   // checked as Code.gs checks them
   const name = f.cust.trim(); if (!name) return toast('Add the customer’s name.');
   if (later && !f.contact.trim()) return toast('Add the customer’s phone or Messenger, so they can be told when the product arrives.');
+  if (isNaN(disc) || disc < 0) return toast('Discount must be zero or more.');
+  if (disc > sub) return toast('The discount is more than the subtotal.');
+  if (isNaN(fee) || fee < 0) return toast('Shipping fee must be zero or more.');
+  const total = r2(Math.max(0, sub - disc) + fee);
   const paid = later && f.paid !== '' ? Number(f.paid) : '';
   if (paid !== '' && (isNaN(paid) || paid < 0)) return toast('Amount paid must be zero or more.');
   if (paid !== '' && paid > total) return toast('Amount paid is more than the total.');
   const date = parseDate(f.date); if (!date) return toast('Check the date.');
   const custId = custFor(name, f.contact), id = 'v' + uid(), no = nextNo();
-  qAdd('invoice', { invoice: { id, no, date, custId, paid: paid === '' ? '' : r2(paid), lines } });
+  qAdd('invoice', { invoice: { id, no, date, custId, paid: paid === '' ? '' : r2(paid), disc, fee, lines } });
   ui.inv = newInv(); ui.sellSeg = 'list'; commit(); openInv(id); toast(`Invoice no. ${no} issued.${lines.some(l => !l.follow) ? ' Stock updated.' : ''}`);
 }
 const docTitle = v => 'Invoice no. ' + v.no;
-/** An invoice's margin in whole pesos: the total less the cost of its lines, cancelled lines left out; null while a line has no cost (a to-follow line has none yet). */
-const marginOf = v => { const ls = v.lines.filter(l => l.status !== CANCELLED); return ls.every(l => l.cost != null) ? Math.round(v.total - ls.reduce((s, l) => s + l.qty * l.cost, 0)) : null; };
+/** An invoice's margin in whole pesos: the total less the shipping fee and the cost of its lines, cancelled lines left out; null while a line has no cost (a to-follow line has none yet). */
+const marginOf = v => { const ls = v.lines.filter(l => l.status !== CANCELLED); return ls.every(l => l.cost != null) ? Math.round(v.total - (v.fee || 0) - ls.reduce((s, l) => s + l.qty * l.cost, 0)) : null; };
 const hasFollow = v => v.lines.some(l => l.status === FOLLOW);
 // The invoice list's filters: Home's "Collect" row opens Unpaid.
 const SALES_FILTERS = { all: ['All', () => true], unpaid: ['Unpaid', v => v.balance > 0], follow: ['To follow', hasFollow] };
@@ -1229,8 +1270,8 @@ function openInv(id) {
   if (sl && s.mode === 'follow') lineForm = sec(`Expected arrival · ${esc(sl.name)}`, `${expHtml('sub', s, 'S')}
       <div class="links"><button class="btn primary" style="flex:1" data-act="followSave">Save</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   if (sl && s.mode === 'lineCancel') {
-    // A refund defaults to what was paid beyond the new total.
-    const amt = r2(sl.qty * sl.price), over = Math.max(0, r2(v.paid - (v.total - amt)));
+    // A refund defaults to what was paid beyond the new total, which is worked out again without the line (a discount may absorb part of it).
+    const after = totalOf(v, sl), amt = r2(v.total - after), over = Math.max(0, r2(v.paid - after));
     lineForm = sec(`Cancel ${esc(sl.name)} × ${sl.qty}`, `<p class="hint">The total drops by ${money(amt)}. Paid so far ${money(v.paid)}.</p>
       <div><label for="sRefund">Refunded (${esc(prefs.cur)})</label><input id="sRefund" type="number" inputmode="decimal" min="0" step="any" data-b="sub.refund" value="${esc(s.refund)}" placeholder="${over ? 'Leave blank for ' + money(over) : 'Leave blank for none'}"></div>
       <div class="links"><button class="tbtn danger" data-act="lineCancelSave">Cancel this line</button><button class="tbtn" data-act="subOff">Back</button></div>`, '', 'pad');
@@ -1242,7 +1283,7 @@ function openInv(id) {
     const st = l.status === FOLLOW ? 'To follow' + (lineExp(l) ? ' · expected ' + esc(fmtDay(lineExp(l))) : '') + (ready.has(l.line) ? ' · ready to ship' : '') : l.status === DELIVERED && l.delivered && l.delivered !== v.date ? 'Delivered ' + esc(fmtDay(l.delivered)) : '';
     const at = `data-id="${esc(id)}" data-line="${l.line}"`;
     const acts = l.status === FOLLOW ? `<div class="links">${ready.has(l.line) ? `<button class="btn sm primary" data-act="lineShip" ${at}>Ship</button>` : ''}<button class="tbtn" data-act="invSub" data-m="follow" ${at}>Change expected date</button><button class="tbtn danger" data-act="invSub" data-m="lineCancel" ${at}>Cancel</button></div>` : '';
-    return `<div class="item"><div class="main"><div class="name">${esc(l.name)}${l.status === CANCELLED ? '<span class="tag">cancelled</span>' : ''}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div>${st ? `<div class="sub">${st}</div>` : ''}${acts}</div><span class="amt">${l.status === CANCELLED ? '' : money(r2(l.qty * l.price))}</span></div>`;
+    return `<div class="item"><div class="main"><div class="name">${esc(l.name)}${l.status === CANCELLED ? '<span class="tag">cancelled</span>' : ''}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}${l.cond ? ' · ' + esc(l.cond) : ''}</div>${st ? `<div class="sub">${st}</div>` : ''}${acts}</div><span class="amt">${l.status === CANCELLED ? '' : money(r2(l.qty * l.price))}</span></div>`;
   };
   const im = prepImg(v);
   openSheet(`
@@ -1250,7 +1291,7 @@ function openInv(id) {
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(lineRow).join('')}</div>
     ${lineForm}
-    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${v.balance > 0 ? `<p class="hint">Paid ${money(v.paid)} · balance ${money(v.balance)}</p>` : ''}<p class="hint">${margin != null ? 'Margin ' + money(margin) : hasFollow(v) ? 'Margin known once the to-follow lines ship' : 'Margin unknown: a product has no cost'}</p></div>
+    <div class="tot">${subRows(subOf(v), v.disc || 0, v.fee || 0)}<div class="big"><span>Total</span><b>${money(v.total)}</b></div>${v.balance > 0 ? `<p class="hint">Paid ${money(v.paid)} · balance ${money(v.balance)}</p>` : ''}<p class="hint">${margin != null ? 'Margin ' + money(margin) : hasFollow(v) ? 'Margin known once the to-follow lines ship' : 'Margin unknown: a product has no cost'}</p></div>
     ${payForm || (v.balance > 0 ? `<button class="btn" data-act="invSub" data-m="pay" data-id="${esc(id)}">Add a payment</button>` : '')}
     <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg && im.n === 1 ? `<button class="btn" data-act="imgCopy" data-id="${esc(id)}">Copy image</button>` : ''}</div>
     <label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>
@@ -1258,9 +1299,9 @@ function openInv(id) {
     ${retForm || (canReturn ? `<button class="btn" data-act="retOpen" data-id="${esc(id)}">Record a return</button>` : '')}
     ${v.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(v.q.id)}">Delete this invoice</button><p class="hint">It has not reached the sheet yet, so it can still be deleted. After that, a mistake is fixed with a return, or by reversing its stock movement in Activity.</p>` : ''}`, 'inv:' + id, () => openInv(id));
 }
-/** Ship a to-follow line: it leaves stock now, at the FIFO cost of the units it takes, under the same invoice number. */
+/** Ship a to-follow line: it leaves stock now, at the FIFO cost and with the condition of the units it takes, under the same invoice number. */
 function shipLine(v, l) {
-  qAdd('deliver', { invId: v.id, line: l.line, date: todayISO(), cost: costOut(l.sku, l.qty) });
+  qAdd('deliver', { invId: v.id, line: l.line, date: todayISO(), cost: costOut(l.sku, l.qty), cond: condOut(l.sku, l.qty) });
   commit(); toast(`${l.name} × ${l.qty} shipped. Stock updated.`);
 }
 function savePayment() {
@@ -1272,7 +1313,7 @@ function savePayment() {
 }
 function saveLineCancel() {
   const s = ui.sub, v = s && live().invs.find(x => x.id === s.id), l = v && v.lines.find(x => x.line === s.line && x.status === FOLLOW); if (!l) return;
-  const refund = s.refund === '' ? Math.max(0, r2(v.paid - (v.total - l.qty * l.price))) : Number(s.refund);
+  const refund = s.refund === '' ? Math.max(0, r2(v.paid - totalOf(v, l))) : Number(s.refund);
   if (isNaN(refund) || refund < 0) return toast('Refund must be zero or more.');
   if (refund > v.paid) return toast(`That is more than the ${money(v.paid)} paid.`);
   qAdd('lineCancel', { invId: v.id, line: l.line, refund: r2(refund) }); ui.sub = null; commit(); toast(`${l.name} taken off invoice no. ${v.no}`);
@@ -2182,10 +2223,16 @@ document.addEventListener('click', async ev => {
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
-function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); ui.inv.lines.forEach((l, i) => { if ((e = $('#amt' + i))) e.textContent = lineAmt(l); if ((e = $('#cost' + i)) && e.innerHTML) e.innerHTML = lineCost(l); }); }
+/** Brings the New sale form's figures up to date while typing: the totals, the discount field not typed last, the hint, and each line's amount and cost. */
+function liveHints() {
+  let e; if ((e = $('#invTot'))) e.innerHTML = invTotHtml(ui.inv.lines.some((l, i) => isFollow(i))); if ((e = $('#invHint'))) e.textContent = invHint();
+  const [pct, amt] = discShown(); [['#iPct', pct], ['#iDisc', amt]].forEach(([id, v]) => { if ((e = $(id)) && e !== document.activeElement) e.value = v; });
+  ui.inv.lines.forEach((l, i) => { if ((e = $('#amt' + i))) e.textContent = lineAmt(l); if ((e = $('#cost' + i)) && e.innerHTML) e.innerHTML = lineCost(l); });
+}
 document.addEventListener('input', ev => {
   const t = ev.target;
   if (t.dataset.cost) { costInput(t); return; }
+  if (t.dataset.disc) { ui.inv.disc = { by: t.dataset.disc, v: t.value }; liveHints(); return; }   // the discount field typed last decides
   if (t.dataset.units) redrawCosts(t.dataset.units, t.value - (t.dataset.have || 0));   // a quantity sets how many cost fields show (a count: the units above the stock on hand)
   if (t.dataset.b) {
     setPath(t.dataset.b, t.value);
@@ -2214,6 +2261,7 @@ document.addEventListener('change', ev => {
   if (t.dataset.cond) costInput(t);   // a unit's condition in the cost fields
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
   if (t.dataset.ucond && setConds([t.dataset.ucond], t.value)) { commit(); toast('Saved'); }
+  if (t.dataset.lcond) setLineCond(+t.dataset.lcond, t.value);
   if (t.dataset.rcost) setRowCost(t);
   if (t.dataset.rcond) setRowCond(t);
   if (t.dataset.rprice) setRowPrice(t);
