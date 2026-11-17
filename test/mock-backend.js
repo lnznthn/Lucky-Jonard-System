@@ -14,8 +14,6 @@ class Range {
   setFontWeight() { return this; }
   clearContent() { for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) { delete this.sh.cells[(this.r + i) + ',' + (this.c + j)]; delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)]; } return this; }
   setDataValidation(rule) { this.sh.validation = { r: this.r, c: this.c, nr: this.nr, nc: this.nc, rule }; return this; }
-  getFormula() { return this.sh.formulas[this.r + ',' + this.c] || ''; }
-  setFormula(f) { this.sh.formulas[this.r + ',' + this.c] = f; return this; }
 }
 class Sheet {
   constructor(name, ss) { this.name = name; this.ss = ss || {}; this.cells = {}; this.formulas = {}; this.max = 1000; this.frozen = 0; this.textCols = new Set(); this.protections = []; this.validation = null; this.filter = null; this.writes = 0; }

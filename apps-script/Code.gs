@@ -84,8 +84,6 @@ function setup() {
   moves.getRange('A:E').setNumberFormat('@');
   moves.getRange('G:I').setNumberFormat('@');
   moves.getRange('J:J').setNumberFormat('#,##0.00');
-  // 2.0.0 filled On hand with one ARRAYFORMULA in G2. It is now a plain number the script writes.
-  if (items.getRange('G2').getFormula()) items.getRange('G2').clearContent();
   Object.keys(T_).forEach(function (k) {
     var sh = ensureSheet_(ss, T_[k].name, T_[k].head);
     T_[k].text.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
