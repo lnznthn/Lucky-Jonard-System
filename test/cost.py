@@ -7,12 +7,12 @@ from common import *
 
 SHOTS = '/tmp/shots-cost'
 os.makedirs(SHOTS, exist_ok=True)
-def open_item(p, name): tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
+def open_item(p, name): tab(p, 'Inventory'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
 def units(p): return [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]
 def unit_cost(p, k, value): f = p.locator('#sheet [data-unit]').nth(k); f.fill(value); f.blur()   # a changed field saves when it loses focus
 def cost_fields(p, path): return [e.input_value() for e in p.query_selector_all(f'[data-cost="{path}"]')]
 def add_item(p, name, price=None, start=0, costs=()):
-    tab(p, 'Stock'); p.click('#view [data-act="newItem"]'); p.fill('#fName', name)
+    tab(p, 'Inventory'); p.click('#view [data-act="newItem"]'); p.fill('#fName', name)
     if price is not None: p.fill('#fPrice', str(price))
     p.fill('#fStart', str(start))
     for k, c in enumerate(costs): p.fill(f'#sheet [data-cost="f.c"][data-k="{k}"]', str(c))
@@ -33,7 +33,7 @@ with sync_playwright() as pw:
     p.goto(APP); connect(p); synced(p)
 
     # ---- more than 12 units: one Cost each field that opens into one field per unit
-    tab(p, 'Stock'); p.click('#view [data-act="newItem"]'); p.fill('#fName', 'Cost Many'); p.fill('#fStart', '13')
+    tab(p, 'Inventory'); p.click('#view [data-act="newItem"]'); p.fill('#fName', 'Cost Many'); p.fill('#fStart', '13')
     check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Cost each'] and p.is_visible('#sheet button:has-text("Different costs per unit")'), 'thirteen units show one Cost each field and Different costs per unit')
     p.fill('#sheet [data-cost="f.c"][data-k="0"]', '25'); p.click('#sheet button:has-text("Different costs per unit")')
     labels = [e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')]
@@ -93,15 +93,15 @@ with sync_playwright() as pw:
     # ---- a sale of a unit with no cost: the form says so, and the margin stays unknown after the cost is typed later
     add_item(p, 'Cost Bravo', price=500, start=2)
     sell(p, 'cost bravo', 500, 'Di Cruz', qty=2)
-    check('2 units of this item have no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody'), 'the form counts the units with no cost')
+    check('2 units of this product have no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody'), 'the form counts the units with no cost')
     p.fill('[data-b="inv.lines.0.qty"]', '1')
-    check('1 unit of this item has no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody') and p.evaluate('document.activeElement.dataset.b') == 'inv.lines.0.qty', 'one unit: the line says so, and the quantity keeps focus')
+    check('1 unit of this product has no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody') and p.evaluate('document.activeElement.dataset.b') == 'inv.lines.0.qty', 'one unit: the line says so, and the quantity keeps focus')
     p.screenshot(path=f'{SHOTS}/05-no-cost-line.png')
     p.click('#sellBody button:has-text("Add the cost")'); check(p.inner_text('#sheet h2') == 'Cost Bravo' and len(units(p)) == 2, 'Add the cost opens the item sheet'); close(p)
-    check('Margin unknown: an item has no cost' in issue(p), 'the invoice has an unknown margin')
+    check('Margin unknown: a product has no cost' in issue(p), 'the invoice has an unknown margin')
     open_item(p, 'Cost Bravo'); unit_cost(p, 0, '300'); check(units(p) == ['300'], 'the cost of the unit left is typed'); close(p)
     tab(p, 'Sales'); p.click('#invList .item:has-text("Di Cruz")')
-    check('Margin unknown: an item has no cost' in p.inner_text('#sheet'), 'the margin of the sale stays unknown'); close(p); synced(p)
+    check('Margin unknown: a product has no cost' in p.inner_text('#sheet'), 'the margin of the sale stays unknown'); close(p); synced(p)
     check([r[7] for r in rows('Invoice lines') if r[3] == 'Cost Bravo'] == [''], 'its invoice line has no cost in the sheet')
 
     # ---- a sale below zero, then a receipt: the first unit in covers the deficit
@@ -127,18 +127,18 @@ with sync_playwright() as pw:
     # ---- reversing a receipt takes out that receipt's unit; reversing a sale brings its unit back at its cost
     add_item(p, 'Cost Delta', price=90); stock_in(p, 'Cost Delta', [10, 20, 30]); synced(p)
     mid = p.evaluate(f"live().all.find(m => m.sku === {json.dumps(sku_of(p, 'Cost Delta'))} && m.cost === 20).id")
-    tab(p, 'Stock'); p.click('#view button[data-t="activity"]'); p.click(f'#actList [data-id="{mid}"]'); p.click('button:has-text("Reverse this movement")'); synced(p)
+    tab(p, 'Inventory'); p.click('#view button[data-t="activity"]'); p.click(f'#actList [data-id="{mid}"]'); p.click('button:has-text("Reverse this movement")'); synced(p)
     open_item(p, 'Cost Delta'); check(units(p) == ['10', '30'], f'the reversed receipt’s unit is gone, the others stay: {units(p)}'); close(p)
     cor = [r for r in rows('Movements') if r[6] == 'Correction' and r[7] == mid]
     check(len(cor) == 1 and cor[0][4:6] == ['Out', 1], f'one Out Correction refers to the receipt: {cor}')
     sale = [r for r in rows('Movements') if r[3] == 'Cost Alpha' and r[6] == 'Sale' and r[7] == '2'][0]
-    tab(p, 'Stock'); p.click('#view button[data-t="activity"]'); p.click(f'#actList [data-id="{sale[0]}"]'); p.click('button:has-text("Reverse this movement")'); synced(p)
+    tab(p, 'Inventory'); p.click('#view button[data-t="activity"]'); p.click(f'#actList [data-id="{sale[0]}"]'); p.click('button:has-text("Reverse this movement")'); synced(p)
     open_item(p, 'Cost Alpha'); check(units(p) == ['400', '100', '200'], f'a reversed sale brings its unit back at ₱200: {units(p)}'); close(p)
 
     # ---- Needs you asks for the cost of units with none, and opens Stock filtered to them
     add_item(p, 'Cost Echo', start=2); synced(p)
     h = home(p); titles = [e.inner_text() for e in p.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    check('Add the cost of 2 units' in titles and titles.index('Add the cost of 2 units') == titles.index('Price 1 item') + 1, f'Needs you: Add the cost of 2 units follows Price 1 item: {titles}')
+    check('Add the cost of 2 units' in titles and titles.index('Add the cost of 2 units') == titles.index('Price 1 product') + 1, f'Needs you: Add the cost of 2 units follows Price 1 product: {titles}')
     p.screenshot(path=f'{SHOTS}/06-needs-you.png')
     p.click('#view .item:has-text("Add the cost of 2 units")')
     check('Showing only: No cost yet' in p.inner_text('#view') and stock_names(p) == ['Cost Echo'], f'it opens Stock showing only items with a unit that has no cost: {stock_names(p)}')

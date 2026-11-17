@@ -1,4 +1,4 @@
-# Desktop layout check: side navigation, sheets as dialogs, the tables (Stock, Sales, Orders, Activity, Update stock) with
+# Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Update inventory) with
 # their sort and the Stock filter row, and no page that scrolls sideways.
 # python3 test/desktop.py  (needs static server on 8765, mock backend on 8766, Chrome)
 import os, re
@@ -21,18 +21,18 @@ with sync_playwright() as pw:
     side = p.eval_on_selector('nav.tabs', 'e => { const r = e.getBoundingClientRect(); return [r.left, r.width, r.height, innerHeight]; }')
     check(side[0] == 0 and 200 < side[1] < 260 and side[2] == side[3], f'navigation is a full-height side bar: {side}')
     labels = [x.inner_text().strip() for x in p.query_selector_all('#tabs button')]
-    check(labels == ['Home', 'Stock', 'Sales', 'Orders', 'Update stock · 3', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Stock, Sales, Orders, Update stock with its count, Activity: {labels}")
+    check(labels == ['Home', 'Inventory', 'Sales', 'Orders', 'Update inventory · 3', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Inventory, Sales, Orders, Update inventory with its count, Activity: {labels}")
     check(p.eval_on_selector('#tabs button.on', 'e => getComputedStyle(e).color') == p.evaluate("getComputedStyle(document.body).color"), 'the current page in the side bar is in the text colour')
-    # Update stock: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
-    tab(p, 'Update stock')
-    check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update stock shows each group as a table: {heads('imp.ready')}")
+    # Update inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
+    tab(p, 'Update inventory')
+    check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update inventory shows each group as a table: {heads('imp.ready')}")
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") td:nth-child(2)')
     check(p.inner_text('#sheet h2') == 'Correct this row', 'clicking a review row opens Correct this row'); p.click('#sheet button[aria-label="Close"]')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") input[type=checkbox]')
     check(p.is_hidden('#layer') and p.is_visible('button:has-text("Apply 2 changes")'), 'the tick box in a review row unticks it without opening the modal')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") input[type=checkbox]')
     apply(p, 'Apply 3 changes'); synced(p)
-    check(p.inner_text('header.top h1') == 'Stock' and fits(), 'header names the page; Stock fits the window')
+    check(p.inner_text('header.top h1') == 'Inventory' and fits(), 'header names the page; Inventory fits the window')
     for nm, pr in [('Grandista', '1800'), ('Maximatic', '1500')]:
         p.click(f'#stockList tbody tr:has-text("{nm}")'); p.click('button:has-text("Edit details")'); p.fill('#fPrice', pr); p.click('#sheet button.primary:has-text("Save")')
     p.screenshot(path=f'{SHOTS}/stock.png')
@@ -41,10 +41,10 @@ with sync_playwright() as pw:
     check(p.is_visible('#sellBody button:has-text("Issue invoice")') and p.is_visible('#invList') and not p.is_visible('[data-act="sellNew"]') and p.inner_text('header.top h1') == 'Sales', 'Sales shows the New sale form and the invoice list together')
     tops = lambda sel: p.eval_on_selector_all(sel, 'els => els.map(e => Math.round(e.getBoundingClientRect().top))')
     t = tops('#iCust, #iContact, #iDate'); check(len(t) == 3 and len(set(t)) == 1, f'Customer, Phone or Messenger and Date sit in one row: {t}')
-    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Item', '', 'Quantity', f'Price each (₱)', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
+    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Quantity', f'Price each (₱)', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
     pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.lines.0.qty"]', '2')
     check(p.inner_text('#amt0') == '₱3,600' and '3 in stock' in p.inner_text('#sellBody tbody tr:first-child'), f"a line shows its stock hint and its amount: {p.inner_text('#amt0')}")
-    p.click('button:has-text("Add another item")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another item adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
+    p.click('button:has-text("Add another product")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another product adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
     p.fill('[data-b="inv.lines.0.qty"]', '1')
     form, btn = [p.eval_on_selector(sel, 'e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }') for sel in ['#sellBody', '#sellBody [data-act="invIssue"]']]
     check(abs(btn[1] - form[1]) < 2 and btn[0] > (form[0] + form[1]) / 2, f'the total and the issue button sit at the right under the lines: {btn} in {form}')
@@ -80,11 +80,11 @@ with sync_playwright() as pw:
                 {'type': 'Count', 'name': 'Beta Figure', 'qty': 1, 'brand': 'banpresto', 'rel': '2024-07'},
                 {'type': 'Count', 'name': 'Delta Bust', 'qty': 3, 'cost': 250, 'mfr': 'Bandai', 'chr': 'Son Goku', 'rel': '2024-07-15'},
                 {'type': 'Count', 'name': 'Epsilon Statue', 'qty': 1, 'cost': 100, 'rel': '2023-12-31'}])
-    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update stock · 4')"); tab(p, 'Update stock'); apply(p, 'Apply 4 changes'); synced(p)
+    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update inventory · 4')"); tab(p, 'Update inventory'); apply(p, 'Apply 4 changes'); synced(p)
     p.click('#stockList tbody tr:has-text("alpha Plush")'); p.click('button:has-text("Edit details")'); p.fill('#fCat', 'Plush'); p.click('#sheet button.primary:has-text("Save")')
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
     # Stock: a read-only table of every field; a header sorts and a second click reverses; a filter row under the header.
-    tab(p, 'Stock'); T = '[data-tbl="stock"]'; cols = heads('stock')
+    tab(p, 'Inventory'); T = '[data-tbl="stock"]'; cols = heads('stock')
     cells = lambda k: p.eval_on_selector_all(f'{T} tbody tr', f'rs => rs.map(r => r.cells.length > 1 ? r.cells[{k}].innerText.trim() : "")')
     names = lambda: [x for x in cells(0) if x]
     th = lambda h: f'{T} thead tr:first-child th:nth-child({cols.index(h) + 1})'
@@ -145,7 +145,7 @@ with sync_playwright() as pw:
     nrows = p.eval_on_selector_all('.cols > div:nth-child(2) .list > *', 'els => els.length'); badge = p.inner_text('.cols > div:nth-child(2)')
     check(nrows >= 3 and 'See ' not in badge and p.query_selector('[data-act="homeMore"]') is None and all(p.is_visible(f'.cols > div:nth-child(2) .list > *:nth-child({i + 1})') for i in range(nrows)), f'Home on a 1280px window shows all {nrows} Needs-you rows with no See more')
     no_toy(p, 'desktop Home')
-    tab(p, 'Stock'); no_toy(p, 'Stock'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); tab(p, 'Update stock'); no_toy(p, 'Update stock')
+    tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Orders'); no_toy(p, 'Orders'); tab(p, 'Sales'); no_toy(p, 'Sales'); tab(p, 'Update inventory'); no_toy(p, 'Update inventory')
     tab(p, 'Activity'); no_toy(p, 'Activity'); check(p.inner_text('header.top h1') == 'Activity' and 'Sale' in p.inner_text('#actList') and fits(), 'Activity opens from the side bar')
     check(heads('moves') == ['Date', 'Item', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
     p.click('[data-tbl="moves"] tbody tr:has-text("Sale")'); check('Grandista Son Goku' in p.inner_text('#sheet h2') and p.is_visible('#sheet button:has-text("Reverse this movement")'), 'clicking a movement row opens the movement'); p.click('#sheet button[aria-label="Close"]')
@@ -153,11 +153,11 @@ with sync_playwright() as pw:
     p.screenshot(path=f'{SHOTS}/activity.png')
     for w in (1280, 900):
         p.set_viewport_size({'width': w, 'height': 800}); p.wait_for_timeout(200); bad = []
-        for pg in ['Home', 'Stock', 'Sales', 'Orders', 'Update stock', 'Activity']:
+        for pg in ['Home', 'Inventory', 'Sales', 'Orders', 'Update inventory', 'Activity']:
             tab(p, pg); bad += [] if fits() else [pg]
         check(not bad, f'no page scrolls sideways at {w} px wide, only the tables in their own boxes: {bad}')
     p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
-    check(p.inner_text('header.top h1') == 'Activity' and [x.inner_text().strip() for x in p.query_selector_all('#tabs button')] == ['Home', 'Stock', 'Sales', 'Orders'] and p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().top') > 600, 'narrowing the window returns to the phone layout with four tabs')
+    check(p.inner_text('header.top h1') == 'Activity' and [x.inner_text().strip() for x in p.query_selector_all('#tabs button')] == ['Home', 'Inventory', 'Sales', 'Orders'] and p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().top') > 600, 'narrowing the window returns to the phone layout with four tabs')
     tab(p, 'Sales'); check(p.is_visible('[data-act="sellNew"]'), 'on a phone Sales opens the invoice list with a New sale button')
     check(not errors, f'no page errors: {errors}')
     b.close()

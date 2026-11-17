@@ -17,7 +17,7 @@ def costs(p): return [e.input_value() for e in p.query_selector_all('#sheet [dat
 def cost(p, k, v): p.fill(f'#sheet [data-cost="f.c"][data-k="{k}"]', str(v))
 def save(p): p.click('#sheet button:has-text("Save")')
 def units(p, name):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
+    tab(p, 'Inventory'); p.click('#view .seg button[data-f="all"]'); p.click(f'#stockList .item:has-text("{name}")')
     out = [e.input_value() for e in p.query_selector_all('#sheet [data-unit]')]; close(p); return out
 def moves(name, reason): return [r for r in rows('Movements') if r[3] == name and r[6] == reason]
 def item(name): return next(r for r in rows('Items') if r[1] == name)
