@@ -291,7 +291,7 @@ const ICON = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   stock: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
   sell: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
-  orders: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  orders: '<path d="M2 6h12v10H2zM14 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   activity: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><path d="M13 4v6h4V4zM7 14v6h4v-6z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
@@ -327,7 +327,7 @@ const RETURN_HINT = { 'Restock': 'Goes back into stock.', 'Write-off': 'Does not
 let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
-let docs = Object.assign({ custs: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
+let docs = Object.assign({ custs: [], sups: [], orders: [], pres: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
 let meta = store.get('meta', {});
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
@@ -337,7 +337,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
 let ui = { q: '', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
+  sellSeg: 'list', supTab: 'sups', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -352,7 +352,7 @@ const saveSynced = () => { store.set('items', items); store.set('moves', moves);
 function live() {
   if (_live) return _live;
   const map = new Map(items.map(i => [i.sku, { ...i }]));
-  const custs = new Map(docs.custs.map(c => [c.id, { ...c }]));
+  const custs = new Map(docs.custs.map(c => [c.id, { ...c }])), sups = new Map(docs.sups.map(s => [s.id, { ...s }]));
   const orders = docs.orders.map(o => ({ ...o })), pres = docs.pres.map(p => ({ ...p })), invs = docs.invs.map(v => ({ ...v })), rets = docs.rets.map(r => ({ ...r }));
   const all = moves.map((m, i) => ({ ...m, _i: i }));
   const push = (m, q) => all.push({ ...m, _i: all.length, q }), units = (m, costs, q) => perUnit(m, costs).forEach(x => push(x, q));
@@ -365,9 +365,16 @@ function live() {
       case 'item': if (!map.has(q.item.sku)) map.set(q.item.sku, { ...q.item }); break;
       case 'edit': if (map.has(q.sku)) Object.assign(map.get(q.sku), q.patch); break;
       case 'cust': custs.set(q.cust.id, { ...q.cust }); break;
-      case 'order': orders.push({ ...q.order, name: nameOf(q.order.sku), status: 'Ordered', recQty: null, recDate: '', q }); break;
-      case 'receive': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Received'; o.recQty = q.qty; o.recDate = q.date; o.w = q; units({ id: 'rcv-' + o.id, date: q.date, sku: o.sku, dir: 'In', reason: 'Restock', ref: o.id, note: '' }, q.costs, q); } break; }
-      case 'orderCancel': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
+      case 'supplier': sups.set(q.supplier.id, { ...q.supplier }); break;
+      // A supplier order is one row per line; a line ID already there is skipped.
+      case 'order': { const o = q.order; o.lines.forEach(l => { if (!find(orders, l.id)) orders.push({ id: l.id, orderId: o.id, date: o.date, supId: o.supId, sup: '', sku: l.sku, name: nameOf(l.sku), qty: l.qty, cost: l.cost, expected: o.expected, recQty: 0, status: 'Ordered', note: o.note, q }); }); break; }
+      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost typed for it, skipping IDs already written.
+      case 'receive': {
+        const o = find(orders, q.lineId); if (!o || o.status === 'Cancelled') break;
+        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost }, q); });
+        o.recQty = Math.max(o.recQty || 0, q.from + q.costs.length); if (o.recQty >= o.qty) o.status = 'Received'; o.w = q; break;
+      }
+      case 'orderCancel': { const o = find(orders, q.lineId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
       case 'pre': {
         const p = q.pre, c = custs.get(p.custId) || {}, tot = r2(p.qty * p.price), it = map.get(p.sku) || {};
         pres.push({ id: p.id, date: p.date, custId: p.custId, cust: c.name || '', contact: c.contact || '', sku: p.sku, name: nameOf(p.sku), qty: p.qty, price: p.price, paid: p.paid, balance: r2(tot - p.paid), status: PRE_OPEN, kept: null, recNo: p.no, invNo: null, note: p.note, q });
@@ -407,12 +414,13 @@ function live() {
     else { nos.set(m.sku, n + m.qty); if (m.q && m.qty === 1) m.unit = m.sku + '-' + (n + 1); }
   });
   const incoming = new Map(), owed = new Map();
-  orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
+  // A line shows its supplier's current name; incoming is what its Ordered lines still have due.
+  orders.forEach(o => { o.sup = (sups.get(o.supId) || {}).name || o.sup; if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty - (o.recQty || 0)); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
   const inbox = docs.inbox.filter(r => !handled.has(r.row));
-  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, orders, pres, invs, rets, inbox };
+  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, all, custs, sups, orders, pres, invs, rets, inbox };
   return _live;
 }
 /**
@@ -503,16 +511,17 @@ const qLast = (kind, k, payload) => { queue = queue.filter(q => !(q.kind === kin
 const perUnit = (move, costs) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost }));
 const qIns = (move, costs) => perUnit(move, costs).forEach(qMove);
 /** The records in an entry that carry a SKU. */
-const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? [q.order] : q.kind === 'pre' ? [q.pre] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
+const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? q.order.lines : q.kind === 'pre' ? [q.pre] : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
 function describe(q) {
   switch (q.kind) {
     case 'item': return `New product “${q.item.name}”`;
     case 'edit': return `Edit of ${itemName(q.sku)}`;
     case 'cust': return `Customer “${q.cust.name}”`;
-    case 'order': return `Supplier order for ${itemName(q.order.sku)}`;
-    case 'receive': return 'Receiving a supplier order';
-    case 'orderCancel': return 'Cancelling a supplier order';
+    case 'supplier': return `Supplier “${q.supplier.name}”`;
+    case 'order': return `Supplier order of ${plural(q.order.lines.length, 'line')}`;
+    case 'receive': return 'Receiving a supplier order line';
+    case 'orderCancel': return 'Cancelling the rest of a supplier order line';
     case 'pre': return `Pre-order for ${itemName(q.pre.sku)}`;
     case 'prePay': return 'Payment on a pre-order';
     case 'preCancel': return 'Cancelling a pre-order';
@@ -546,7 +555,7 @@ function applySnapshot(s) {
   items = s.items;
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
-  docs = { custs: s.custs, orders: s.orders, pres: s.pres, invs: s.invs, rets: s.rets, inbox: s.inbox };
+  docs = { custs: s.custs, sups: s.sups || [], orders: s.orders, pres: s.pres, invs: s.invs, rets: s.rets, inbox: s.inbox };
   meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev };   // moveRev changes when a cost is rewritten in Movements
   ui.warn = s.warnings;   // problems the sheet found in its tabs, kept in memory until the next sync
   saveSynced(); dirty();
@@ -620,7 +629,7 @@ function copyText(text) {
 const closeBtn = `<button class="icon" data-act="close" aria-label="Close">${icon('close', 22)}</button>`;
 const waitTag = d => (d.q ? '<span class="tag warn">waiting</span>' : d.w ? '<span class="tag warn">change waiting</span>' : '');
 
-/* ---------- product picker used by the Move screen and the invoice and supplier order forms ---------- */
+/* ---------- product picker used by the Move screen and the invoice form ---------- */
 function pickerHtml(k, sku) {
   const it = sku && live().map.get(sku);
   return it
@@ -637,10 +646,10 @@ function rerender() { if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn(); else 
 const custList = () => `<datalist id="custList">${[...live().custs.values()].map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`;
 
 /* ---------- rendering ---------- */
-const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Orders']];
+const TABS = [['home', 'Home'], ['stock', 'Inventory'], ['sell', 'Sales'], ['orders', 'Suppliers']];
 // Routes with no phone tab, and the tab that stays lit while they show.
 const ROUTE_TAB = { move: 'stock', activity: 'stock' };
-const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Orders', move: 'Stock in and out', activity: 'Activity' };
+const TITLES = { home: 'Home', stock: 'Inventory', sell: 'Sales', orders: 'Suppliers', move: 'Stock in and out', activity: 'Activity' };
 // Add inventory is the last status tab of Inventory (ui.filter 'add'): the review of the Inbox rows, or the other ways in.
 const addOn = () => prefs.tab === 'stock' && ui.filter === 'add';
 function pageTitle() {
@@ -734,7 +743,7 @@ function needsRows() {
   }
   if (L.inbox.length) out.push(row(`Review ${plural(L.inbox.length, 'row')} from Claude`, 'Read from your photos, not recorded yet', 'data-act="homeGo" data-to="add"'));
   if (short.length) out.push(row(`Order stock for ${plural(short.length, 'product')} promised beyond supply`, 'More owed than on hand plus incoming', 'data-act="homeGo" data-to="short"'));
-  if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
+  if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order line')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
   if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, p) => s + p.balance, 0)))} on ${plural(owing.length, 'pre-order')}`, 'Balances still open', 'data-act="homeGo" data-to="pre"'));
   if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'product')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
   if (nocost) out.push(row(`Add the cost of ${plural(nocost, 'unit')}`, 'Without it, the margin on a sale stays unknown', 'data-act="homeGo" data-to="nocost"'));
@@ -1213,32 +1222,92 @@ function saveReturn() {
   ui.sub = null; commit(); toast('Return recorded');
 }
 
-/* ---------- Orders: pre-orders and supplier orders ---------- */
+/* ---------- Suppliers: the supplier list, and the supplier-order lines with their order sheet ---------- */
+const dueOf = o => o.qty - (o.recQty || 0);
+/** To-follow units on invoices, per supplier-order line they wait for. */
+function waitingOn() { const m = new Map(); live().invs.forEach(v => v.lines.forEach(l => { if (l.status === 'To follow' && l.orderLine) m.set(l.orderLine, (m.get(l.orderLine) || 0) + l.qty); })); return m; }
 function renderOrders() {
-  if (wide()) { view().innerHTML = preListHtml() + ordListHtml(); return; }   // two tables, one under the other
-  const pre = ui.ordSeg === 'pre';
-  view().innerHTML = `<div class="seg"><button class="${pre ? 'on' : ''}" data-act="ordSeg" data-s="pre">Pre-orders</button><button class="${pre ? '' : 'on'}" data-act="ordSeg" data-s="sup">Supplier orders</button></div>${pre ? preListHtml() : ordListHtml()}`;
+  const o = ui.supTab === 'orders';
+  view().innerHTML = `<div class="seg"><button class="${o ? '' : 'on'}" data-act="supTab" data-s="sups">Suppliers</button><button class="${o ? 'on' : ''}" data-act="supTab" data-s="orders">Orders</button></div>${o ? linesHtml() : supsHtml()}`;
 }
-function preRow(p, ready) {
-  return row(`${esc(p.cust)}${p.status !== PRE_OPEN ? `<span class="tag">${esc(p.status.toLowerCase())}</span>` : ''}${waitTag(p)}`,
-    `${esc(p.name)} × ${p.qty}${ready ? ' · ' + esc(contactOf(p)) : ''} · ${p.status === PRE_OPEN ? (p.balance > 0 ? 'balance ' + money(p.balance) : 'paid in full') : esc(fmtDay(p.date))}`, `data-act="pre" data-id="${esc(p.id)}"`);
+function supsHtml() {
+  const L = live(), rows = [...L.sups.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(s => {
+    const open = L.orders.filter(o => o.supId === s.id && o.status === 'Ordered'); return { s, n: open.length, inc: open.reduce((t, o) => t + dueOf(o), 0) };
+  });
+  const add = `<div><button class="btn primary${wide() ? '' : ' big'}" data-act="sup" data-id="">Add supplier</button></div>`, at = r => `data-act="sup" data-id="${esc(r.s.id)}"`;
+  if (!rows.length) return add + '<p class="empty">No suppliers yet. Add one here, or with its first order.</p>';
+  if (wide()) return add + table('sups', [['Name', r => r.s.name, null, 'name'], ['Contact', r => r.s.contact], ['Open lines', r => r.n, null, 'num'], ['Units incoming', r => r.inc, null, 'num'], ['Note', r => r.s.note, null, 'name']], rows, at);
+  return add + `<div class="list">${rows.map(r => row(esc(r.s.name), [r.s.contact, r.n ? plural(r.n, 'open line') : '', r.s.note].filter(Boolean).map(esc).join(' · '), at(r), r.inc ? `<span class="qty">${r.inc}</span>` : null)).join('')}</div>`;
 }
-function preListHtml() {
-  const L = live(), ready = readyPres(), rs = new Set(ready.map(p => p.id));
-  const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
-  // Desktop: one table, ready to ship first; Status sorts in that order too.
-  const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
-  const how = '<p class="hint">To take a pre-order, start a <b>New sale</b>. A product that is not free to sell is saved as a pre-order.</p>';
-  if (wide()) return `${how}
-    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date)), 'date'], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p), 'name'], ['Contact', contactOf], ['Product', p => p.name, null, 'name'], ['Qty', p => p.qty, null, 'num'],
-      ['Price', p => p.price, p => money(p.price), 'money'], ['Paid', p => p.paid, p => money(p.paid), 'money'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'money'], ['Status', rank, p => said[rank(p)]]],
-      [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
-  return `${how}
-    ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
-    ${open.length ? sec('Waiting for stock', `<div class="list">${open.map(p => preRow(p)).join('')}</div>`) : ''}
-    ${!L.pres.length ? `<p class="empty">No pre-orders yet.</p>` : ''}
-    ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(p => preRow(p)).join('')}</div></details>` : ''}`;
+function openSup(id) {
+  const s = id && live().sups.get(id), v = k => esc(s && s[k] ? s[k] : '');
+  openSheet(`<div class="top"><h2>${s ? esc(s.name) : 'New supplier'}</h2>${closeBtn}</div>
+    <div><label for="spName">Name</label><input id="spName" value="${v('name')}" autocomplete="off"></div>
+    <div><label for="spContact">Contact</label><input id="spContact" value="${v('contact')}" placeholder="Phone, Messenger or email" autocomplete="off"></div>
+    <div><label for="spNote">Note</label><input id="spNote" value="${v('note')}" placeholder="Optional" autocomplete="off"></div>
+    <button class="btn primary big" data-act="supSave" data-id="${s ? esc(s.id) : ''}">Save</button>`);
 }
+function saveSup(id) {
+  const name = $('#spName').value.trim().replace(/\s+/g, ' '), contact = $('#spContact').value.trim(), note = $('#spNote').value.trim(), cur = id && live().sups.get(id);
+  if (!name) return toast('Give the supplier a name.');
+  const clash = [...live().sups.values()].find(x => custKey(x.name) === custKey(name) && x.id !== id);
+  if (clash) return toast(`“${clash.name}” already exists.`);
+  if (!cur || name !== cur.name || contact !== String(cur.contact || '') || note !== String(cur.note || '')) qAdd('supplier', { supplier: { id: cur ? cur.id : 's' + uid(), name, contact, note } });
+  closeSheet(); commit(); toast('Saved');
+}
+function linesHtml() {
+  const L = live(), wait = waitingOn(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
+  const add = `<div><button class="btn primary${wide() ? '' : ' big'}" data-act="ordNew">New order</button></div>`, at = o => `data-act="ord" data-id="${esc(o.orderId)}"`;
+  if (!L.orders.length) return add + '<p class="empty">No supplier orders yet. New order opens Add inventory, where Claude’s rows from an order or quotation also arrive.</p>';
+  if (wide()) return add + table('olines', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Supplier', o => o.sup], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.qty, null, 'num'], ['Received', o => o.recQty || 0, null, 'num'],
+    ['Cost each', o => blank(o.cost) ? null : o.cost, o => blank(o.cost) ? '–' : money(o.cost), 'money'], ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'],
+    ['Status', o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), o => o.status === 'Ordered' ? 'On the way' : esc(o.status)], ['Waiting', o => wait.get(o.id) || 0, o => wait.get(o.id) || '', 'num']],
+    [...open, ...closed.slice(0, 200)], at);
+  const line = o => row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`,
+    [o.sup, 'ordered ' + fmtDay(o.date), o.recQty ? `${o.recQty} of ${o.qty} received` : '', o.status === 'Ordered' && o.expected ? 'expected ' + fmtDay(o.expected) : '', wait.get(o.id) ? wait.get(o.id) + ' waiting' : ''].filter(Boolean).map(esc).join(' · '),
+    at(o), `<span class="qty">${o.status === 'Ordered' ? dueOf(o) : o.recQty || 0}</span>`);
+  return add + (open.length ? sec('On the way', `<div class="list">${open.map(line).join('')}</div>`) : '<p class="empty">Nothing on the way.</p>')
+    + (closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(line).join('')}</div></details>` : '');
+}
+// Receiving a line: the quantity starts at what is still due and each unit's cost field at the line's cost each.
+const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], open: false } });
+/** One supplier order (id is its Order ID) with its lines: Receive and Cancel the rest per line, and Receive all. */
+function openOrd(id) {
+  const L = live(), lines = L.orders.filter(o => o.orderId === id); if (!lines.length) return closeSheet();
+  const o = lines[0], sup = L.sups.get(o.supId), open = lines.filter(x => x.status === 'Ordered'), wait = waitingOn();
+  // With one line left to receive, its form shows at once.
+  if (open.length === 1 && !(ui.sub && ui.sub.id === open[0].id)) ui.sub = recvSub(open[0]);
+  const s = ui.sub && ui.sub.mode === 'recv' ? ui.sub : null, l = s && open.find(x => x.id === s.id);
+  openSheet(`
+    <div class="top"><h2>Order from ${esc(o.sup)}</h2>${closeBtn}</div>
+    <p class="hint">${[sup && sup.contact, 'ordered ' + fmtDay(o.date), o.expected ? 'expected ' + fmtDay(o.expected) : ''].filter(Boolean).map(esc).join(' · ')} ${waitTag(o)}</p>
+    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
+    <div class="list">${lines.map(x => `<div class="item"><div class="main"><div class="name">${esc(x.name)}${x.status !== 'Ordered' ? `<span class="tag">${esc(x.status.toLowerCase())}</span>` : ''}${x.q ? '' : waitTag(x)}</div>
+      <div class="sub">${[x.qty + ' ordered', x.recQty ? x.recQty + ' received' : '', blank(x.cost) ? 'no cost yet' : money(x.cost) + ' each', wait.get(x.id) ? wait.get(x.id) + ' waiting' : ''].filter(Boolean).join(' · ')}</div>
+      ${x.status === 'Ordered' ? `<div class="links"><button class="tbtn" data-act="ordLine" data-id="${esc(x.id)}">Receive</button><button class="tbtn danger" data-act="ordCancel" data-id="${esc(x.id)}">Cancel the rest</button></div>` : ''}</div>
+      <span class="qty">${x.status === 'Ordered' ? dueOf(x) : x.recQty || 0}</span></div>`).join('')}</div>
+    ${l ? sec(`Receive ${esc(l.name)}`, `<div><label for="rcQty">Quantity received (${dueOf(l)} due)</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
+      <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') : ''}
+    ${open.length > 1 ? `<button class="btn ${l ? '' : 'primary'} big" data-act="ordRecvAll" data-id="${esc(id)}">Receive all</button>` : ''}
+    ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
+}
+/** Receives part or all of what is still due on a line; a short line stays open for the rest. */
+function receiveLine() {
+  const s = ui.sub, l = s && live().orders.find(x => x.id === s.id); if (!l || l.status !== 'Ordered') return;
+  const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
+  if (qty > dueOf(l)) return toast(`Only ${dueOf(l)} still due on this line.`);
+  const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
+  qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs });
+  ui.sub = null; commit(); toast(`+${qty} ${l.name}`);
+}
+/** Receives everything still due on every open line of the order, each unit at its line's cost each. */
+function receiveAll(id) {
+  const open = live().orders.filter(l => l.orderId === id && l.status === 'Ordered'), n = open.reduce((t, l) => t + dueOf(l), 0);
+  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost) }));
+  ui.sub = null; commit(); toast(`+${plural(n, 'unit')} received`);
+}
+
+/* The pre-order sheet */
 function openPre(id) {
   const L = live(), p = L.pres.find(x => x.id === id); if (!p) return closeSheet();
   const open = p.status === PRE_OPEN, ready = open && readyPres().some(x => x.id === id), tot = r2(p.qty * p.price);
@@ -1256,61 +1325,6 @@ function openPre(id) {
     ${sub || (open ? `<div class="actions"><button class="btn ${ready ? 'primary' : ''}" data-act="fulfil" data-id="${esc(id)}">Issue invoice</button>${p.balance > 0 ? `<button class="btn" data-act="subOn" data-id="${esc(id)}" data-m="pay">Add payment</button>` : ''}</div><button class="tbtn danger" data-act="subOn" data-id="${esc(id)}" data-m="cancel">Cancel</button>` : '')}
     ${rec ? `<button class="btn" data-act="inv" data-id="${esc(rec.id)}">Receipt no. ${rec.no} (image)</button>` : ''}
     ${p.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(p.q.id)}">Delete this pre-order</button>` : ''}`, 'pre:' + id, () => openPre(id));
-}
-function ordRow(o) { return row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`, o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''), `data-act="ord" data-id="${esc(o.id)}"`, `<span class="qty">${o.status === 'Received' ? o.recQty : o.qty}</span>`); }
-function ordListHtml() {
-  const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
-  const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), none = 'No supplier orders yet. Add one when stock is ordered and paid for.';
-  if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
-    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'num'],
-      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
-      [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">${none}</p>`}`;
-  return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
-    ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
-    ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
-}
-const newOrd = sku => ({ sku: sku || '', qty: 1, expected: '', note: '' });
-function openOrdForm() {
-  const f = ui.f || (ui.f = newOrd());
-  openSheet(`
-    <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
-    <div><div class="lbl">Product</div>${pickerHtml('f', f.sku)}</div>
-    <div class="row2"><div><label for="oQty">Quantity ordered</label><input id="oQty" type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="f.expected" value="${esc(f.expected)}"></div></div>
-    <details ${f.note ? 'open' : ''}>${summary('Note')}<div class="stack"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
-    <div class="stack"><button class="btn primary big" data-act="ordSave">Save order</button>
-    <p class="hint">Counts as incoming until it is received. The cost is typed when it arrives.</p></div>`, 'ordForm', openOrdForm);
-}
-function saveOrd() {
-  const f = ui.f, it = f.sku && live().map.get(f.sku);
-  if (!it) return toast('Pick a product first.');
-  const qty = Number(f.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
-  const expected = f.expected ? parseDate(f.expected) : ''; if (expected == null) return toast('Check the expected date.');
-  qAdd('order', { order: { id: 'o' + uid(), date: todayISO(), sku: it.sku, qty, expected, note: f.note.trim() } });
-  closeSheet(); ui.ordSeg = 'sup'; commit(); toast(`${qty} × ${it.name} on the way`);
-}
-function openOrd(id) {
-  const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
-  const open = o.status === 'Ordered';
-  if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, c: newCosts() };
-  const s = ui.sub || {};
-  openSheet(`
-    <div class="top"><h2>${esc(o.name)}</h2>${closeBtn}</div>
-    <p class="hint">Supplier order · ${o.qty} ordered ${esc(fmtDay(o.date))}${o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''} ${waitTag(o)}</p>
-    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
-    ${open ? sec('When it arrives', `<div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
-      <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') + `<button class="tbtn danger" data-act="ordCancel" data-id="${esc(id)}">Cancel this order</button>`
-      : `<dl class="kv"><dt>Status</dt><dd>${esc(o.status)}${o.status === 'Received' ? ', ' + o.recQty + ' on ' + esc(o.recDate) : ''}</dd></dl>`}
-    ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
-}
-function receiveOrd() {
-  const s = ui.sub, o = s && live().orders.find(x => x.id === s.id); if (!o) return;
-  const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
-  const costs = readCosts('sub.c', qty); if (!costs) return toast('Cost must be zero or more.');
-  qAdd('receive', { orderId: o.id, date: todayISO(), qty, costs });
-  closeSheet(); commit();
-  const waiting = readyPres().filter(p => p.sku === o.sku).length;
-  toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
-  if (waiting) { ui.ordSeg = 'pre'; go('orders'); }
 }
 
 /* ---------- Invoice image: the invoice or receipt drawn on a canvas and saved as PNG ---------- */
@@ -1482,14 +1496,15 @@ function recvRow(c) {
   return r;
 }
 function parseReceive(text) { const rows = pasted(text, c => /^(qty|quantity)/i.test((c[1] || '').trim()), recvRow); settleReceive(rows); return rows; }
-function settleReceive(rows) {
+/** ordered: the batch is a supplier order (Ordered), so a row on file becomes an order line ('ord') instead of a receipt of an open line. */
+function settleReceive(rows, ordered) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
     r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty);   // one per unit the row adds
     if (r.match) {
-      r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
-      r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
+      r.status = ordered ? 'ord' : 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
+      if (!ordered) r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
       if (r.order) taken.add(r.order.id);
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
@@ -1526,7 +1541,7 @@ function parseMoves(text) {
     return r;
   });
 }
-const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', ord: 'Order', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
 const IMP = {
   count: { name: 'Count from photo', cols: 'Name⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
     hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Products missing from the paste are left alone.' },
@@ -1561,13 +1576,16 @@ function inboxLoad() {
   }
   const mode = type === 'count' ? 'count' : 'receive';
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
+  // Rows added here by hand stay in the review when the Inbox rows change; an Order batch starts as Ordered, with the first Supplier and Expected given.
+  const hand = old.size && ui.imp.mode === mode ? ui.imp.rows.filter(r => !r.src.refs) : [], first = k => (set.find(r => r[k]) || {})[k] || '';
+  const ord = old.size && ui.imp.type === type ? ui.imp.ord : newOrd(type === 'order', first('supplier'), first('expected') && parseDate(first('expected')));
   ui.rdate = todayISO();
-  ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
+  ui.imp = { src: 'inbox', key, type, mode, ord, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
     const cols = (mode === 'count' ? [g.name, g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
-  }) };
+  }).concat(hand.map(r => impRow(mode, r.src))) };
   resettle(ui.imp);
   return true;
 }
@@ -1584,7 +1602,7 @@ function impRow(mode, src) {
 }
 /** Works out every row's status again, then puts back what the owner ticked or unticked. */
 function resettle(imp) {
-  (imp.mode === 'receive' ? settleReceive : settleCount)(imp.rows);
+  if (imp.mode === 'receive') settleReceive(imp.rows, imp.ord && imp.ord.on); else settleCount(imp.rows);
   imp.rows.forEach(r => {
     if (!r.src || !canTick(r)) return;
     if (r.src.user != null) r.on = r.src.user;
@@ -1592,6 +1610,18 @@ function resettle(imp) {
   });
 }
 const canTick = r => !['bad', 'skip'].includes(r.status);
+/** A Receive batch is received now, or Ordered (on) from a supplier, with the order date and expected arrival for the whole batch. */
+const newOrd = (on, sup, exp) => ({ on: !!on, sup: sup || '', date: todayISO(), exp: exp || '' });
+/** A review of rows typed here (Add a row, Order stock, New order), dated today when received. */
+function handImp(on) { ui.rdate = todayISO(); return { src: 'hand', mode: 'receive', ord: newOrd(on), rows: [] }; }
+const ordered = imp => imp.mode === 'receive' && !!imp.ord && imp.ord.on;
+/** Order stock and New order: Add inventory set to Ordered, in the review of rows typed here (a new one unless one is open), with the product as a row when one is given. */
+function orderStock(sku) {
+  if (!ui.imp || ui.imp.src !== 'hand') ui.imp = handImp(true); else ui.imp.ord.on = true;
+  const it = sku && live().map.get(sku);
+  if (it && !ui.imp.rows.some(r => r.match && r.match.sku === sku)) ui.imp.rows.push(impRow('receive', { cols: [it.name, '1'], use: sku }));
+  resettle(ui.imp); ui.filter = 'add'; go('stock');
+}
 const relToCheck = r => r.relCheck && !!r.rel && (!r.match || (r.adds || '').includes('release date'));
 /** Which group of the review a row belongs to: check (needs a decision), ready, or name (cannot be recorded as it is). */
 function impGroup(r) {
@@ -1602,17 +1632,18 @@ function impGroup(r) {
 /** The Add inventory tab of Inventory, drawn into #addInv. */
 function renderImport() {
   const box = $('#addInv'); if (!box) return;
-  // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
-  if (!(ui.imp && ui.imp.src === 'paste') && inboxLoad()) {
+  // A pasted preview or rows typed here are finished first; waiting rows show once they are applied or cleared.
+  if (!(ui.imp && ui.imp.src !== 'inbox') && inboxLoad()) {
     const n = ui.imp.refs.length, more = live().inbox.length - n;
-    box.innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
+    box.innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : ui.imp.type === 'order' ? 'a supplier’s order or quotation.' : 'supplier paperwork.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
     renderImpOut(); return;
   }
+  if (ui.imp && ui.imp.src === 'hand') { box.innerHTML = '<p>Rows typed here. Nothing is recorded until you apply them.</p><div id="impOut" class="stack" style="gap:20px"></div>'; renderImpOut(); return; }
   const m = IMP[ui.mode], L = live(), onWay = L.orders.filter(o => o.status === 'Ordered').length;
   const open = ui.manual == null ? !cfg.url : ui.manual;
   box.innerHTML = `
     <p>Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
-    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
+    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${plural(onWay, 'line')} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('Add a row', 'Received now or ordered from a supplier, typed by hand', 'data-act="impAdd" data-new="1"')}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
     <div class="seg">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
     <p class="hint">${m.hint}</p>
@@ -1627,8 +1658,8 @@ function renderImport() {
 }
 function renderImpOut() {
   const box = $('#impOut'); if (!box) return;
-  const imp = ui.imp; if (!imp || (imp.src !== 'inbox' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
-  if (!imp.rows.length) { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
+  const imp = ui.imp; if (!imp || (imp.src === 'paste' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
+  if (!imp.rows.length && imp.src === 'paste') { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
   const n = imp.rows.filter(r => r.on).length, list = (idx, k) => wide() && imp.mode !== 'moves' ? impTable(imp, idx, k) : `<div class="list">${idx.map(i => prowHtml(imp, i)).join('')}</div>`;
   let body;
   if (imp.mode === 'moves') body = sec('To review', list(imp.rows.map((r, i) => i)), `<span class="badge">${imp.rows.length}</span>`);
@@ -1645,12 +1676,22 @@ function renderImpOut() {
       g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
     ].join('');
   }
-  box.innerHTML = body + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : ''}</div>`;
+  box.innerHTML = (imp.mode === 'receive' ? ordSwitch(imp) : '') + (imp.rows.length ? body : '') + (imp.mode !== 'moves' ? '<button class="tbtn" data-act="impAdd">Add a row</button>' : '')
+    + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : imp.src === 'hand' ? '<button class="tbtn c" data-act="impClear">Clear these rows</button>' : ''}</div>`;
+}
+/** Above a Receive batch: Received now, or Ordered with the supplier (one on file or a new name), order date and expected arrival. */
+function ordSwitch(imp) {
+  const o = imp.ord || (imp.ord = newOrd());
+  return `<div class="stack" style="max-width:640px"><div class="seg"><button class="${o.on ? '' : 'on'}" data-act="ordOn" data-v="">Received now</button><button class="${o.on ? 'on' : ''}" data-act="ordOn" data-v="1">Ordered</button></div>
+    ${o.on ? `<div><label for="oSup">Supplier</label><input id="oSup" data-b="imp.ord.sup" list="supList" value="${esc(o.sup)}" placeholder="Pick one, or type a new name" autocomplete="off"><datalist id="supList">${[...live().sups.values()].map(x => `<option value="${esc(x.name)}">`).join('')}</datalist></div>
+      <div class="row2"><div><label for="oDate">Order date</label><input id="oDate" type="date" data-b="imp.ord.date" value="${esc(o.date)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="imp.ord.exp" value="${esc(o.exp)}"></div></div>
+      <p class="hint">Applying records one supplier order with a line per row. Nothing comes into stock until it is received under Suppliers.</p>`
+    : '<p class="hint">Each row adds stock at its cost.</p>'}</div>`;
 }
 /** A review group on desktop: one row per review row with every field it carries. A row opens Correct this row; the tick box records it or not. */
 function impTable(imp, idx, k) {
   const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
-  const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
+  const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'receives the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
   // One cost each for every unit the row adds, typed in place (setRowCost()); units with different costs show the range and open Correct this row.
   const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
     return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
@@ -1685,7 +1726,7 @@ function setRowPrice(t) {
 /** What a folded Ready group holds, for example "172 new products, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
   const rows = idx.map(i => imp.rows[i]), k = st => rows.filter(r => r.status === st).length, det = rows.filter(r => r.match && (r.adds || r.status === 'details')).length;
-  return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
+  return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', k('ord') ? plural(k('ord'), 'order line') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
 /** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
 const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
@@ -1698,8 +1739,9 @@ function prowHtml(imp, i) {
     else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
     else if (r.status === 'new') detail = `New${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
   } else if (imp.mode === 'receive') {
-    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-    else if (r.status === 'new') detail = `New · +${r.qty}${costNote(r)}`;
+    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · receives the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty - (r.order.recQty || 0)} due)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'ord') detail = `${esc(r.match.name)}: ${r.qty} ordered${costNote(r)}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'new') detail = `New · ${ordered(imp) ? r.qty + ' ordered' : '+' + r.qty}${costNote(r)}`;
   } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
   const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
   const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
@@ -1709,8 +1751,9 @@ function prowHtml(imp, i) {
     ? `<button class="name" data-act="impFix" data-i="${i}">${name}</button>` : `<label class="name" for="imp${i}">${name}</label>`}${sub ? `<div class="sub">${sub}</div>` : ''}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
 /** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
+/** i < 0 opens an empty row (Add a row): saving adds it to the review. */
 function openFix(i) {
-  const imp = ui.imp, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  const imp = ui.imp, r = imp && (i < 0 ? impRow(imp.mode, { cols: [] }) : imp.rows[i]); if (!r || !r.src) return;
   const src = r.src, c = fixedCols(imp.mode, src), at = k => c[ROW_COLS[imp.mode].indexOf(k)] || '', sim = src.use ? live().map.get(src.use) : r.similar;
   // A count is absolute, so an item on file gets cost fields only for the units above its stock.
   const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, t = (src.fix && src.fix.costs) || (r.cost != null ? [r.cost] : []);
@@ -1720,7 +1763,7 @@ function openFix(i) {
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
     ${fld('name', 'Name')}
     ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
-    ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
+    ${ordered(imp) ? fld('cost', `Cost each (${esc(prefs.cur)})`, ' inputmode="decimal" placeholder="Optional"') : costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
     ${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}
     <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
     <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
@@ -1731,7 +1774,7 @@ function openFix(i) {
     <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
 }
 function saveFix(i, simSku) {
-  const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
+  const imp = ui.imp, r = imp && (i < 0 ? impRow(imp.mode, { cols: [] }) : imp.rows[i]); if (!r) return;
   // Only the fields changed here count as typed: they overwrite the item on file, while the others keep the rule for Claude's values.
   const src = r.src, sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}, fix = { ...src.fix };
   document.querySelectorAll('#sheet [data-fx]').forEach(e => { const k = e.dataset.fx; v[k] = sp(e.value); if (v[k] !== sp(e.defaultValue)) fix[k] = v[k]; });
@@ -1739,12 +1782,14 @@ function saveFix(i, simSku) {
   if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) return toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`);
   if (v.price && parsePrice(v.price) == null) return toast('Price must be zero or more.');
   if (v.rel && !parseRel(v.rel)) return toast('Release date must look like 2024, 2024-07 or 2024-07-15.');
-  fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
-  if (!fix.costs) return toast('Cost must be zero or more.');
+  if (v.cost && parsePrice(v.cost) == null) return toast('Cost must be zero or more.');
+  // An order line has one cost each; otherwise each unit the row adds has its own.
+  if (ordered(imp)) delete fix.costs;
+  else if (!(fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0)))) return toast('Cost must be zero or more.');
   if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
   src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
-  imp.rows[i] = impRow(imp.mode, src);
-  resettle(imp); closeSheet(); renderImpOut();
+  if (i < 0) imp.rows.push(impRow(imp.mode, src)); else imp.rows[i] = impRow(imp.mode, src);
+  resettle(imp); closeSheet(); renderImport();
 }
 /** The result of Apply. It stays until closed and follows the sync. */
 function openImpResult() {
@@ -1752,7 +1797,7 @@ function openImpResult() {
   const pend = queued('pending');
   const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
   openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
-    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new product')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'product')} with new details`}.</p>
+    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${x.mode === 'order' ? `a supplier order of ${plural(x.nLines, 'line')}, ` : ''}${plural(x.nNew, 'new product')}, ${x.mode === 'order' ? '' : x.mode === 'receive' ? plural(x.nRecv, 'receipt') + ', ' : plural(x.nCount, 'count change') + ', '}${plural(x.nDetails, 'product')} with new details`}.</p>
     ${x.inbox ? `<p id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
@@ -1792,10 +1837,33 @@ function applyReceive(rows) {
     let it = r.match || made.get(norm(r.name));
     if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
-    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: r.costs });
-    else qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs);
+    // A row receives the oldest open order line of its product up to what is still due on it; units beyond that are a plain Restock.
+    const n = r.order ? Math.min(r.qty, r.order.qty - (r.order.recQty || 0)) : 0;
+    if (n) qAdd('receive', { lineId: r.order.id, date, from: r.order.recQty || 0, costs: r.costs.slice(0, n) });
+    if (r.qty > n) qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs.slice(n));
     out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
+  return out;
+}
+/** Ordered: the supplier (queued when the name is new), new products and their details, then one supplier order with a line per row. No stock moves. */
+function applyOrder(rows, o) {
+  const name = o.sup.trim().replace(/\s+/g, ' '), date = parseDate(o.date), expected = o.exp ? parseDate(o.exp) : '';
+  if (!name) return toast('Type the supplier’s name.');
+  if (!date) return toast('Check the order date.');
+  if (expected == null) return toast('Check the expected arrival.');
+  const out = { nNew: 0, nLines: 0, nDetails: 0, done: new Set() }, made = new Map(), lines = [];
+  rows.forEach((r, i) => {
+    if (!r.on || !['new', 'ord'].includes(r.status)) return;
+    let it = r.match || made.get(norm(r.name));
+    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
+    else if (r.match && patchExisting(it, r)) out.nDetails++;
+    lines.push({ id: 'l' + uid(), sku: it.sku, qty: r.qty, cost: r.costs[0] == null ? null : r.costs[0] });
+    out.done.add(i); dirty();
+  });
+  const cur = [...live().sups.values()].find(x => custKey(x.name) === custKey(name)), supId = cur ? cur.id : 's' + uid();
+  if (!cur) qAdd('supplier', { supplier: { id: supId, name, contact: '', note: '' } });
+  qAdd('order', { order: { id: 'o' + uid(), date, supId, expected, note: '', lines } });
+  out.nLines = lines.length;
   return out;
 }
 function applyMoves(rows) {
@@ -1809,7 +1877,7 @@ function applyMoves(rows) {
   return n;
 }
 /** Reads the pasted block into the preview. */
-function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }
+function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, ord: ui.imp && ui.imp.ord, rows: IMP[ui.mode].parse(ui.text) }; if (ui.mode === 'receive') resettle(ui.imp); renderImpOut(); }
 function buildPrompt() {
   const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${stockOf(i.sku)}`).join('\n') || '(empty: no products yet)';
   const details = `- Manufacturer, Brand, Product line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
@@ -1950,15 +2018,12 @@ document.addEventListener('click', async ev => {
       if (d.to === 'sell') {
         const l = ui.inv.lines; if (!l[0].sku) l[0] = { sku: it.sku, qty: 1, price }; else if (!l.some(x => x.sku === it.sku)) l.push({ sku: it.sku, qty: 1, price });
         ui.inv.force = ''; ui.sellSeg = 'new'; go('sell');
-      } else {
-        ui.ordSeg = 'sup'; go('orders');
-        ui.f = newOrd(it.sku); openOrdForm();
-      }
+      } else orderStock(it.sku);
       break;
     }
     case 'homeGo': {
       if (d.to === 'sale' || d.to === 'invs') { ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; go('sell'); }
-      else if (d.to === 'pre' || d.to === 'sup') { ui.ordSeg = d.to; go('orders'); }
+      else if (d.to === 'pre' || d.to === 'sup') { ui.supTab = 'orders'; go('orders'); }
       else { ui.filter = d.to; ui.q = ''; ui.tf = {}; go('stock'); }
       break;
     }
@@ -1978,8 +2043,18 @@ document.addEventListener('click', async ev => {
     case 'retOpen': { const v = live().invs.find(x => x.id === d.id); const l = v && v.lines.find(l => returnable(v, l.sku) > 0); if (l) { ui.sub = { id: d.id, mode: 'ret', sku: l.sku, qty: 1, outcome: 'Restock', refund: '', note: '' }; rerender(); } break; }
     case 'retSave': saveReturn(); break;
 
-    // orders
-    case 'ordSeg': ui.ordSeg = d.s; renderOrders(); break;
+    // suppliers and their orders
+    case 'supTab': ui.supTab = d.s; renderOrders(); break;
+    case 'sup': openSup(d.id); break;
+    case 'supSave': saveSup(d.id); break;
+    case 'ordNew': orderStock(''); break;
+    case 'ord': ui.sub = null; openOrd(d.id); break;
+    case 'ordLine': { const l = live().orders.find(x => x.id === d.id); if (l) { ui.sub = recvSub(l); rerender(); } break; }
+    case 'ordRecv': receiveLine(); break;
+    case 'ordRecvAll': receiveAll(d.id); break;
+    case 'ordCancel': { const l = live().orders.find(x => x.id === d.id); if (l && confirm(`Cancel the rest of this line? ${plural(dueOf(l), 'unit')} of ${l.name} stop counting as incoming.`)) { qAdd('orderCancel', { lineId: l.id }); ui.sub = null; commit(); toast('The rest is cancelled'); } break; }
+
+    // pre-orders
     case 'pre': ui.sub = null; openPre(d.id); break;
     case 'fulfil': {
       const p = live().pres.find(x => x.id === d.id); if (!p) break;
@@ -2001,11 +2076,6 @@ document.addEventListener('click', async ev => {
       if (kept > p.paid) { toast('That is more than what was paid.'); break; }
       qAdd('preCancel', { preId: p.id, kept: r2(kept) }); ui.sub = null; commit(); toast('Pre-order cancelled'); break;
     }
-    case 'ordNew': ui.f = null; openOrdForm(); break;
-    case 'ordSave': saveOrd(); break;
-    case 'ord': ui.sub = null; openOrd(d.id); break;
-    case 'ordRecv': receiveOrd(); break;
-    case 'ordCancel': if (confirm('Cancel this supplier order? It stops counting as incoming.')) { qAdd('orderCancel', { orderId: d.id }); closeSheet(); commit(); toast('Order cancelled'); } break;
 
     // import
     case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
@@ -2013,6 +2083,9 @@ document.addEventListener('click', async ev => {
     case 'impParse': impParse(); break;
     case 'inboxDismiss': if (ui.imp && ui.imp.src === 'inbox') { qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Dismissed' }); ui.imp = null; commit(); toast('Dismissed'); } break;
     case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
+    case 'ordOn': ui.imp.ord.on = !!d.v; resettle(ui.imp); renderImpOut(); break;
+    // Add a row: from the list of other ways it starts a review of rows typed here; in a review it adds to that review.
+    case 'impAdd': if (d.new) { ui.imp = handImp(false); renderImport(); } openFix(-1); break;
     case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; if (r.src) r.src.user = el.checked; renderImpOut(); break; }
     case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; if (r.src) r.src.use = r.match.sku; resettle(ui.imp); renderImpOut(); break; }
     case 'impFix': openFix(+d.i); break;
@@ -2021,10 +2094,11 @@ document.addEventListener('click', async ev => {
       const imp = ui.imp, rows = imp.rows;
       if (imp.mode === 'moves') ui.impResult = { moves: applyMoves(rows) };
       else {
-        const r = (imp.mode === 'count' ? applyCount : applyReceive)(rows), x = Object.assign({ mode: imp.mode }, r);
-        // Only the rows actually recorded leave the Inbox; unticked rows and rows that need a name keep waiting.
+        const r = ordered(imp) ? applyOrder(rows, imp.ord) : (imp.mode === 'count' ? applyCount : applyReceive)(rows); if (!r) break;
+        const x = Object.assign({ mode: ordered(imp) ? 'order' : imp.mode }, r);
+        // Only the rows actually recorded leave the Inbox; unticked rows and rows that need a name keep waiting. Rows added here have no Inbox row.
         if (imp.src === 'inbox') {
-          const refs = rows.filter((row, i) => r.done.has(i)).flatMap(row => row.src.refs), n = list => list.reduce((s, row) => s + row.src.refs.length, 0);
+          const refs = rows.filter((row, i) => r.done.has(i)).flatMap(row => row.src.refs || []), n = list => list.reduce((s, row) => s + (row.src.refs || []).length, 0);
           if (refs.length) qAdd('inboxDone', { rows: refs, mark: 'Done' });
           Object.assign(x, { inbox: true, leftName: n(rows.filter(row => impGroup(row) === 'name')), leftOff: n(rows.filter((row, i) => impGroup(row) !== 'name' && !r.done.has(i))) });
         }
