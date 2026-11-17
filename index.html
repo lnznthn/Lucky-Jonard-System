@@ -981,13 +981,10 @@ function invHint() {
   return `Takes ${ls.length === 1 ? units + ' ' + L.map.get(ls[0].sku).name : plural(units, 'unit') + ' of ' + ls.length + ' items'} out of stock and opens the invoice.`;
 }
 function renderSell() {
-  if (wide()) {   // New sale across the page, the invoice list under it
-    view().innerHTML = `<section class="sec pad"><h2>New sale</h2><div id="sellBody" class="stack" style="gap:20px"></div></section><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
-    renderInvForm(); renderInvList(); return;
-  }
-  if (ui.sellSeg === 'new') { view().innerHTML = `<div id="sellBody" class="stack" style="gap:20px"></div>`; renderInvForm(); return; }
-  view().innerHTML = `<button class="btn primary big" data-act="sellNew">New sale</button><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
-  renderInvList();
+  const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or item" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
+  // Desktop: New sale across the page, the invoice list under it. Phone: the list, or the New sale form in its place.
+  view().innerHTML = wide() ? `<section class="sec pad"><h2>New sale</h2>${form}</section>${list}` : ui.sellSeg === 'new' ? form : `<button class="btn primary big" data-act="sellNew">New sale</button>${list}`;
+  renderInvForm(); renderInvList();   // each draws only into its own box, if the page has it
 }
 function invNotice(l, several) {
   const it = live().map.get(l.sku), have = Math.max(stockOf(l.sku), 0), free = freeOf(l.sku);
@@ -1008,9 +1005,9 @@ function invNoCost(l) {
   return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this item has' : n + ' units of this item have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
 }
 function renderInvForm() {
+  const box = $('#sellBody'); if (!box) return;
   const f = ui.inv, L = live(), pre = preOf(f), { mode, shortL } = invInfo(), pm = mode === 'pre', several = f.lines.length > 1;
   ui.invSig = invSig();
-  const box = $('#sellBody'); if (!box) return;
   // Nothing to sell yet: say so and offer the one step that fixes it.
   if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No items to sell yet</h3><p>Add an item with its price, or send Claude photos and review them under Update stock.</p><div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`; return; }
   const banner = pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : '';
@@ -1610,8 +1607,7 @@ function prowHtml(imp, i) {
   const sub = [parts, detail, esc(dl), r.match && relToCheck(r) ? 'Release date to verify' : '', esc(r.msg), r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
   const name = `${esc(r.name)}<span class="tag ${r.status === 'bad' ? 'bad' : ['dup', 'warn'].includes(r.status) || r.similar ? 'warn' : ''}">${STATUS_LABEL[r.status] || ''}</span>`;
   return `<div class="prow ${r.on ? '' : 'off'}"><input id="imp${i}" type="checkbox" data-act="tick" data-i="${i}" ${r.on ? 'checked' : ''} ${can ? '' : 'disabled'} aria-label="Record ${esc(r.name)}"><div class="main">${fixable
-    ? `<button class="name" data-act="impFix" data-i="${i}">${name}</button>${sub ? `<div class="sub">${sub}</div>` : ''}`
-    : `<label class="name" for="imp${i}">${name}</label>${sub ? `<div class="sub">${sub}</div>` : ''}`}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
+    ? `<button class="name" data-act="impFix" data-i="${i}">${name}</button>` : `<label class="name" for="imp${i}">${name}</label>`}${sub ? `<div class="sub">${sub}</div>` : ''}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
 /** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
 function openFix(i) {
