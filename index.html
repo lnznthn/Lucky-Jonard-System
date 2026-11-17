@@ -343,7 +343,7 @@ const oneCond = c => Object.hasOwn(CONDITIONS, c || '') ? c : '';   // a single 
 let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
-let docs = Object.assign({ custs: [], sups: [], orders: [], invs: [], rets: [], inbox: [] }, store.get('docs', {}));   // synced documents
+let docs = Object.assign({ custs: [], sups: [], orders: [], invs: [], rets: [], inbox: [], pay: [] }, store.get('docs', {}));   // synced documents; pay is the sheet's Payment details tab
 let meta = store.get('meta', {});
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
@@ -589,7 +589,7 @@ function applySnapshot(s) {
   items = s.items;
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
-  docs = { custs: s.custs, sups: s.sups || [], orders: s.orders, invs: s.invs, rets: s.rets, inbox: s.inbox };
+  docs = { custs: s.custs, sups: s.sups || [], orders: s.orders, invs: s.invs, rets: s.rets, inbox: s.inbox, pay: s.pay || [] };
   meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev };   // moveRev changes when a cost is rewritten in Movements
   ui.warn = s.warnings;   // problems the sheet found in its tabs, kept in memory until the next sync
   saveSynced(); dirty();
@@ -2034,13 +2034,22 @@ function openSettings() {
       <div><label for="sContact">Contact details (one per line)</label><textarea id="sContact" rows="3">${esc(sh.contact)}</textarea></div>
       <div><label for="sFoot">Line at the foot of the page</label><input id="sFoot" value="${esc(sh.foot)}" placeholder="Optional" autocomplete="off"></div>
       <div><div class="lbl">Logo</div><div class="links">${sh.logo ? `<img class="logo" src="${esc(sh.logo)}" alt="Logo">` : ''}<label class="btn sm" style="margin:0 0 3px;color:var(--text)">${sh.logo ? 'Replace' : 'Choose a picture'}<input id="sLogo" type="file" accept="image/*" hidden></label>${sh.logo ? `<button class="tbtn danger" data-act="logoOff">Remove</button>` : ''}</div></div>
-      <p class="hint">The shop name also heads the Home page on this device.</p>`, '', 'pad')}
+      <p class="hint">The shop name also heads the Home page on this device.</p>
+      ${payHtml()}`, '', 'pad')}
     ${sec('Preferences', `<div><div class="lbl">Theme</div><div class="seg">${[['auto', 'Device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => `<button class="${prefs.theme === k ? 'on' : ''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
       <div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="4"></div>`, '', 'pad')}
     <button class="btn primary big" data-act="savePrefs">Save invoice details and preferences</button>
     ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Products and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
       <button class="tbtn danger" data-act="wipe">Erase data on this device</button><p class="hint" style="margin-top:-12px">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p>`, '', 'pad')}
     <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings');
+}
+/** Payment details, read only: the rows of the sheet's Payment details tab, which the invoice image draws. They live only in the sheet (the code is public). */
+function payHtml() {
+  const pay = docs.pay || [];
+  return `<div><div class="lbl">Payment details</div>${pay.length ? `<div class="list" id="payList">${pay.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.method)}</div><div class="sub">${[r.number, r.name].filter(Boolean).map(esc).join(' · ')}</div></div></div>`).join('')}</div>` : ''}
+    <p class="hint" style="margin-top:6px">${pay.length ? 'From the sheet’s Payment details tab; they appear on the invoice image. Change them in the sheet.'
+      : cfg.url ? 'None yet. Add rows (Method, Number, Name) to the sheet’s Payment details tab and they appear on the invoice image after the next sync.'
+      : 'They come from the sheet’s Payment details tab once the sheet is connected, and appear on the invoice image.'}</p></div>`;
 }
 /** What is typed in the shop fields, kept when the sheet is redrawn for a new logo. */
 function readShopFields() { if ($('#sShop')) { prefs.shop.name = $('#sShop').value.trim(); prefs.shop.contact = $('#sContact').value.trim(); prefs.shop.foot = $('#sFoot').value.trim(); } }
