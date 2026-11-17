@@ -1619,7 +1619,7 @@ function renderImpOut() {
     const fold = (k, line, idx, dflt) => `<details class="grp" data-grp="${k}" ${(imp.open[k] != null ? imp.open[k] : dflt) ? 'open' : ''}>${summary(line)}${list(idx, k)}</details>`;
     const left = imp.src === 'inbox' ? 'They stay in the Inbox.' : 'They are not recorded.';
     body = [
-      g.check.length ? sec('Check these · ' + g.check.length, list(g.check, 'check'), '', 'grp-check') : '',
+      g.check.length ? sec('Check these · ' + g.check.length, fold('check', `${plural(g.check.length, 'row')} to decide on before they are recorded.`, g.check, true), '', 'grp-check') : '',
       g.ready.length ? sec('Ready · ' + g.ready.length, g.ready.length > 8 ? fold('ready', readyLine(imp, g.ready), g.ready, false) : list(g.ready, 'ready'), '', 'grp-ready') : '',
       g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
     ].join('');

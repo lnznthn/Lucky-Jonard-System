@@ -26,6 +26,8 @@ with sync_playwright() as pw:
     # Update stock: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
     tab(p, 'Update stock')
     check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update stock shows each group as a table: {heads('imp.ready')}")
+    p.click('#impOut details[data-grp="check"] summary'); folded = p.is_hidden('[data-tbl="imp.check"]'); p.click('#impOut details[data-grp="check"] summary')
+    check(folded and p.is_visible('[data-tbl="imp.check"]'), 'Check these folds like Needs a name')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") td:nth-child(2)')
     check(p.inner_text('#sheet h2') == 'Correct this row', 'clicking a review row opens Correct this row'); p.click('#sheet button[aria-label="Close"]')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") input[type=checkbox]')
