@@ -23,6 +23,16 @@ with sync_playwright() as pw:
     labels = [x.inner_text().strip() for x in p.query_selector_all('#tabs button')]
     check(labels == ['Home', 'Stock', 'Sales', 'Orders', 'Update stock · 3', 'Activity'] and p.inner_text('#tabs .brand') == 'Bodega', f"side bar: Home, Stock, Sales, Orders, Update stock with its count, Activity: {labels}")
     check(p.eval_on_selector('#tabs button.on', 'e => getComputedStyle(e).color') == p.evaluate("getComputedStyle(document.body).color"), 'the current page in the side bar is in the text colour')
+    # Side bar collapses to icons (kept on the device); the phone layout is untouched.
+    full = p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width')
+    p.click('#navTog'); mini = p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width'); main_l = p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left')
+    check(mini < 80 and main_l == mini and p.inner_text('#tabs .on').strip() == '' and p.get_attribute('#tabs button[data-t="stock"]', 'title') == 'Stock' and p.get_attribute('#tabs button[data-t="import"]', 'aria-label') == 'Update stock · 3' and p.inner_text('#tabs .bd') == '3' and fits(), f'the toggle collapses the side bar to icons with tooltips and a count badge: {full} -> {mini}')
+    p.reload(); p.wait_for_selector('#tabs button')
+    check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == mini, 'the collapsed side bar survives a reload')
+    p.click('#navTog'); check(p.eval_on_selector('nav.tabs', 'e => e.getBoundingClientRect().width') == full and 'Update stock · 3' in p.inner_text('#tabs'), 'the toggle expands the side bar again')
+    p.click('#navTog'); p.set_viewport_size({'width': 390, 'height': 780}); p.wait_for_timeout(300)
+    check(p.is_hidden('#navTog') and p.eval_on_selector('.app', 'e => e.getBoundingClientRect().left') == 0 and p.inner_text('#tabs').split() == ['Home', 'Stock', 'Sales', 'Orders'], 'a collapsed side bar leaves the phone layout unchanged')
+    p.set_viewport_size({'width': 1280, 'height': 800}); p.click('#navTog'); p.wait_for_timeout(200)
     # Update stock: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
     tab(p, 'Update stock')
     check(p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Update stock shows each group as a table: {heads('imp.ready')}")

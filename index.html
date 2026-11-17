@@ -42,6 +42,7 @@ svg{flex:none;display:block}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;background:var(--bg);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:6}
 nav.tabs .in{display:flex;width:100%;max-width:720px}
 nav.tabs .brand{display:none}
+nav.tabs .navtog,nav.tabs .bd{display:none}
 nav.tabs button{flex:1;min-height:60px;border:0;border-top:2px solid transparent;margin-top:-1px;background:none;color:var(--muted);font-size:13px;font-weight:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 nav.tabs button.on{color:var(--text);border-top-color:var(--text)}
 /* Buttons: a solid lower layer marks something to press; pressing moves the face down onto it. */
@@ -164,6 +165,13 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   nav.tabs .brand{display:block;font:400 28px/1 var(--display);letter-spacing:.02em;padding:6px 14px 22px}
   nav.tabs button{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;min-height:44px;padding:0 14px;border-top:0;margin:0;font-size:15px}
   nav.tabs button.on{font-weight:600}
+  nav.tabs .navtog{display:flex;align-items:center;justify-content:flex-start;min-height:36px;padding:0 14px;border:0;background:none;color:var(--muted)}
+  html[data-mini] .app{margin-left:64px}
+  html[data-mini] nav.tabs{width:64px;padding:18px 8px}
+  html[data-mini] nav.tabs .navtog{justify-content:center;padding:0}
+  html[data-mini] nav.tabs .brand,html[data-mini] nav.tabs .lb{display:none}
+  html[data-mini] nav.tabs #tabs button{position:relative;justify-content:center;padding:0}
+  html[data-mini] nav.tabs .bd{display:block;position:absolute;top:4px;right:4px;min-width:16px;padding:0 4px;border-radius:8px;background:var(--text);color:var(--bg);font-size:11px;line-height:16px;text-align:center}
   .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
   /* Tables: hairline rows like the lists; the header stays in view, and a wide table scrolls sideways inside its own box. */
   .tbl{overflow:auto;max-height:calc(100dvh - 92px);border:1px solid var(--line)}
@@ -214,7 +222,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   </header>
   <main id="view"></main>
 </div>
-<nav class="tabs" aria-label="Main"><div class="in" id="tabs"></div></nav>
+<nav class="tabs" aria-label="Main"><button class="navtog" id="navTog" data-act="navMini" aria-controls="tabs"></button><div class="in" id="tabs"></div></nav>
 <div class="layer" id="layer" hidden><div class="scrim" data-act="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -279,6 +287,8 @@ const ICON = {
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   minus: '<path d="M5 12h14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  sidebarShut: '<path d="M4 4h16v16H4zM9 4v16M16 9l-3 3 3 3"/>',
+  sidebarOpen: '<path d="M4 4h16v16H4zM9 4v16M13 9l3 3-3 3"/>',
 };
 const icon = (k, size = 20, cls = '') => `<svg aria-hidden="true" class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter">${ICON[k]}</svg>`;
 const CHEV = icon('chev', 18, 'chev'), DOWN = icon('chev', 16);
@@ -627,8 +637,11 @@ function render() {
   $('#backBtn').setAttribute('aria-label', 'Close ' + pageTitle());
   view().className = 'v-' + prefs.tab;
   const lit = w ? prefs.tab : ROUTE_TAB[prefs.tab] || prefs.tab;
-  const tabs = w ? [...TABS, ['import', 'Update stock' + (waiting ? ' · ' + waiting : '')], ['activity', 'Activity']] : TABS;
-  $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}>${icon(k, 20)}${esc(n)}</button>`).join('');
+  const tabs = w ? [...TABS, ['import', 'Update stock', waiting], ['activity', 'Activity']] : TABS;
+  document.documentElement.toggleAttribute('data-mini', w && !!prefs.navMini);
+  $('#navTog').innerHTML = icon(prefs.navMini ? 'sidebarOpen' : 'sidebarShut', 20);
+  $('#navTog').setAttribute('aria-label', prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'); $('#navTog').title = prefs.navMini ? 'Expand the side bar' : 'Collapse the side bar'; $('#navTog').setAttribute('aria-expanded', String(!prefs.navMini));
+  $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n, c]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}${w ? ` title="${esc(n)}" aria-label="${esc(n + (c ? ' · ' + c : ''))}"` : ''}>${icon(k, 20)}<span class="lb">${esc(n)}${c ? ' · ' + c : ''}</span>${c ? `<span class="bd">${c}</span>` : ''}</button>`).join('');
   keepScroll(({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]);
   if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn();
   renderSync();
@@ -1792,6 +1805,7 @@ document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
+    case 'navMini': prefs.navMini = !prefs.navMini; savePrefs(); render(); break;
     case 'tab':
       if (STOCK_FILTERS[ui.filter]) ui.filter = 'all';
       if (d.t === 'home') ui.homeMore = false;
