@@ -1636,16 +1636,15 @@ function openFix(i) {
 }
 function saveFix(i, simSku) {
   const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
-  const sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}; document.querySelectorAll('#sheet [data-fx]').forEach(e => { v[e.dataset.fx] = sp(e.value); });
-  if (!v.name) { toast('Type a name.'); return; }
-  if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) { toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`); return; }
-  if (v.price && parsePrice(v.price) == null) { toast('Price must be zero or more.'); return; }
-  if (v.rel && !parseRel(v.rel)) { toast('Release date must look like 2024, 2024-07 or 2024-07-15.'); return; }
-  const costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
-  if (!costs) { toast('Cost must be zero or more.'); return; }
   // Only the fields changed here count as typed: they overwrite the item on file, while the others keep the rule for Claude's values.
-  const src = r.src, c = fixedCols(imp.mode, src), fix = { ...src.fix, costs };
-  Object.keys(v).forEach(k => { if (v[k] !== sp(c[ROW_COLS[imp.mode].indexOf(k)])) fix[k] = v[k]; });
+  const src = r.src, sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}, fix = { ...src.fix };
+  document.querySelectorAll('#sheet [data-fx]').forEach(e => { const k = e.dataset.fx; v[k] = sp(e.value); if (v[k] !== sp(e.defaultValue)) fix[k] = v[k]; });
+  if (!v.name) return toast('Type a name.');
+  if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) return toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`);
+  if (v.price && parsePrice(v.price) == null) return toast('Price must be zero or more.');
+  if (v.rel && !parseRel(v.rel)) return toast('Release date must look like 2024, 2024-07 or 2024-07-15.');
+  fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
+  if (!fix.costs) return toast('Cost must be zero or more.');
   if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
   src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
   imp.rows[i] = impRow(imp.mode, src);
