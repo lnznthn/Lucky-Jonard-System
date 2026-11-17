@@ -232,10 +232,10 @@ assert.equal(r.sync.orders.find(o => o.id === 'sl9').sku, luffy); assert.equal(r
 assert.equal(full().moves.find(m => m.id === 'inv9-1').sku, luffy);
 assert.match(z18.dupname2.error, /already exists/); assert.match(z18.oso10.error, /refused/);
 
-// 19. Inbox: rows Claude appends in the sheet show up as waiting, the app marks them Done or Dismissed
+// 19. Inbox: rows Claude appends in the sheet show up as waiting, the app marks them Done or Dismissed; Order rows carry Supplier and Expected
 const ib = sheet('Inbox');
 assert.ok(ib, 'setup creates the Inbox tab');
-assert.deepEqual(ib.getRange(1, 1, 1, 13).getValues()[0], ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status']);
+assert.deepEqual(ib.getRange(1, 1, 1, 15).getValues()[0], ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected']);
 assert.deepEqual(full().inbox, [], 'an empty Inbox sends nothing');
 const putRow = (row, vals) => vals.forEach((v, j) => ib.set(row, j + 1, v));
 putRow(2, ['2026-11-15', 'Count', 'Grandista Son Goku', '3', '', 'Bandai Spirits', 'Banpresto', 'Grandista', 'Son Goku', '2019-06', 'Y', '=back row hidden', '']);
@@ -245,7 +245,7 @@ putRow(5, ['2026-11-15', 'Count', '', '4', '', '', '', '', '', '', '', 'no name'
 putRow(6, ['', 'receive', 'No Date Toy', '1', '50', '', '', '', '', '', '', '', '']);
 let inbox = full().inbox;
 assert.deepEqual(inbox.map(x => [x.row, x.type, x.name]), [[2, 'count', 'Grandista Son Goku'], [3, 'receive', 'Gigo Zoro'], [6, 'receive', 'No Date Toy']], 'waiting rows only: a name and no status; a blank Added still shows');
-assert.deepEqual(inbox[0], { row: 2, added: '2026-11-15', type: 'count', name: 'Grandista Son Goku', qty: '3', cost: '', mfr: 'Bandai Spirits', brand: 'Banpresto', line: 'Grandista', chr: 'Son Goku', rel: '2019-06', verify: 'Y', note: '=back row hidden' });
+assert.deepEqual(inbox[0], { row: 2, added: '2026-11-15', type: 'count', name: 'Grandista Son Goku', qty: '3', cost: '', mfr: 'Bandai Spirits', brand: 'Banpresto', line: 'Grandista', chr: 'Son Goku', rel: '2019-06', verify: 'Y', note: '=back row hidden', supplier: '', expected: '' });
 assert.deepEqual([inbox[1].qty, inbox[1].cost, inbox[1].brand], ['2', '900', 'Gigo']); assert.equal(inbox[2].added, '');
 rowsBefore = full().rows;
 r = add([{ id: 'ib1', kind: 'inboxDone', rows: [{ row: 2, name: 'grandista son goku' }, { row: 3, name: 'Gigo Zoro' }], mark: 'Done' },
@@ -261,6 +261,10 @@ putRow(7, ['2026-11-15', 'Count', 'Mark Test', '1', '', '', '', '', '', '', '', 
 r = add([{ id: 'ib4', kind: 'inboxDone', rows: [{ row: 6, name: 'No Date Toy' }], mark: 'Dismissed' }, { id: 'ib5', kind: 'inboxDone', rows: [{ row: 7, name: 'Mark Test' }], mark: 'Weird' }]);
 assert.ok(r.results.every(x => x.ok)); assert.equal(ib.cell(6, 13), 'Dismissed', 'retrying is harmless'); assert.equal(ib.cell(7, 13), 'Done', 'an unknown mark becomes Done');
 assert.deepEqual(r.sync.inbox, []);
+putRow(8, ['2026-11-16', 'Order', 'Gigo Nami', '3', '850', '', '', '', '', '', '', '', '', 'Toy Hub', '2026-12-10']);
+assert.deepEqual(full().inbox.map(x => [x.row, x.type, x.name, x.cost, x.supplier, x.expected]), [[8, 'order', 'Gigo Nami', '850', 'Toy Hub', '2026-12-10']]);
+r = add([{ id: 'ib6', kind: 'inboxDone', rows: [{ row: 8, name: 'Gigo Nami', added: '2026-11-16', type: 'order', qty: '3' }], mark: 'Done' }]);
+assert.equal(ib.cell(8, 13), 'Done');
 
 // 20. nothing internal leaks, and unknown kinds are refused
 assert.ok(!JSON.stringify(full()).includes('"_row"') && !JSON.stringify(full()).includes('"_dirty"'));

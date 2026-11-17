@@ -26,8 +26,9 @@ var SHIP_ = ['', 'Delivered'];
 var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // Rows Claude writes after reading photos. The app shows the rows whose Status is blank and marks them Done or Dismissed.
 // An intake run may set Status to Working while it still researches a row; any non-blank Status keeps a row out of the app.
-// Nothing in this tab counts as stock until the app applies it.
-var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status'];
+// Nothing in this tab counts as stock until the app applies it. Supplier and Expected, after Status, belong to Order rows
+// (a supplier order or quotation), which the app opens as an Ordered batch.
+var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
 // Browse: one row per product with the computed numbers, rewritten in full at the end of every sync and add.
 // Units on hand lists each unit on hand, oldest first, as its SKU and cost, with ? for a unit without a cost.
 var BROWSE_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
@@ -90,7 +91,7 @@ function setup() {
   asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
   asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:K']).getRange('J:J').setNumberFormat('#,##0.00');
   Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
-  asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:M']);
+  asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:O']);
   var br = ss.getSheetByName('Browse');
   if (br && br.getRange(1, 1, 1, BROWSE_HEAD_.length).getValues()[0].join('|') !== BROWSE_HEAD_.join('|')) ss.deleteSheet(br);
   browseSheet_(ss);
@@ -320,8 +321,8 @@ function writeBrowse_() {
   sh.getRange(1, 1, rows.length + 1, BROWSE_HEAD_.length).setValues([BROWSE_HEAD_].concat(rows));
 }
 
-/** Inbox rows still waiting: a name and no status. */
-function inboxType_(v) { return /^r/i.test(s_(v)) ? 'receive' : 'count'; }
+/** Inbox rows still waiting: a name and no status. A Type starting with O is an order, with R a receipt, anything else a count. */
+function inboxType_(v) { return /^o/i.test(s_(v)) ? 'order' : /^r/i.test(s_(v)) ? 'receive' : 'count'; }
 function readInbox_() {
   var sh = sheet_('Inbox'), last = sh.getLastRow();
   if (last < 2) return [];
@@ -329,7 +330,7 @@ function readInbox_() {
   for (var i = 0; i < vals.length; i++) {
     var v = vals[i];
     if (!s_(v[2]) || s_(v[12])) continue;
-    out.push({ row: i + 2, added: dateStr_(v[0]), type: inboxType_(v[1]), name: s_(v[2]), qty: s_(v[3]), cost: s_(v[4]), mfr: s_(v[5]), brand: s_(v[6]), line: s_(v[7]), chr: s_(v[8]), rel: dateStr_(v[9]), verify: s_(v[10]), note: s_(v[11]) });
+    out.push({ row: i + 2, added: dateStr_(v[0]), type: inboxType_(v[1]), name: s_(v[2]), qty: s_(v[3]), cost: s_(v[4]), mfr: s_(v[5]), brand: s_(v[6]), line: s_(v[7]), chr: s_(v[8]), rel: dateStr_(v[9]), verify: s_(v[10]), note: s_(v[11]), supplier: s_(v[13]), expected: dateStr_(v[14]) });
   }
   return out;
 }
