@@ -162,12 +162,11 @@ with sync_playwright() as pw:
     p2.click('#syncBtn'); synced(p2)
     check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
 
-    def add_toy(pg, name, start, sku=None):
+    def add_toy(pg, name, start):
         tab(pg, 'Inventory'); pg.click('button:has-text("Add product")'); pg.fill('#fName', name); pg.fill('#fStart', str(start))
-        if sku: pg.click('#sheet summary:has-text("SKU")'); pg.fill('#fSku', sku)
         pg.click('#sheet button.primary:has-text("Save")')
 
-    # ---- two phones invent the same next SKU: the second is renumbered, nobody is credited wrongly
+    # ---- two phones invent the same next Product ID: the second is renumbered, nobody is credited wrongly
     add_toy(p, 'Dino Figure', 2); synced(p)
     sku_dino = [r[0] for r in dump()['Items']['rows'][1:] if r[1] == 'Dino Figure'][0]
     ctx2.set_offline(True)
@@ -180,17 +179,18 @@ with sync_playwright() as pw:
     check(stock_map(p2)['Dino Figure'] == 2 and stock_map(p2)['Robot Kit'] == 3, f'no cross-credit on device 2: {stock_map(p2)}')
     check(stock_map(p) == stock_map(p2), 'devices agree after renumbering')
 
-    # ---- a toy the sheet refuses (name already used by another SKU) takes its stock entry down with it
+    # ---- a product the sheet refuses (a name over 120 characters) takes its stock entries down with it, not onto the product that owns its Product ID
     add_toy(p, 'Lego Castle', 7); synced(p)
-    ctx2.set_offline(True); add_toy(p2, 'Lego Castle', 4, sku='LC-1'); ctx2.set_offline(False)
+    long_name = 'Lego Castle' + ' with every extra piece' * 6
+    ctx2.set_offline(True); add_toy(p2, long_name, 4); ctx2.set_offline(False)
     p2.click('#syncBtn'); p2.wait_for_timeout(1500)
     check('need attention' in p2.inner_text('#syncTxt'), f"refused entries flagged ({p2.inner_text('#syncTxt')})")
     tab(p2, 'Home'); check('Fix 5 entries the sheet refused' in p2.inner_text('#view'), 'Home flags the refused entries: the item and its four units')
     p2.click('#view .item:has-text("the sheet refused")'); p2.screenshot(path=f'{SHOTS}/10-failed.png')
-    check('New product “Lego Castle” (LC-1) was refused' in p2.inner_text('#view'), 'activity says which item was refused and why')
-    check(not any(r[0] == 'LC-1' for r in dump()['Items']['rows']) and not any(r[2] == 'LC-1' for r in dump()['Movements']['rows']), 'sheet has neither the toy nor its stock entry')
+    check(f'New product “{long_name}” was refused: Name is too long.' in p2.inner_text('#view'), 'activity says which product was refused and why, with no Product ID')
+    check(not any(r[1] == long_name for r in dump()['Items']['rows']) and not any(r[3] == long_name for r in dump()['Movements']['rows']), 'sheet has neither the product nor its stock entries')
     p2.click('#view .banner.bad button:has-text("Delete")'); synced(p2)
-    check(stock_map(p2)['Lego Castle'] == 7 and not p2.evaluate("live().map.has('LC-1')"), f"after Delete, Lego Castle stays at 7 and LC-1 is gone: {stock_map(p2)}")
+    check(stock_map(p2)['Lego Castle'] == 7 and long_name not in stock_map(p2), f"after Delete, Lego Castle stays at 7 and the refused product is gone: {stock_map(p2)}")
 
     # ---- Inbox: Claude appends rows to the sheet; the app shows them under Import to apply or dismiss
     p.click('#syncBtn'); synced(p); before = stock_map(p)
