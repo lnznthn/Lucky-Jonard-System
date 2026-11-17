@@ -35,7 +35,7 @@ with sync_playwright() as pw:
     p.set_viewport_size({'width': 1280, 'height': 800}); p.click('#navTog'); p.wait_for_timeout(200)
     # Add inventory, the last status tab of Inventory: each group of the review is a table; a row opens Correct this row, the tick box only ticks.
     tab(p, 'Inventory'); p.click('#view [data-f="add"]:has-text("Add inventory · 3")')   # no products yet: the button under "No products yet"
-    check(p.inner_text('#view .seg button.on') == 'Add inventory · 3' and not p.is_visible('#q') and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Price', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Add inventory shows each group as a table, with no search box: {heads('imp.ready')}")
+    check(p.inner_text('#view .seg button.on') == 'Add inventory · 3' and not p.is_visible('#q') and 'on' in p.get_attribute('#tabs button[data-t="stock"]', 'class') and p.is_visible('[data-tbl="imp.check"]') and p.is_visible('[data-tbl="imp.ready"]') and heads('imp.ready') == ['', 'Name', 'Status', 'Count', 'Cost', 'Condition', 'Price', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Note'], f"Add inventory shows each group as a table, with no search box: {heads('imp.ready')}")
     p.click('#impOut details[data-grp="check"] summary'); folded = p.is_hidden('[data-tbl="imp.check"]'); p.click('#impOut details[data-grp="check"] summary')
     check(folded and p.is_visible('[data-tbl="imp.check"]'), 'Check these folds like Needs a name')
     p.click('[data-tbl="imp.check"] tbody tr:has-text("Grandista") td:nth-child(2)')
@@ -53,7 +53,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#sellBody button:has-text("Issue invoice")') and p.is_visible('#invList') and not p.is_visible('[data-act="sellNew"]') and p.inner_text('header.top h1') == 'Sales', 'Sales shows the New sale form and the invoice list together')
     tops = lambda sel: p.eval_on_selector_all(sel, 'els => els.map(e => Math.round(e.getBoundingClientRect().top))')
     t = tops('#iCust, #iContact, #iDate'); check(len(t) == 3 and len(set(t)) == 1, f'Customer, Phone or Messenger and Date sit in one row: {t}')
-    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Pre-order', 'Quantity', f'Price each (₱)', 'Cost each', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
+    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Pre-order', 'Quantity', f'Price each (₱)', 'Cost each', 'Condition', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
     pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.lines.0.qty"]', '2')
     check(p.inner_text('#amt0') == '₱3,600' and '3 in stock' in p.inner_text('#sellBody tbody tr:first-child'), f"a line shows its stock hint and its amount: {p.inner_text('#amt0')}")
     p.click('button:has-text("Add another product")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another product adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
@@ -70,7 +70,7 @@ with sync_playwright() as pw:
     # A line beyond stock is to follow: Paid now joins the top row and the expected arrival spans the full width under the line.
     pick(p, 'inv.lines.0', 'zoro'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '700'); p.fill('[data-b="inv.cust"]', 'Cy Lim'); p.fill('[data-b="inv.contact"]', 'cy.lim')
     t = tops('#iCust, #iContact, #iDate, #iPaid'); check(len(t) == 4 and len(set(t)) == 1 and p.is_checked('[data-act="invFollow"][data-i="0"]'), f'a to-follow line ticks Pre-order and Paid now joins the top row: {t}')
-    check(p.eval_on_selector('#e0', 'e => e.closest("td").colSpan') == 8 and p.inner_text('#cost0') == '', 'its expected arrival spans the full width under its line, and it has no cost yet')
+    check(p.eval_on_selector('#e0', 'e => e.closest("td").colSpan') == 9 and p.inner_text('#cost0') == '', 'its expected arrival spans the full width under its line, and it has no cost yet')
     p.click('button:has-text("Issue invoice no. 2")'); p.click('button[aria-label="Close"]'); synced(p)
     row2 = [c.inner_text().strip() for c in p.query_selector_all('[data-tbl="invs"] tbody tr:first-child td')]
     check(row2[2] == 'Cy Limto follow' and row2[5] == '–' and p.get_attribute('#invSeg button[data-f="follow"]', 'class') == '' and p.inner_text('#invSeg button[data-f="follow"]') == 'To follow · 1', f'the invoice list tags it to follow and counts it on its filter: {row2}')
@@ -95,12 +95,13 @@ with sync_playwright() as pw:
     A = '[data-tbl="imp.ready"] tbody tr:has-text("alpha Plush")'
     p.click(f'{A} input[data-rcost]'); check(p.is_hidden('#layer'), 'a click in the cost field of a review row does not open the row')
     p.fill(f'{A} input[data-rcost]', '300'); p.press(f'{A} input[data-rcost]', 'Tab')
-    p.fill(f'{A} input[data-rprice]', '650'); p.press(f'{A} input[data-rprice]', 'Tab')
-    p.click(f'{A} td:nth-child(2)'); costs = [p.input_value(f'#sheet [data-cost="f.c"][data-k="{k}"]') for k in (0, 1)]
+    p.fill(f'{A} input[data-rprice]', '650'); p.press(f'{A} input[data-rprice]', 'Tab'); p.select_option(f'{A} select[data-rcond]', 'MOC')
+    p.click(f'{A} td:nth-child(2)'); costs = [p.input_value(f'#sheet [data-{f}="f.c"][data-k="{k}"]') for f in ('cost', 'cond') for k in (0, 1)]
     p.fill('#sheet [data-cost="f.c"][data-k="1"]', '400'); p.click('#sheet button:has-text("Save")'); rng = p.inner_text(f'{A} td:nth-child(5)'); p.click(f'{A} td:nth-child(5) button')
-    check(costs == ['300', '300'] and rng == '₱300 to 400' and p.inner_text('#sheet h2') == 'Correct this row', f'the cost typed in a review row goes to every unit; different costs show the range, which opens Correct this row: {costs} {rng}')
+    check(costs == ['300', '300', 'MOC', 'MOC'] and rng == '₱300 to 400' and p.inner_text('#sheet h2') == 'Correct this row', f'the cost and condition set in a review row go to every unit; different costs show the range, which opens Correct this row: {costs} {rng}')
     p.fill('#sheet [data-cost="f.c"][data-k="1"]', '300'); p.click('#sheet button:has-text("Save")'); apply(p, 'Apply 4 changes'); synced(p)
     check(any(r[1].lower() == 'alpha plush' and str(r[2]) == '650' for r in rows('Products')), 'a price typed in a review row reaches the product')
+    check([r[11] for r in rows('Movements') if r[3].lower() == 'alpha plush'] == ['MOC', 'MOC'], 'the condition picked in a review row reaches each unit')
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
     # Inventory: a read-only table of every field; a header sorts and a second click reverses; filters open from the headers.
     tab(p, 'Inventory'); T = '[data-tbl="stock"]'; cols = heads('stock')
@@ -177,7 +178,7 @@ with sync_playwright() as pw:
     no_toy(p, 'desktop Home')
     tab(p, 'Inventory'); no_toy(p, 'Inventory'); tab(p, 'Suppliers'); no_toy(p, 'Suppliers'); tab(p, 'Sales'); no_toy(p, 'Sales'); add_inventory(p); no_toy(p, 'Add inventory')
     tab(p, 'Activity'); no_toy(p, 'Activity'); check(p.inner_text('header.top h1') == 'Activity' and 'Sale' in p.inner_text('#actList') and fits(), 'Activity opens from the side bar')
-    check(heads('moves') == ['Date', 'Product', 'Reason', 'In or Out', 'Qty', 'Cost', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
+    check(heads('moves') == ['Date', 'Product', 'Reason', 'In or Out', 'Qty', 'Cost', 'Condition', 'Ref', 'Note'], f"Activity is a table: {heads('moves')}")
     p.click('[data-tbl="moves"] tbody tr:has-text("Sale")'); check('Grandista Son Goku' in p.inner_text('#sheet h2') and p.is_visible('#sheet button:has-text("Reverse this movement")'), 'clicking a movement row opens the movement'); p.click('#sheet button[aria-label="Close"]')
     p.focus('[data-tbl="moves"] tbody tr:first-child'); p.keyboard.press('Enter'); check(p.is_visible('#sheet button[aria-label="Close"]'), 'Enter on a focused row opens it too'); p.click('#sheet button[aria-label="Close"]')
     p.screenshot(path=f'{SHOTS}/activity.png')

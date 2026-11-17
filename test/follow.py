@@ -63,8 +63,8 @@ with sync_playwright() as pw:
     check('Paid ₱2,000 · balance ₱2,500' in p.inner_text('#sheet'), 'the payment lowers the balance')
     drawn = p.evaluate("""() => { const f = CanvasRenderingContext2D.prototype.fillText, out = []; CanvasRenderingContext2D.prototype.fillText = function (s, ...a) { out.push(String(s)); return f.call(this, s, ...a); };
       try { drawDoc(live().invs[0]); } finally { CanvasRenderingContext2D.prototype.fillText = f; } return out; }""")
-    long2 = p.evaluate(f"new Date('{EXP2}T00:00:00').toLocaleDateString(undefined, {{ year: 'numeric', month: 'long', day: 'numeric' }})")
-    check('INVOICE' in drawn and f'To follow · expected {long2}' in drawn and 'Paid' in drawn and '₱2,500' in drawn, f'the image marks the line to follow and shows Paid and Balance: {drawn}')
+    d2 = datetime.date.fromisoformat(EXP2); has = lambda t: any(t in s for s in drawn)   # amounts by their start: the image may add decimals
+    check('Invoice' in drawn and 'Expected arrival' in drawn and f'{d2.month}/{d2.day}/{d2.year}' in drawn and 'Paid' in drawn and has('₱2,000') and has('₱2,500'), f'the image gives the to-follow line its expected arrival and shows Paid and the balance: {drawn}')
     close(p); synced(p)
     check(rows('Invoices')[0][7:9] == [2000, 2500], f"the payment reached the sheet: {rows('Invoices')[0]}")
 

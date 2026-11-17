@@ -34,10 +34,10 @@ with sync_playwright() as pw:
 
     # ---- more than 12 units: one Cost each field that opens into one field per unit
     tab(p, 'Inventory'); p.click('#view [data-act="newItem"]'); p.fill('#fName', 'Cost Many'); p.fill('#fStart', '13')
-    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Cost each'] and p.is_visible('#sheet button:has-text("Different costs per unit")'), 'thirteen units show one Cost each field and Different costs per unit')
+    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Cost each', 'Condition'] and p.is_visible('#sheet button:has-text("Different costs per unit")'), 'thirteen units show one Cost each and one Condition field, and Different costs per unit')
     p.fill('#sheet [data-cost="f.c"][data-k="0"]', '25'); p.click('#sheet button:has-text("Different costs per unit")')
     labels = [e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')]
-    check(labels == [f'Unit {k} cost' for k in range(1, 14)] and cost_fields(p, 'f.c') == ['25'] * 13, f'it opens into thirteen fields holding the cost typed: {labels[:2]}…')
+    check(labels == [f'Unit {k} {w}' for k in range(1, 14) for w in ('cost', 'condition')] and cost_fields(p, 'f.c') == ['25'] * 13, f'it opens into thirteen pairs of fields holding the cost typed: {labels[:2]}…')
     p.screenshot(path=f'{SHOTS}/01-many-units.png'); close(p)
 
     # ---- four units in at four costs: one field per unit, the first fills the ones not typed in
@@ -45,7 +45,7 @@ with sync_playwright() as pw:
     open_item(p, 'Cost Alpha'); sheet = p.inner_text('#sheet')
     check('Left to promise is on hand, plus incoming supplier orders, minus units owed on pre-order lines still to follow.' in sheet and 'None on hand.' in sheet, 'the item sheet explains Left to promise and has no units on hand yet')
     p.click('#sheet button:has-text("Stock in")'); p.fill('#mvQty', '4')
-    check([e.inner_text() for e in p.query_selector_all('[data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'Stock in shows one cost field per unit')
+    check([e.inner_text() for e in p.query_selector_all('[data-costbox] label')] == [f'Unit {k} {w}' for k in range(1, 5) for w in ('cost', 'condition')], 'Stock in shows one cost field and one condition per unit')
     p.fill('[data-cost="mv.c"][data-k="0"]', '100'); check(cost_fields(p, 'mv.c') == ['100'] * 4, 'typing in the first field fills the others')
     for k, c in ((1, '200'), (2, '300'), (3, '400')): p.fill(f'[data-cost="mv.c"][data-k="{k}"]', c)
     p.fill('[data-cost="mv.c"][data-k="0"]', '150'); check(cost_fields(p, 'mv.c') == ['150', '200', '300', '400'], 'the first field leaves alone the fields typed in')
@@ -77,7 +77,7 @@ with sync_playwright() as pw:
     close(p); synced(p)
     alpha = [r for r in rows('Movements') if r[3] == 'Cost Alpha' and r[4] == 'In']
     check([r[9] for r in alpha] == [100, 200, 350, 400], f'the cost reached that unit’s row in Movements: {[r[9] for r in alpha]}')
-    check([r[8] for r in rows('Browse') if r[1] == 'Cost Alpha'] == [f'{pid}-3 350, {pid}-4 400'], f"Browse lists the units on hand with their SKUs and costs: {[r[8] for r in rows('Browse') if r[1] == 'Cost Alpha']}")
+    check([r[8] for r in rows('Browse') if r[1] == 'Cost Alpha'] == [f'{pid}-3 350 MIB, {pid}-4 400 MIB'], f"Browse lists the units on hand with their SKUs, costs and conditions: {[r[8] for r in rows('Browse') if r[1] == 'Cost Alpha']}")
     p2.click('#syncBtn'); synced(p2)
     open_item(p2, 'Cost Alpha'); check(units(p2) == ['350', '400'], f'device 2 has the new cost after its next sync: {units(p2)}'); close(p2)
 
