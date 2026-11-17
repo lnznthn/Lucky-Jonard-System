@@ -309,7 +309,7 @@ with sync_playwright() as pw:
     new_sale(p); pick(p, 'inv.lines.0', 'plain'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '300'); p.fill('[data-b="inv.cust"]', 'Eva Cruz'); p.fill('[data-b="inv.contact"]', '0917 111 2222'); p.fill('[data-b="inv.paid"]', '100')
     p.click('button:has-text("Save pre-order · receipt no. 8")'); close(p)
     h = home(p)
-    check('Order stock for 1 item promised beyond supply\nMore owed than on hand plus incoming' in h and 'Collect ₱1,400 on 1 pre-order' in h, 'Home: a pre-order beyond stock and incoming')
+    check('Order stock for 1 product promised beyond supply\nMore owed than on hand plus incoming' in h and 'Collect ₱1,400 on 1 pre-order' in h, 'Home: a pre-order beyond stock and incoming')
     p.click('#view .item:has-text("promised beyond supply")')
     check('Showing only: Promised beyond supply' in p.inner_text('#view') and stock_names(p) == ['Plain Toy'], 'the row opens Stock filtered to that item')
     p.click('#view button:has-text("Show all")')
@@ -362,7 +362,7 @@ with sync_playwright() as pw:
       commit();
     }""")
     names = lambda: [e.inner_text() for e in q.query_selector_all('#view .sec:has-text("Needs you") .item .name')]
-    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 item promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 item', 'Add the cost of 15 units', 'Check 1 release date']
+    want = ['Fix 1 entry the sheet refused', 'Ship Ana’s pre-order', 'Ship Ben’s pre-order', 'Review 1 row from Claude', 'Order stock for 1 product promised beyond supply', 'Receive 1 supplier order due', 'Collect ₱350 on 2 pre-orders', 'Price 1 product', 'Add the cost of 15 units', 'Check 1 release date']
     check(names() == want[:4] and q.inner_text('#view .badge') == '10' and q.inner_text('#view .more') == 'See 6 more', f'phone shows the first four rows, the badge counts all ten jobs: {names()}')
     q.screenshot(path=f'{SHOTS}/20-needs-collapsed.png')
     q.click('#view .more'); check(names() == want and q.inner_text('#view .more') == 'See less', f'See 6 more shows every row in the fixed order: {names()}')

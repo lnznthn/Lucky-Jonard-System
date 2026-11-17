@@ -269,7 +269,7 @@ with sync_playwright() as pw:
     check([h.inner_text() for h in p.query_selector_all('#impOut .sec > h2')] == ['Check these · 1', 'Ready · 12', 'Needs a name · 2'], 'review grouped: Check these, Ready, Needs a name, each with its row count')
     first = dump()['Inbox']['rows'].index(next(r for r in dump()['Inbox']['rows'] if r[2] == 'Fresh Box')) + 1
     check(f'Possibly the same box in two photos: 5 in all, row {first} has 2, row {first + 1} has 3' in txt, 'the same new name on two rows is summed and shows each source row')
-    check(not p.is_visible('#impOut .grp-ready .prow') and '11 new items, 1 already right' in txt and not p.is_visible('#impOut .grp-name .prow'), 'Ready (more than 8) and Needs a name start folded, Ready says what it holds')
+    check(not p.is_visible('#impOut .grp-ready .prow') and '11 new products, 1 already right' in txt and not p.is_visible('#impOut .grp-name .prow'), 'Ready (more than 8) and Needs a name start folded, Ready says what it holds')
     check('Apply 13 changes' in txt, 'Apply counts the ticked rows, including the count that is already right')
     bar = p.eval_on_selector('.applybar', 'e => [getComputedStyle(e).position, Math.round(e.getBoundingClientRect().bottom), innerHeight, Math.round(document.querySelector("nav.tabs").getBoundingClientRect().top)]')
     check(bar[0] == 'sticky' and bar[1] <= bar[3] + 1, f'Apply stays at the bottom of the screen above the tab bar: {bar}')
