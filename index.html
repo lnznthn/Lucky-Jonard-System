@@ -629,7 +629,7 @@ function copyText(text) {
 const closeBtn = `<button class="icon" data-act="close" aria-label="Close">${icon('close', 22)}</button>`;
 const waitTag = d => (d.q ? '<span class="tag warn">waiting</span>' : d.w ? '<span class="tag warn">change waiting</span>' : '');
 
-/* ---------- product picker used by the Move screen and the invoice and supplier order forms ---------- */
+/* ---------- product picker used by the Move screen and the invoice form ---------- */
 function pickerHtml(k, sku) {
   const it = sku && live().map.get(sku);
   return it
@@ -1278,25 +1278,6 @@ function ordListHtml() {
     ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : none}</p>`}
     ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
 }
-const newOrd = sku => ({ sku: sku || '', qty: 1, expected: '', note: '' });
-function openOrdForm() {
-  const f = ui.f || (ui.f = newOrd());
-  openSheet(`
-    <div class="top"><h2>New supplier order</h2>${closeBtn}</div>
-    <div><div class="lbl">Product</div>${pickerHtml('f', f.sku)}</div>
-    <div class="row2"><div><label for="oQty">Quantity ordered</label><input id="oQty" type="number" inputmode="numeric" min="1" step="1" data-b="f.qty" value="${esc(f.qty)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="f.expected" value="${esc(f.expected)}"></div></div>
-    <details ${f.note ? 'open' : ''}>${summary('Note')}<div class="stack"><input data-b="f.note" value="${esc(f.note)}" placeholder="Note" autocomplete="off" aria-label="Note"></div></details>
-    <div class="stack"><button class="btn primary big" data-act="ordSave">Save order</button>
-    <p class="hint">Counts as incoming until it is received. The cost is typed when it arrives.</p></div>`, 'ordForm', openOrdForm);
-}
-function saveOrd() {
-  const f = ui.f, it = f.sku && live().map.get(f.sku);
-  if (!it) return toast('Pick a product first.');
-  const qty = Number(f.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
-  const expected = f.expected ? parseDate(f.expected) : ''; if (expected == null) return toast('Check the expected date.');
-  qAdd('order', { order: { id: 'o' + uid(), date: todayISO(), sku: it.sku, qty, expected, note: f.note.trim() } });
-  closeSheet(); ui.ordSeg = 'sup'; commit(); toast(`${qty} × ${it.name} on the way`);
-}
 function openOrd(id) {
   const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
   const open = o.status === 'Ordered';
@@ -1491,14 +1472,15 @@ function recvRow(c) {
   return r;
 }
 function parseReceive(text) { const rows = pasted(text, c => /^(qty|quantity)/i.test((c[1] || '').trim()), recvRow); settleReceive(rows); return rows; }
-function settleReceive(rows) {
+/** ordered: the batch is a supplier order (Ordered), so a row on file becomes an order line ('ord') instead of a receipt of an open line. */
+function settleReceive(rows, ordered) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
     r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty);   // one per unit the row adds
     if (r.match) {
-      r.status = 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
-      r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
+      r.status = ordered ? 'ord' : 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
+      if (!ordered) r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
       if (r.order) taken.add(r.order.id);
       if (!r.match.active) r.msg = 'Archived. Applying restores it.';
     } else {
@@ -1535,7 +1517,7 @@ function parseMoves(text) {
     return r;
   });
 }
-const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
+const STATUS_LABEL = { new: 'New product', count: 'Count', same: 'No change', details: 'Details', recv: 'Receive', ord: 'Order', skip: 'Skipped', bad: 'Problem', ok: 'Ready', dup: 'Duplicate?', warn: 'Below zero' };
 const IMP = {
   count: { name: 'Count from photo', cols: 'Name⇥Count⇥Price⇥Note⇥Manufacturer⇥Brand⇥Product line⇥Character⇥Release date⇥Verify', parse: parseCount,
     hint: 'Send Claude a photo of the boxes or shelves, then paste its answer here. Counts are compared with the stock on file and only the differences are recorded. Products missing from the paste are left alone.' },
@@ -1570,13 +1552,16 @@ function inboxLoad() {
   }
   const mode = type === 'count' ? 'count' : 'receive';
   const old = new Map(ui.imp && ui.imp.src === 'inbox' ? ui.imp.rows.map(r => [JSON.stringify(r.src.refs), r.src]) : []);
+  // Rows added here by hand stay in the review when the Inbox rows change; an Order batch starts as Ordered, with the first Supplier and Expected given.
+  const hand = old.size && ui.imp.mode === mode ? ui.imp.rows.filter(r => !r.src.refs) : [], first = k => (set.find(r => r[k]) || {})[k] || '';
+  const ord = old.size && ui.imp.type === type ? ui.imp.ord : newOrd(type === 'order', first('supplier'), first('expected') && parseDate(first('expected')));
   ui.rdate = todayISO();
-  ui.imp = { src: 'inbox', key, mode, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
+  ui.imp = { src: 'inbox', key, type, mode, ord, open: old.size && ui.imp.mode === mode ? ui.imp.open || {} : {}, refs: set.map(ref), rows: groups.map(g => {
     const cols = (mode === 'count' ? [g.name, g.qty, '', g.note, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.cost] : [g.name, g.qty, g.cost, g.mfr, g.brand, g.line, g.chr, g.rel, g.verify, g.note]).map(cell);
     const src = { cols, refs: g.parts.map(ref), parts: g.parts.map(p => ({ row: p.row, qty: p.qty })) }, was = old.get(JSON.stringify(src.refs));
     if (was) ['fix', 'use', 'user'].forEach(k => { if (was[k] != null) src[k] = was[k]; });
     return impRow(mode, src);
-  }) };
+  }).concat(hand.map(r => impRow(mode, r.src))) };
   resettle(ui.imp);
   return true;
 }
@@ -1593,7 +1578,7 @@ function impRow(mode, src) {
 }
 /** Works out every row's status again, then puts back what the owner ticked or unticked. */
 function resettle(imp) {
-  (imp.mode === 'receive' ? settleReceive : settleCount)(imp.rows);
+  if (imp.mode === 'receive') settleReceive(imp.rows, imp.ord && imp.ord.on); else settleCount(imp.rows);
   imp.rows.forEach(r => {
     if (!r.src || !canTick(r)) return;
     if (r.src.user != null) r.on = r.src.user;
@@ -1601,6 +1586,18 @@ function resettle(imp) {
   });
 }
 const canTick = r => !['bad', 'skip'].includes(r.status);
+/** A Receive batch is received now, or Ordered (on) from a supplier, with the order date and expected arrival for the whole batch. */
+const newOrd = (on, sup, exp) => ({ on: !!on, sup: sup || '', date: todayISO(), exp: exp || '' });
+/** A review of rows typed here (Add a row, Order stock, New order), dated today when received. */
+function handImp(on) { ui.rdate = todayISO(); return { src: 'hand', mode: 'receive', ord: newOrd(on), rows: [] }; }
+const ordered = imp => imp.mode === 'receive' && !!imp.ord && imp.ord.on;
+/** Order stock and New order: Add inventory set to Ordered, in the review of rows typed here (a new one unless one is open), with the product as a row when one is given. */
+function orderStock(sku) {
+  if (!ui.imp || ui.imp.src !== 'hand') ui.imp = handImp(true); else ui.imp.ord.on = true;
+  const it = sku && live().map.get(sku);
+  if (it && !ui.imp.rows.some(r => r.match && r.match.sku === sku)) ui.imp.rows.push(impRow('receive', { cols: [it.name, '1'], use: sku }));
+  resettle(ui.imp); ui.filter = 'add'; go('stock');
+}
 const relToCheck = r => r.relCheck && !!r.rel && (!r.match || (r.adds || '').includes('release date'));
 /** Which group of the review a row belongs to: check (needs a decision), ready, or name (cannot be recorded as it is). */
 function impGroup(r) {
@@ -1611,17 +1608,18 @@ function impGroup(r) {
 /** The Add inventory tab of Inventory, drawn into #addInv. */
 function renderImport() {
   const box = $('#addInv'); if (!box) return;
-  // A pasted preview that is still open is finished first; waiting rows show once it is applied or cleared.
-  if (!(ui.imp && ui.imp.src === 'paste') && inboxLoad()) {
+  // A pasted preview or rows typed here are finished first; waiting rows show once they are applied or cleared.
+  if (!(ui.imp && ui.imp.src !== 'inbox') && inboxLoad()) {
     const n = ui.imp.refs.length, more = live().inbox.length - n;
-    box.innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : 'supplier paperwork. Each row adds stock at its cost.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
+    box.innerHTML = `<p>Claude read ${plural(n, 'row')} from ${ui.imp.mode === 'count' ? 'photos of boxes or shelves. Counts are compared with stock, and only the differences are recorded.' : ui.imp.type === 'order' ? 'a supplier’s order or quotation.' : 'supplier paperwork.'}${more ? ` ${more} more after these.` : ''}</p><div id="impOut" class="stack" style="gap:20px"></div>`;
     renderImpOut(); return;
   }
+  if (ui.imp && ui.imp.src === 'hand') { box.innerHTML = '<p>Rows typed here. Nothing is recorded until you apply them.</p><div id="impOut" class="stack" style="gap:20px"></div>'; renderImpOut(); return; }
   const m = IMP[ui.mode], L = live(), onWay = L.orders.filter(o => o.status === 'Ordered').length;
   const open = ui.manual == null ? !cfg.url : ui.manual;
   box.innerHTML = `
     <p>Send Claude photos of boxes, shelves or a supplier’s paperwork and ask it to log them. What it reads appears here to check, and nothing is recorded until you apply it.</p>
-    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${onWay} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
+    ${sec('Other ways to change stock', `<div class="list">${onWay ? row(`Receive a supplier order (${plural(onWay, 'line')} on the way)`, 'Type the cost of each unit when it arrives', 'data-act="homeGo" data-to="sup"') : ''}${row('Add a row', 'Received now or ordered from a supplier, typed by hand', 'data-act="impAdd" data-new="1"')}${row('One product by hand', 'Stock in or out for one product', 'data-act="moveFor" data-sku="" data-dir="In"')}${row('Add a new product', 'Name, price and starting stock', 'data-act="newItem"')}</div>`)}
     <details id="manual" ${open ? 'open' : ''}>${summary('Paste a block by hand')}<div class="stack">
     <div class="seg">${Object.keys(IMP).map(k => `<button class="${ui.mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${IMP[k].name}</button>`).join('')}</div>
     <p class="hint">${m.hint}</p>
@@ -1636,8 +1634,8 @@ function renderImport() {
 }
 function renderImpOut() {
   const box = $('#impOut'); if (!box) return;
-  const imp = ui.imp; if (!imp || (imp.src !== 'inbox' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
-  if (!imp.rows.length) { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
+  const imp = ui.imp; if (!imp || (imp.src === 'paste' && imp.mode !== ui.mode)) { box.innerHTML = ''; return; }
+  if (!imp.rows.length && imp.src === 'paste') { box.innerHTML = `<p class="empty">No rows found. Check that columns are separated by tabs.</p>`; return; }
   const n = imp.rows.filter(r => r.on).length, list = (idx, k) => wide() && imp.mode !== 'moves' ? impTable(imp, idx, k) : `<div class="list">${idx.map(i => prowHtml(imp, i)).join('')}</div>`;
   let body;
   if (imp.mode === 'moves') body = sec('To review', list(imp.rows.map((r, i) => i)), `<span class="badge">${imp.rows.length}</span>`);
@@ -1654,12 +1652,22 @@ function renderImpOut() {
       g.name.length ? sec('Needs a name · ' + g.name.length, fold('name', `${plural(g.name.length, 'row')} with no name or no count. ${left}`, g.name, false), '', 'grp-name') : '',
     ].join('');
   }
-  box.innerHTML = body + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : ''}</div>`;
+  box.innerHTML = (imp.mode === 'receive' ? ordSwitch(imp) : '') + (imp.rows.length ? body : '') + (imp.mode !== 'moves' ? '<button class="tbtn" data-act="impAdd">Add a row</button>' : '')
+    + `<div class="applybar"><button class="btn primary big" data-act="impApply" ${n ? '' : 'disabled'}>Apply ${plural(n, 'change')}</button>${imp.src === 'inbox' ? '<button class="tbtn c" data-act="inboxDismiss">Dismiss these rows</button>' : imp.src === 'hand' ? '<button class="tbtn c" data-act="impClear">Clear these rows</button>' : ''}</div>`;
+}
+/** Above a Receive batch: Received now, or Ordered with the supplier (one on file or a new name), order date and expected arrival. */
+function ordSwitch(imp) {
+  const o = imp.ord || (imp.ord = newOrd());
+  return `<div class="stack" style="max-width:640px"><div class="seg"><button class="${o.on ? '' : 'on'}" data-act="ordOn" data-v="">Received now</button><button class="${o.on ? 'on' : ''}" data-act="ordOn" data-v="1">Ordered</button></div>
+    ${o.on ? `<div><label for="oSup">Supplier</label><input id="oSup" data-b="imp.ord.sup" list="supList" value="${esc(o.sup)}" placeholder="Pick one, or type a new name" autocomplete="off"><datalist id="supList">${[...live().sups.values()].map(x => `<option value="${esc(x.name)}">`).join('')}</datalist></div>
+      <div class="row2"><div><label for="oDate">Order date</label><input id="oDate" type="date" data-b="imp.ord.date" value="${esc(o.date)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="imp.ord.exp" value="${esc(o.exp)}"></div></div>
+      <p class="hint">Applying records one supplier order with a line per row. Nothing comes into stock until it is received under Suppliers.</p>`
+    : '<p class="hint">Each row adds stock at its cost.</p>'}</div>`;
 }
 /** A review group on desktop: one row per review row with every field it carries. A row opens Correct this row; the tick box records it or not. */
 function impTable(imp, idx, k) {
   const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
-  const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
+  const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'receives the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
   // One cost each for every unit the row adds, typed in place (setRowCost()); units with different costs show the range and open Correct this row.
   const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
     return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
@@ -1694,7 +1702,7 @@ function setRowPrice(t) {
 /** What a folded Ready group holds, for example "172 new products, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
   const rows = idx.map(i => imp.rows[i]), k = st => rows.filter(r => r.status === st).length, det = rows.filter(r => r.match && (r.adds || r.status === 'details')).length;
-  return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
+  return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', k('ord') ? plural(k('ord'), 'order line') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
 /** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
 const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
@@ -1707,8 +1715,9 @@ function prowHtml(imp, i) {
     else if (r.status === 'details') detail = `${esc(r.match.name)}: already ${r.count} · adds ${esc(r.adds)}`;
     else if (r.status === 'new') detail = `New${r.price != null ? ' · ' + money(r.price) : ''} · opening stock ${r.count}${costNote(r)}`;
   } else if (imp.mode === 'receive') {
-    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · closes the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty} ordered)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
-    else if (r.status === 'new') detail = `New · +${r.qty}${costNote(r)}`;
+    if (r.status === 'recv') detail = `${esc(r.match.name)}: +${r.qty}${costNote(r)}${r.order ? ` · receives the supplier order of ${esc(fmtDay(r.order.date))} (${r.order.qty - (r.order.recQty || 0)} due)` : ''}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'ord') detail = `${esc(r.match.name)}: ${r.qty} ordered${costNote(r)}${r.adds ? ' · adds ' + esc(r.adds) : ''}`;
+    else if (r.status === 'new') detail = `New · ${ordered(imp) ? r.qty + ' ordered' : '+' + r.qty}${costNote(r)}`;
   } else if (r.item) detail = `${esc(r.date)} · ${r.dir} ${r.qty} · ${esc(r.reason)}${r.cost != null ? ' · ' + money(r.cost) + ' each' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
   const dl = r.status === 'new' && imp.mode !== 'moves' ? detailLine(r) : '';
   const parts = r.src && r.src.parts && r.src.parts.length > 1 ? `Possibly the same box in two photos: ${r.count != null ? r.count + ' in all, ' : ''}${r.src.parts.map(p => `row ${p.row} has ${esc(p.qty)}`).join(', ')}` : '';
@@ -1718,8 +1727,9 @@ function prowHtml(imp, i) {
     ? `<button class="name" data-act="impFix" data-i="${i}">${name}</button>` : `<label class="name" for="imp${i}">${name}</label>`}${sub ? `<div class="sub">${sub}</div>` : ''}${r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button>` : ''}</div></div>`;
 }
 /** The sheet that corrects one review row. Saving changes the review only; the Inbox row stays as Claude wrote it. */
+/** i < 0 opens an empty row (Add a row): saving adds it to the review. */
 function openFix(i) {
-  const imp = ui.imp, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  const imp = ui.imp, r = imp && (i < 0 ? impRow(imp.mode, { cols: [] }) : imp.rows[i]); if (!r || !r.src) return;
   const src = r.src, c = fixedCols(imp.mode, src), at = k => c[ROW_COLS[imp.mode].indexOf(k)] || '', sim = src.use ? live().map.get(src.use) : r.similar;
   // A count is absolute, so an item on file gets cost fields only for the units above its stock.
   const have = imp.mode === 'count' && r.match ? stockOf(r.match.sku) : 0, t = (src.fix && src.fix.costs) || (r.cost != null ? [r.cost] : []);
@@ -1729,7 +1739,7 @@ function openFix(i) {
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
     ${fld('name', 'Name')}
     ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
-    ${costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
+    ${ordered(imp) ? fld('cost', `Cost each (${esc(prefs.cur)})`, ' inputmode="decimal" placeholder="Optional"') : costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
     ${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}
     <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
     <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
@@ -1740,7 +1750,7 @@ function openFix(i) {
     <button class="btn primary big" data-act="fixSave" data-i="${i}" data-sim="${sim ? esc(sim.sku) : ''}">Save</button>`);
 }
 function saveFix(i, simSku) {
-  const imp = ui.imp, r = imp && imp.rows[i]; if (!r) return;
+  const imp = ui.imp, r = imp && (i < 0 ? impRow(imp.mode, { cols: [] }) : imp.rows[i]); if (!r) return;
   // Only the fields changed here count as typed: they overwrite the item on file, while the others keep the rule for Claude's values.
   const src = r.src, sp = s => String(s).replace(/\s+/g, ' ').trim(), v = {}, fix = { ...src.fix };
   document.querySelectorAll('#sheet [data-fx]').forEach(e => { const k = e.dataset.fx; v[k] = sp(e.value); if (v[k] !== sp(e.defaultValue)) fix[k] = v[k]; });
@@ -1748,12 +1758,14 @@ function saveFix(i, simSku) {
   if (v.count && v.count !== '?' && !/^\d+$/.test(v.count)) return toast(`${imp.mode === 'count' ? 'Count' : 'Qty'} must be a whole number.`);
   if (v.price && parsePrice(v.price) == null) return toast('Price must be zero or more.');
   if (v.rel && !parseRel(v.rel)) return toast('Release date must look like 2024, 2024-07 or 2024-07-15.');
-  fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0));
-  if (!fix.costs) return toast('Cost must be zero or more.');
+  if (v.cost && parsePrice(v.cost) == null) return toast('Cost must be zero or more.');
+  // An order line has one cost each; otherwise each unit the row adds has its own.
+  if (ordered(imp)) delete fix.costs;
+  else if (!(fix.costs = readCosts('f.c', Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0)))) return toast('Cost must be zero or more.');
   if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
   src.fix = fix; src.use = $('#fxUse') && $('#fxUse').checked ? simSku : '';
-  imp.rows[i] = impRow(imp.mode, src);
-  resettle(imp); closeSheet(); renderImpOut();
+  if (i < 0) imp.rows.push(impRow(imp.mode, src)); else imp.rows[i] = impRow(imp.mode, src);
+  resettle(imp); closeSheet(); renderImport();
 }
 /** The result of Apply. It stays until closed and follows the sync. */
 function openImpResult() {
@@ -1761,7 +1773,7 @@ function openImpResult() {
   const pend = queued('pending');
   const state = !cfg.url ? 'Saved on this device. It goes to the sheet once a connection code is set in Settings.' : ui.busy ? 'Syncing with the sheet now.' : ui.err ? `Not synced yet: ${ui.err}` : pend ? 'Waiting to sync with the sheet.' : 'Synced with the sheet.';
   openSheet(`<div class="top"><h2>Applied</h2>${closeBtn}</div>
-    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${plural(x.nNew, 'new product')}, ${x.mode === 'receive' ? plural(x.nRecv, 'receipt') : plural(x.nCount, 'count change')}, ${plural(x.nDetails, 'product')} with new details`}.</p>
+    <p id="resRec">Recorded: ${x.moves ? plural(x.moves, 'movement') : `${x.mode === 'order' ? `a supplier order of ${plural(x.nLines, 'line')}, ` : ''}${plural(x.nNew, 'new product')}, ${x.mode === 'order' ? '' : x.mode === 'receive' ? plural(x.nRecv, 'receipt') + ', ' : plural(x.nCount, 'count change') + ', '}${plural(x.nDetails, 'product')} with new details`}.</p>
     ${x.inbox ? `<p id="resLeft">Left in the Inbox: ${plural(x.leftName, 'row')} that need${x.leftName === 1 ? 's' : ''} a name; ${plural(x.leftOff, 'row')} you unticked.</p>` : ''}
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
@@ -1801,10 +1813,33 @@ function applyReceive(rows) {
     let it = r.match || made.get(norm(r.name));
     if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
-    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: r.costs });
-    else qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs);
+    // A row receives the oldest open order line of its product up to what is still due on it; units beyond that are a plain Restock.
+    const n = r.order ? Math.min(r.qty, r.order.qty - (r.order.recQty || 0)) : 0;
+    if (n) qAdd('receive', { lineId: r.order.id, date, from: r.order.recQty || 0, costs: r.costs.slice(0, n) });
+    if (r.qty > n) qIns({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', reason: 'Restock', ref: '', note: r.note }, r.costs.slice(n));
     out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
+  return out;
+}
+/** Ordered: the supplier (queued when the name is new), new products and their details, then one supplier order with a line per row. No stock moves. */
+function applyOrder(rows, o) {
+  const name = o.sup.trim().replace(/\s+/g, ' '), date = parseDate(o.date), expected = o.exp ? parseDate(o.exp) : '';
+  if (!name) return toast('Type the supplier’s name.');
+  if (!date) return toast('Check the order date.');
+  if (expected == null) return toast('Check the expected arrival.');
+  const out = { nNew: 0, nLines: 0, nDetails: 0, done: new Set() }, made = new Map(), lines = [];
+  rows.forEach((r, i) => {
+    if (!r.on || !['new', 'ord'].includes(r.status)) return;
+    let it = r.match || made.get(norm(r.name));
+    if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
+    else if (r.match && patchExisting(it, r)) out.nDetails++;
+    lines.push({ id: 'l' + uid(), sku: it.sku, qty: r.qty, cost: r.costs[0] == null ? null : r.costs[0] });
+    out.done.add(i); dirty();
+  });
+  const cur = [...live().sups.values()].find(x => custKey(x.name) === custKey(name)), supId = cur ? cur.id : 's' + uid();
+  if (!cur) qAdd('supplier', { supplier: { id: supId, name, contact: '', note: '' } });
+  qAdd('order', { order: { id: 'o' + uid(), date, supId, expected, note: '', lines } });
+  out.nLines = lines.length;
   return out;
 }
 function applyMoves(rows) {
@@ -1818,7 +1853,7 @@ function applyMoves(rows) {
   return n;
 }
 /** Reads the pasted block into the preview. */
-function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }
+function impParse() { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, ord: ui.imp && ui.imp.ord, rows: IMP[ui.mode].parse(ui.text) }; if (ui.mode === 'receive') resettle(ui.imp); renderImpOut(); }
 function buildPrompt() {
   const L = live(), cat = L.list.filter(i => i.active).map(i => `${i.name} | ${stockOf(i.sku)}`).join('\n') || '(empty: no products yet)';
   const details = `- Manufacturer, Brand, Product line, Character: read them from the box or paperwork, and look the product up to fill what is not printed. Leave a field blank when you cannot establish it.
@@ -1959,10 +1994,7 @@ document.addEventListener('click', async ev => {
       if (d.to === 'sell') {
         const l = ui.inv.lines; if (!l[0].sku) l[0] = { sku: it.sku, qty: 1, price }; else if (!l.some(x => x.sku === it.sku)) l.push({ sku: it.sku, qty: 1, price });
         ui.inv.force = ''; ui.sellSeg = 'new'; go('sell');
-      } else {
-        ui.ordSeg = 'sup'; go('orders');
-        ui.f = newOrd(it.sku); openOrdForm();
-      }
+      } else orderStock(it.sku);
       break;
     }
     case 'homeGo': {
@@ -2010,18 +2042,20 @@ document.addEventListener('click', async ev => {
       if (kept > p.paid) { toast('That is more than what was paid.'); break; }
       qAdd('preCancel', { preId: p.id, kept: r2(kept) }); ui.sub = null; commit(); toast('Pre-order cancelled'); break;
     }
-    case 'ordNew': ui.f = null; openOrdForm(); break;
-    case 'ordSave': saveOrd(); break;
+
+    case 'ordNew': orderStock(''); break;
     case 'ord': ui.sub = null; openOrd(d.id); break;
     case 'ordRecv': receiveOrd(); break;
     case 'ordCancel': if (confirm('Cancel this supplier order? It stops counting as incoming.')) { qAdd('orderCancel', { orderId: d.id }); closeSheet(); commit(); toast('Order cancelled'); } break;
-
     // import
     case 'mode': ui.mode = d.m; ui.text = ''; ui.imp = null; renderImport(); break;
     case 'copyPrompt': await copyText(buildPrompt()); toast('Copied. Paste it in Claude together with the photo.'); break;
     case 'impParse': impParse(); break;
     case 'inboxDismiss': if (ui.imp && ui.imp.src === 'inbox') { qAdd('inboxDone', { rows: ui.imp.refs, mark: 'Dismissed' }); ui.imp = null; commit(); toast('Dismissed'); } break;
     case 'impClear': ui.text = ''; ui.imp = null; renderImport(); break;
+    case 'ordOn': ui.imp.ord.on = !!d.v; resettle(ui.imp); renderImpOut(); break;
+    // Add a row: from the list of other ways it starts a review of rows typed here; in a review it adds to that review.
+    case 'impAdd': if (d.new) { ui.imp = handImp(false); renderImport(); } openFix(-1); break;
     case 'tick': { const r = ui.imp.rows[+d.i]; r.on = el.checked; if (r.src) r.src.user = el.checked; renderImpOut(); break; }
     case 'useSimilar': { const r = ui.imp.rows[+d.i]; r.match = r.similar; r.similar = null; if (r.src) r.src.use = r.match.sku; resettle(ui.imp); renderImpOut(); break; }
     case 'impFix': openFix(+d.i); break;
@@ -2030,10 +2064,11 @@ document.addEventListener('click', async ev => {
       const imp = ui.imp, rows = imp.rows;
       if (imp.mode === 'moves') ui.impResult = { moves: applyMoves(rows) };
       else {
-        const r = (imp.mode === 'count' ? applyCount : applyReceive)(rows), x = Object.assign({ mode: imp.mode }, r);
-        // Only the rows actually recorded leave the Inbox; unticked rows and rows that need a name keep waiting.
+        const r = ordered(imp) ? applyOrder(rows, imp.ord) : (imp.mode === 'count' ? applyCount : applyReceive)(rows); if (!r) break;
+        const x = Object.assign({ mode: ordered(imp) ? 'order' : imp.mode }, r);
+        // Only the rows actually recorded leave the Inbox; unticked rows and rows that need a name keep waiting. Rows added here have no Inbox row.
         if (imp.src === 'inbox') {
-          const refs = rows.filter((row, i) => r.done.has(i)).flatMap(row => row.src.refs), n = list => list.reduce((s, row) => s + row.src.refs.length, 0);
+          const refs = rows.filter((row, i) => r.done.has(i)).flatMap(row => row.src.refs || []), n = list => list.reduce((s, row) => s + (row.src.refs || []).length, 0);
           if (refs.length) qAdd('inboxDone', { rows: refs, mark: 'Done' });
           Object.assign(x, { inbox: true, leftName: n(rows.filter(row => impGroup(row) === 'name')), leftOff: n(rows.filter((row, i) => impGroup(row) !== 'name' && !r.done.has(i))) });
         }
