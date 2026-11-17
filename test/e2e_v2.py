@@ -105,7 +105,7 @@ with sync_playwright() as pw:
 
     # ---- supplier stock arrives: cost typed at receipt
     tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]'); p.click('#view .item:has-text("Maximatic Luffy")')
-    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == ['Unit 1 cost', 'Unit 2 cost', 'Unit 3 cost', 'Unit 4 cost'], 'receiving shows one cost field per unit')
+    check([e.inner_text() for e in p.query_selector_all('#sheet [data-costbox] label')] == [f'Unit {k} {w}' for k in range(1, 5) for w in ('cost', 'condition')], 'receiving shows one cost field and one condition per unit')
     p.fill('#sheet [data-cost][data-k="0"]', '800'); p.screenshot(path=f'{SHOTS}/08-receive-order.png'); p.click('#sheet button:has-text("Received")'); close(p); synced(p)
     so = rows('Supplier orders')[0]; rc = [r for r in rows('Movements') if r[0].startswith('rcv-')]
     check(so[10:12] == [4, 'Received'] and [r[0] for r in rc] == [f'rcv-{so[0]}-{k}' for k in (1, 2, 3, 4)] and all(r[4:8] == ['In', 1, 'Restock', so[1]] and r[9] == 800 for r in rc), f'order line received, one movement per unit refers to its order with its cost: {rc}')
@@ -260,7 +260,7 @@ with sync_playwright() as pw:
     check([d.suggested_filename for d in got] == ['Invoice-1-1.png', 'Invoice-1-2.png'] and not tabs and '2 images downloaded' in q.inner_text('#toast'), f'a 40-line invoice downloads two images and opens no tab: {[d.suggested_filename for d in got]}')
     check(all(s and s[0] == 1190 and s[1] <= 2048 for s in sizes) and len(sizes) == 2, f'each image is a PNG 1190 px wide and at most 2048 px tall: {sizes}')
     drawn = q.evaluate('window._drawn')
-    check(drawn.count('ITEM') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
+    check(drawn.count('Item') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
     check(q.evaluate('canCopyImg') and not q.is_visible('#sheet button:has-text("Copy image")'), 'Copy image is hidden for a document with several images')
     cl.close()
 
