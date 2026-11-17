@@ -1,5 +1,5 @@
 # Desktop layout check: side navigation, sheets as dialogs, the tables (Inventory, Sales, Orders, Activity, Update stock) with
-# their sort and filters in the header cells, and no page that scrolls sideways.
+# their sort and filters in the header cells, the cost typed in a review row, and no page that scrolls sideways.
 # python3 test/desktop.py  (needs static server on 8765, mock backend on 8766, Chrome)
 import os, re
 from playwright.sync_api import sync_playwright
@@ -78,11 +78,19 @@ with sync_playwright() as pw:
     p.click('button:has-text("New supplier order")'); pick(p, 'f', 'zoro'); p.fill('[data-b="f.qty"]', '3'); p.click('button:has-text("Save order")'); synced(p)
     p.screenshot(path=f'{SHOTS}/orders.png')
     # More items for the stock table: blanks, a lower-case name, release dates of every precision, a unit cost range.
-    post_inbox([{'type': 'Count', 'name': 'alpha Plush', 'qty': 2, 'cost': 300, 'mfr': 'Bandai', 'rel': '2024'},
+    post_inbox([{'type': 'Count', 'name': 'alpha Plush', 'qty': 2, 'mfr': 'Bandai', 'rel': '2024'},
                 {'type': 'Count', 'name': 'Beta Figure', 'qty': 1, 'brand': 'banpresto', 'rel': '2024-07'},
                 {'type': 'Count', 'name': 'Delta Bust', 'qty': 3, 'cost': 250, 'mfr': 'Bandai', 'chr': 'Son Goku', 'rel': '2024-07-15'},
                 {'type': 'Count', 'name': 'Epsilon Statue', 'qty': 1, 'cost': 100, 'rel': '2023-12-31'}])
-    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update stock · 4')"); tab(p, 'Update stock'); apply(p, 'Apply 4 changes'); synced(p)
+    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#tabs').innerText.includes('Update stock · 4')"); tab(p, 'Update stock')
+    # The cost each of a review row is typed in place for every unit it adds; units with different costs show the range, which opens Correct this row.
+    A = '[data-tbl="imp.ready"] tbody tr:has-text("alpha Plush")'
+    p.click(f'{A} input[data-rcost]'); check(p.is_hidden('#layer'), 'a click in the cost field of a review row does not open the row')
+    p.fill(f'{A} input[data-rcost]', '300'); p.press(f'{A} input[data-rcost]', 'Tab')
+    p.click(f'{A} td:nth-child(2)'); costs = [p.input_value(f'#sheet [data-cost="f.c"][data-k="{k}"]') for k in (0, 1)]
+    p.fill('#sheet [data-cost="f.c"][data-k="1"]', '400'); p.click('#sheet button:has-text("Save")'); rng = p.inner_text(f'{A} td:nth-child(5)'); p.click(f'{A} td:nth-child(5) button')
+    check(costs == ['300', '300'] and rng == '₱300 to 400' and p.inner_text('#sheet h2') == 'Correct this row', f'the cost typed in a review row goes to every unit; different costs show the range, which opens Correct this row: {costs} {rng}')
+    p.fill('#sheet [data-cost="f.c"][data-k="1"]', '300'); p.click('#sheet button:has-text("Save")'); apply(p, 'Apply 4 changes'); synced(p)
     p.click('#stockList tbody tr:has-text("Delta Bust")'); p.click('#sheet button:has-text("Stock in")'); p.fill('[data-cost="mv.c"][data-k="0"]', '500'); p.click('button:has-text("Record stock in")'); synced(p)
     # Inventory: a read-only table of every field; a header sorts and a second click reverses; filters open from the headers.
     tab(p, 'Stock'); T = '[data-tbl="stock"]'; cols = heads('stock')

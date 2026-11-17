@@ -186,6 +186,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .tbl td .hint,.tbl td .tbtn,.tbl td.empty{font-size:13px}
   .tbl td .tbtn{min-height:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-weight:400}
   .tbl td input[type=checkbox]{width:16px;height:16px;vertical-align:middle}
+  .tbl td input[data-rcost]{min-height:0;height:24px;margin:-3px 0;padding:0 6px;font-size:13px;text-align:right}
   .tbl tr.off td{color:var(--muted)}
   .tbl tbody tr:last-child td{border-bottom:0}
   .tbl tr[data-act]{cursor:pointer}
@@ -1630,14 +1631,25 @@ function renderImpOut() {
 function impTable(imp, idx, k) {
   const R = i => imp.rows[i], cnt = imp.mode === 'count', has = i => (R(i).costs || []).filter(x => x != null);
   const why = r => [r.src && r.src.parts && r.src.parts.length > 1 ? 'Possibly the same box in two photos' : '', r.adds ? 'adds ' + r.adds : '', r.order ? 'closes the supplier order of ' + fmtDay(r.order.date) : '', r.msg, r.src && r.src.fix ? 'Corrected here' : ''].filter(Boolean).join(' · ');
+  // One cost each for every unit the row adds, typed in place (setRowCost()); units with different costs show the range and open Correct this row.
+  const cost = i => { const r = R(i), c = r.costs || []; if (!r.src || !c.length) return '';
+    return new Set(c).size > 1 ? `<button class="tbtn" data-act="impFix" data-i="${i}">${esc(prefs.cur + (costsText(c) || '') + (c.includes(null) ? ', some blank' : ''))}</button>`
+      : `<input type="number" inputmode="decimal" min="0" step="any" data-rcost="${i}" value="${c[0] == null ? '' : c[0]}" aria-label="Cost each of ${esc(r.name)}">`; };
   return table('imp.' + k, [['', null, i => `<input type="checkbox" data-act="tick" data-i="${i}" ${R(i).on ? 'checked' : ''} ${canTick(R(i)) ? '' : 'disabled'} aria-label="Record ${esc(R(i).name)}">`, 'tick'],
     ['Name', i => R(i).name, i => { const r = R(i); return esc(r.name) + (r.match && r.match.name !== r.name ? ` <span class="hint">recorded as “${esc(r.match.name)}”</span>` : ''); }, 'name'],
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
       + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, i => { const c = costNote(R(i)).replace(/^ (at|·) /, ''); return has(i).length ? esc(c) : `<span class="hint">${c}</span>`; }, 'money'],   // the phone row's wording
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'],
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
+}
+/** The cost each typed in a review row: every unit the row adds takes it, blank allowed. It changes the review only, like Correct this row. */
+function setRowCost(t) {
+  const imp = ui.imp, i = +t.dataset.rcost, r = imp && imp.rows[i]; if (!r || !r.src) return;
+  if (t.value.trim() && parsePrice(t.value) == null) { t.value = r.costs[0] == null ? '' : r.costs[0]; return toast('Cost must be zero or more.'); }
+  const fix = { ...r.src.fix, cost: t.value.trim() }; delete fix.costs;
+  r.src.fix = fix; imp.rows[i] = impRow(imp.mode, r.src); resettle(imp);   // the field already shows the value, so nothing is redrawn and a click elsewhere still lands
 }
 /** What a folded Ready group holds, for example "172 new items, 3 count changes, 11 with new details". */
 function readyLine(imp, idx) {
@@ -1846,7 +1858,8 @@ const tsv = rows => rows.map(r => r.map(cell).join('\t')).join('\n');
 function go(t) { prefs.tab = t; savePrefs(); closeSheet(); render(); window.scrollTo(0, 0); }
 document.addEventListener('click', async ev => {
   if (!$('#pop').hidden && !ev.target.closest('#pop, [data-act="tfOpen"]')) closePop();
-  const el = ev.target.closest('[data-act]'); if (!el) return;
+  // A field inside a table row (a review row's cost) is typed in; it does not open the row.
+  const el = ev.target.closest('[data-act]'); if (!el || (el.tagName === 'TR' && ev.target.closest('input'))) return;
   const a = el.dataset.act, d = el.dataset;
   switch (a) {
     case 'tab':
@@ -2042,6 +2055,7 @@ document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.id === 'mvReason') ui.mv.reason = t.value;
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
+  if (t.dataset.rcost) setRowCost(t);
   if (t.dataset.tfv) { ui.tf[t.dataset.tfv] = [...$('#pop').querySelectorAll('[data-tfv]:checked')].map(x => x.value); renderStockList(); }
   if (t.id === 'fxUse') { const n = $('#fxCount'); n.dataset.have = t.checked ? t.dataset.have : 0; redrawCosts('f.c', n.value - n.dataset.have); }   // the count then means the stock of that item
   if (t.id === 'sLogo' && t.files && t.files[0]) setLogo(t.files[0]);
