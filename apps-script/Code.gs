@@ -117,6 +117,40 @@ function showKey() {
   Logger.log('Key: ' + PropertiesService.getScriptProperties().getProperty('KEY'));
 }
 
+/**
+ * Run by hand to start again from an empty sheet, after every phone has synced with nothing waiting.
+ * Saves a copy of the whole spreadsheet named "Bodega backup <date>" first, then clears every row under the header on the
+ * data tabs, Edits and Browse, and raises moveRev so each phone drops its movements at its next sync.
+ * The key, the tabs, their formatting and the Inbox stay.
+ */
+function wipeAllData() {
+  locked_(function () {
+    var ss = SpreadsheetApp.getActiveSpreadsheet(), name = 'Bodega backup ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    ss.copy(name);
+    ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; }), ['Edits', 'Browse']).forEach(function (n) {
+      var sh = ss.getSheetByName(n);
+      if (sh && sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent();
+    });
+    raiseRev_();
+    Logger.log('Wiped. Backup: ' + name);
+  });
+}
+/** Run by hand, if wanted, after wipeAllData(): clears Status Done on Inbox rows so they come back for review. Dismissed and Working stay. */
+function reopenInbox() {
+  locked_(function () {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox'), last = sh ? sh.getLastRow() : 0, n = 0;
+    // Only the Done cells, so a row an intake run marks Working meanwhile keeps its status.
+    if (last >= 2) sh.getRange(2, 13, last - 1, 1).getValues().forEach(function (v, i) { if (s_(v[0]) === 'Done') { sh.getRange(i + 2, 13).clearContent(); n++; } });
+    Logger.log('Reopened ' + n + ' Inbox rows.');
+  });
+}
+// The hand-run writers take the script lock too, so a phone syncing at that moment waits for them.
+function locked_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try { fn(); } finally { lock.releaseLock(); }
+}
+
 function doGet() {
   return out_({ ok: true, data: { app: 'Toy Stock API', version: VERSION_ } });
 }

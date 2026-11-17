@@ -22,6 +22,7 @@ class Sheet {
   cell(r, c) { return this.cells[r + ',' + c]; }
   set(r, c, v) { if (r > this.max) throw new Error('Mock: row ' + r + ' beyond grid ' + this.max); if (typeof v === 'string' && /^[=+@-]/.test(v) && !this.textCols.has(c) && r > 1) throw new Error('Mock: column ' + c + ' is not text-formatted, so "' + v + '" would become a formula'); this.cells[r + ',' + c] = v; delete this.formulas[r + ',' + c]; }
   getMaxRows() { return this.max; }
+  getMaxColumns() { return 26; }
   insertRowsAfter(after, n) { this.max += n; }
   setFrozenRows(n) { this.frozen = n; }
   protect() { const p = { desc: '', warn: false, setDescription(d) { this.desc = d; return this; }, getDescription() { return this.desc; }, setWarningOnly(w) { this.warn = w; return this; } }; this.protections.push(p); return p; }
@@ -43,17 +44,20 @@ class Sheet {
 function makeSandbox() {
   const sheets = [];
   const props = {};
+  const copies = [];
   const ss = {
     onSetValues: null,
     getSheetByName: n => sheets.find(s => s.name === n) || null,
     insertSheet: n => { const s = new Sheet(n, ss); sheets.push(s); return s; },
     getSheets: () => sheets,
     deleteSheet: s => { sheets.splice(sheets.indexOf(s), 1); },
+    // A copy keeps each tab's cells as they were at that moment.
+    copy: n => { const c = { name: n, sheets: sheets.map(s => ({ name: s.name, cells: { ...s.cells } })) }; copies.push(c); return c; },
   };
   sheets.push(new Sheet('Sheet1', ss));
   let locked = false;
   const sandbox = {
-    sheets, props, logs: [],
+    sheets, props, copies, logs: [],
     ss,
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' },
       newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; } },
