@@ -1,9 +1,10 @@
 /**
- * Toy Stock API: a Google Apps Script web app bound to the "Toy Inventory" spreadsheet.
+ * Bodega API: the back end of one shop, a Google Apps Script web app bound to that shop's spreadsheet. Every shop has a sheet of its own.
  *
- * Install: Extensions > Apps Script, paste this whole file over Code.gs, save, run setup() once,
- * then Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
- * After pasting a newer version, run setup() again and publish a new version of the existing deployment.
+ * Install: in the sheet, Extensions > Apps Script, paste this whole file over Code.gs and save. Reload the sheet and use
+ * Bodega > Set up or upgrade this sheet (or run setup() here), then Deploy > New deployment > Web app (Execute as: Me,
+ * Who has access: Anyone), then Bodega > Show connection code and paste the code into the app.
+ * After pasting a newer version, set up again and publish a new version of the existing deployment.
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
  * The app is the writer of the data tabs. Movements and returns are append-only, except that a cost or cond entry
@@ -15,8 +16,8 @@
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
  * The shop's own details belong to the sheet, not to a device: the Shop tab holds the text and Script Properties the logo.
  */
-var VERSION_ = '2.6.0';
-var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
+var VERSION_ = '2.7.0';
+var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
 var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'];
 // A unit's condition, in this order; CONDITIONS in index.html is the same list. Blank means not recorded.
 var CONDITIONS_ = ['MISB', 'MIB', 'MOC', 'CIB', 'Box damage', 'Loose complete', 'Loose'];
@@ -40,7 +41,7 @@ var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // An intake run may set Status to Working while it still researches a row; any non-blank Status keeps a row out of the app.
 // Nothing in this tab counts as stock until the app applies it. Supplier and Expected, after Status, belong to Order rows
 // (a supplier order or quotation), which the app opens as an Ordered batch.
-var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
+var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
 // Browse: one row per product with the computed numbers, rewritten in full at the end of every sync and add.
 // Units on hand lists each unit on hand, oldest first, as its SKU, its cost (? without one) and its condition when recorded.
 var BROWSE_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
@@ -97,9 +98,20 @@ var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k
  * and Browse is made again when its header is not the current one. And a 2.4 sheet to 2.5, see upgrade25_().
  * A 2.5 sheet becomes 2.6 by the header rows alone: Movements gains Condition, Invoices Discount and Shipping fee, Invoice lines
  * Condition, each a new last column that reads blank on older rows; and the Payment details tab is made.
+ * A 2.6 sheet becomes 2.7 the same way: Toy line on Products and Inbox is renamed Product line (same column), and the Shop tab is made.
+ * It records the spreadsheet's ID; a copy (of the template or of another shop's sheet) can carry the original's properties, so
+ * when the ID differs it gets a new key, loses the copied logo and starts moveRev again.
  */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
+  var props = PropertiesService.getScriptProperties(), was = props.getProperty('SHEET_ID');
+  if (was && was !== ss.getId()) {
+    for (var i = 0, n = Number(props.getProperty('LOGO_N')) || 0; i < n; i++) props.deleteProperty('LOGO_' + i);
+    ['KEY', 'LOGO_N', 'LOGO_REV', 'moveRev'].forEach(function (k) { props.deleteProperty(k); });
+    Logger.log('This sheet is a copy of another, so it gets a new key; the copied logo is cleared and moveRev starts again.');
+  }
+  if (!props.getProperty('KEY')) props.setProperty('KEY', Utilities.getUuid().replace(/-/g, ''));
+  props.setProperty('SHEET_ID', ss.getId());
   if (old && !pr) pr = old.setName('Products');
   if (pr) ['Category', 'Reorder at'].forEach(function (h) { var c = pr.getRange(1, 1, 1, pr.getMaxColumns()).getValues()[0].indexOf(h); if (c >= 0) pr.deleteColumn(c + 1); });
   asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
@@ -125,8 +137,6 @@ function setup() {
   });
   var first = ss.getSheetByName('Sheet1');
   if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
-  var props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('KEY')) props.setProperty('KEY', Utilities.getUuid().replace(/-/g, ''));
   writeOnHand_();
   writeBrowse_();
   Logger.log('Setup done. Key: ' + props.getProperty('KEY'));
@@ -159,9 +169,42 @@ function upgrade25_(ss) {
   if (po && lastRowOf_(po) < 2) ss.deleteSheet(po);
 }
 
-/** Prints the connection key in the execution log (View > Logs). */
-function showKey() {
-  Logger.log('Key: ' + PropertiesService.getScriptProperties().getProperty('KEY'));
+/** Adds the Bodega menu to the sheet each time it opens, so a new shop is set up without opening the script editor. */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Bodega').addItem('Set up or upgrade this sheet', 'setupFromMenu').addItem('Show connection code', 'showCode').addToUi();
+}
+/** Bodega > Set up or upgrade this sheet: setup(), then what to do next. */
+function setupFromMenu() {
+  setup();
+  dialog_('This sheet is ready (back end ' + VERSION_ + ')', '<p>Next:</p><ol>' +
+    '<li>If this sheet has no web app yet: Extensions &gt; Apps Script &gt; Deploy &gt; New deployment &gt; Web app, Execute as Me, Who has access Anyone. ' +
+    'After pasting a newer Code.gs, publish a new version instead: Deploy &gt; Manage deployments &gt; edit &gt; New version.</li>' +
+    '<li>Bodega &gt; Show connection code, and paste the code into the app: Settings &gt; Connection.</li>' +
+    '<li>Fill the Shop tab (or the Shop group in the app\'s Settings) and the Payment details tab.</li></ol>');
+}
+/**
+ * Bodega > Show connection code: <web app URL>#<key> to paste into the app, also logged. Before the first deployment there is no URL,
+ * so it shows the key and how to deploy. getUrl() is not always the deployment's own URL, so the dialog also says where to find that.
+ */
+function showCode() {
+  var key = PropertiesService.getScriptProperties().getProperty('KEY'), url = ScriptApp.getService().getUrl() || '';
+  if (!key) return dialog_('No key yet', '<p>Use Bodega &gt; Set up or upgrade this sheet first.</p>');
+  var box = function (v) { return '<textarea readonly rows="3" style="width:100%" onfocus="this.select()">' + v + '</textarea>'; };
+  var own = 'the Web app URL (Extensions &gt; Apps Script &gt; Deploy &gt; Manage deployments) followed by #' + key;
+  if (/\/exec$/.test(url)) {
+    Logger.log('Connection code: ' + url + '#' + key);
+    return dialog_('Connection code', '<p>Paste this into the app: Settings &gt; Connection. It opens this sheet\'s data, so give it only to this shop\'s devices.</p>' +
+      box(url + '#' + key) + '<p>If the app cannot connect with it, the code is ' + own + '.</p>');
+  }
+  Logger.log('Key: ' + key + '. Deploy the web app to get the connection code.');
+  dialog_('Deploy the web app first', '<p>This sheet\'s key:</p>' + box(key) + '<p>Extensions &gt; Apps Script &gt; Deploy &gt; New deployment &gt; Web app, ' +
+    'Execute as Me, Who has access Anyone. Then use Bodega &gt; Show connection code again.</p><p>Already deployed? The code is ' + own + '.</p>');
+}
+// A dialog over the sheet. Run from the script editor there is no sheet to show it on (getUi() throws there); the log has what matters.
+function dialog_(title, html) {
+  var ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { return; }
+  ui.showModalDialog(HtmlService.createHtmlOutput('<div style="font:14px/1.4 Arial,sans-serif">' + html + '</div>').setWidth(480).setHeight(300), title);
 }
 
 /**
@@ -198,7 +241,7 @@ function locked_(fn) {
 }
 
 function doGet() {
-  return out_({ ok: true, data: { app: 'Toy Stock API', version: VERSION_ } });
+  return out_({ ok: true, data: { app: 'Bodega API', version: VERSION_ } });
 }
 
 function doPost(e) {
@@ -429,7 +472,7 @@ function setLogo_(url) {
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
  * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns, waiting Inbox rows, the payment
  * details and the shop's details (shop, with logoRev) are always sent whole. The logo is sent only when have.logoRev is not LOGO_REV,
- * since it is the one big value.
+ * since it is the one big value. version lets the app refuse to send entries to an older back end.
  * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
@@ -450,7 +493,7 @@ function snapshot_(have) {
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ line: l.line, sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost, status: l.status, expected: l.expected, orderLine: l.orderLine, delivered: l.delivered, cond: l.cond }); });
   invs.forEach(function (x) { x.lines.sort(function (a, b) { return a.line - b.line; }); });
   var shop = readShop_(), out = { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), shop: shop, warnings: warnings };
+    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), shop: shop, warnings: warnings, version: VERSION_ };
   shop.logoRev = logoRev_();
   if (!have || have.logoRev !== shop.logoRev) out.logo = logo_();
   return out;
