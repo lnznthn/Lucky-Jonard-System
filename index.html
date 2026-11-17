@@ -303,6 +303,8 @@ function live() {
   const orders = docs.orders.map(o => ({ ...o })), pres = docs.pres.map(p => ({ ...p })), invs = docs.invs.map(v => ({ ...v })), rets = docs.rets.map(r => ({ ...r }));
   const all = moves.map((m, i) => ({ ...m, _i: i }));
   const push = (m, q) => all.push({ ...m, _i: all.length, q });
+  // An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with its own cost.
+  const units = (m, costs, q) => costs.forEach((cost, k) => push({ ...m, id: m.id + '-' + (k + 1), qty: 1, cost }, q));
   const find = (list, id) => list.find(x => x.id === id);
   const nameOf = sku => (map.get(sku) || { name: sku }).name, handled = new Set();
   for (const q of queue) {
@@ -313,7 +315,7 @@ function live() {
       case 'edit': if (map.has(q.sku)) Object.assign(map.get(q.sku), q.patch); break;
       case 'cust': custs.set(q.cust.id, { ...q.cust }); break;
       case 'order': orders.push({ ...q.order, name: nameOf(q.order.sku), status: 'Ordered', recQty: null, recDate: '', q }); break;
-      case 'receive': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Received'; o.recQty = q.qty; o.recDate = q.date; o.w = q; push({ id: 'rcv-' + o.id, date: q.date, sku: o.sku, dir: 'In', qty: q.qty, reason: 'Restock', ref: o.id, note: '', cost: q.cost }, q); } break; }
+      case 'receive': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Received'; o.recQty = q.qty; o.recDate = q.date; o.w = q; units({ id: 'rcv-' + o.id, date: q.date, sku: o.sku, dir: 'In', reason: 'Restock', ref: o.id, note: '' }, q.costs, q); } break; }
       case 'orderCancel': { const o = find(orders, q.orderId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
       case 'pre': {
         const p = q.pre, c = custs.get(p.custId) || {}, tot = r2(p.qty * p.price), it = map.get(p.sku) || {};
@@ -336,21 +338,13 @@ function live() {
       case 'ret': {
         const r = q.ret, v = find(invs, r.invId);
         rets.push({ ...r, refund: r.refund || 0, invNo: v ? v.no : null, cust: v ? v.cust : '', name: nameOf(r.sku), q });
-        if (RETURN_STOCK[r.outcome] === 'In') push({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', qty: r.qty, reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '', cost: null }, q);
+        // A restocked unit comes back at the cost of the first line of that item on the invoice, as Code.gs writes it.
+        const l = v && v.lines.find(l => l.sku === r.sku);
+        if (RETURN_STOCK[r.outcome] === 'In') units({ id: 'ret-' + r.id, date: r.date, sku: r.sku, dir: 'In', reason: 'Return', ref: r.id, note: v ? 'Invoice ' + v.no : '' }, Array(r.qty).fill(l && l.cost != null ? l.cost : null), q);
         break;
       }
     }
   }
-  // Stock and the average cost on hand. A receipt with a cost moves the average; everything else leaves it alone.
-  const stock = new Map(), avg = new Map();
-  all.forEach(m => {
-    if (m.q && m.q.status !== 'pending') return;
-    const have = stock.get(m.sku) || 0;
-    if (m.dir === 'In') {
-      if (m.cost != null) { const a = avg.get(m.sku); avg.set(m.sku, have <= 0 || a == null ? m.cost : (have * a + m.qty * m.cost) / (have + m.qty)); }
-      stock.set(m.sku, have + m.qty);
-    } else stock.set(m.sku, have - m.qty);
-  });
   const incoming = new Map(), owed = new Map();
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
@@ -358,13 +352,37 @@ function live() {
   const cats = [...new Set(list.filter(i => i.active).map(catOf))].sort((a, b) => a.localeCompare(b));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
   const inbox = docs.inbox.filter(r => !handled.has(r.row));
-  _live = { map, list, stock, avg, incoming, owed, cats, all, custs, orders, pres, invs, rets, inbox };
+  _live = { map, list, fifo: fifo(all.filter(m => !m.q || m.q.status === 'pending')), incoming, owed, cats, all, custs, orders, pres, invs, rets, inbox };
   return _live;
 }
+/**
+ * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost }, one per unit),
+ * the deficit an Out could not take, and stock (units less deficit; one of the two is always zero). An In covers the
+ * deficit first. An Out takes from the front, but a Correction that reverses an In takes that In's units first.
+ */
+function fifo(list) {
+  const by = new Map();
+  list.forEach(m => {
+    const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
+    let n = m.qty;
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost == null ? null : m.cost }); }
+    else {
+      if (m.reason === 'Correction' && m.ref) s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
+      s.deficit += n - s.units.splice(0, n).length;
+    }
+    s.stock = s.units.length - s.deficit;
+  });
+  return by;
+}
+const onHand = sku => live().fifo.get(sku) || { units: [], deficit: 0, stock: 0 };
 const catOf = i => i.cat || 'General';
-const stockOf = sku => live().stock.get(sku) || 0;
+const stockOf = sku => onHand(sku).stock;
+/** Cost of the units on hand: the sum of the known costs, and how many have none. */
+const stockCost = sku => { const u = onHand(sku).units; return { value: r2(u.reduce((s, x) => s + (x.cost || 0), 0)), none: u.filter(x => x.cost == null).length }; };
+/** What selling qty now costs each: the oldest units on hand, per unit. Null when one has no cost or stock would go below zero. */
+function costOut(sku, qty) { const u = onHand(sku).units.slice(0, qty); return u.length < qty || u.some(x => x.cost == null) ? null : r2(u.reduce((s, x) => s + x.cost, 0) / qty); }
 /** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
-function nums(sku) { const L = live(), have = L.stock.get(sku) || 0, inc = L.incoming.get(sku) || 0, owed = L.owed.get(sku) || 0; return { have, inc, owed, ltp: have + inc - owed }; }
+function nums(sku) { const L = live(), have = stockOf(sku), inc = L.incoming.get(sku) || 0, owed = L.owed.get(sku) || 0; return { have, inc, owed, ltp: have + inc - owed }; }
 const fourText = sku => { const n = nums(sku); return `On hand ${n.have} · Incoming ${n.inc} · Owed ${n.owed} · Left to promise ${n.ltp}`; };
 /** Units that can be sold now: on hand (never below zero) less what open pre-orders are owed. Incoming stock does not count. */
 const freeOf = sku => { const n = nums(sku); return Math.max(n.have, 0) - n.owed; };
@@ -631,7 +649,7 @@ function renderHome() {
 function renderStock() {
   const L = live(), act = L.list.filter(i => i.active);
   let units = 0, value = 0;
-  act.forEach(i => { const n = Math.max(L.stock.get(i.sku) || 0, 0); units += n; if (i.price != null) value += n * i.price; });
+  act.forEach(i => { const n = Math.max(stockOf(i.sku), 0); units += n; if (i.price != null) value += n * i.price; });
   if (!L.list.length) {
     view().innerHTML = `<div class="empty"><h3>No items yet</h3><p>Add one by hand, or send Claude photos of the boxes or shelves and review what it read under Update stock.</p>
       <div class="actions"><button class="btn primary" data-act="newItem">Add an item</button><button class="btn" data-act="tab" data-t="import">Update stock</button></div></div>`;
@@ -664,7 +682,7 @@ function renderStockList() {
 }
 function openItem(sku) {
   const L = live(), i = L.map.get(sku); if (!i) return;
-  const n = nums(sku), s = status(i), a = L.avg.get(sku);
+  const n = nums(sku), s = status(i), u = onHand(sku), c = stockCost(sku);
   const recent = L.all.filter(m => m.sku === sku).sort(cmpMove).slice(0, 6);
   const det = [['Manufacturer', i.mfr], ['Brand', i.brand], ['Product line', i.line], ['Character', i.chr]].filter(d => d[1]);
   const said = s === 'out' ? 'Out of stock.' : s === 'neg' ? 'Below zero: run a count.' : '';
@@ -676,9 +694,13 @@ function openItem(sku) {
     <div class="actions"><button class="btn primary" data-act="toyGo" data-to="sell" data-sku="${esc(sku)}">Sell</button><button class="btn" data-act="toyGo" data-to="ord" data-sku="${esc(sku)}">Order stock</button></div>
     <div class="actions"><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="In">Stock in</button><button class="btn" data-act="moveFor" data-sku="${esc(sku)}" data-dir="Out">Stock out</button></div>
     <button class="tbtn" data-act="editItem" data-sku="${esc(sku)}">Edit details</button>
-    <dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}<dt>Average cost</dt><dd>${a == null ? 'No cost recorded yet' : money(r2(a))}</dd></dl>
+    ${det.length || i.rel ? `<dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}</dl>` : ''}
+    ${sec('Units on hand', u.deficit ? `<p class="hint" style="padding:22px 14px 14px">Below zero by ${u.deficit}. Units that arrive next cover this first.</p>`
+      : u.units.length ? `<div class="list">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><span class="amt">${x.cost == null ? 'No cost yet' : money(x.cost)}</span></div>`).join('')}</div>`
+      : '<p class="hint" style="padding:22px 14px 14px">None on hand.</p>')}
+    ${u.units.length ? `<p class="hint">${[c.none < u.units.length ? 'Cost of stock on hand ' + money(c.value) + '.' : '', c.none ? (c.none === 1 ? '1 unit has' : c.none + ' units have') + ' no cost yet.' : ''].filter(Boolean).join(' ')}</p>` : ''}
     ${sec('Recent movements', recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div>` : '<p class="hint" style="padding:22px 14px 14px">None yet.</p>')}
-    ${recent.length ? `<button class="tbtn" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : ''}`);
+    ${recent.length ? `<button class="tbtn" data-act="seeAll" data-sku="${esc(sku)}">See all in Activity</button>` : ''}`, 'item:' + sku, () => openItem(sku));
 }
 
 /* Item editor */
@@ -737,7 +759,7 @@ function saveItem(sku) {
 const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason: defaultReason(dir || 'In'), date: todayISO(), note: '', cost: '' });
 function renderMove() {
   const m = ui.mv || (ui.mv = newMv());
-  const it = m.sku && live().map.get(m.sku), a = it ? live().avg.get(it.sku) : null;
+  const it = m.sku && live().map.get(m.sku);
   view().innerHTML = `
     <div><div class="lbl">Item</div><div id="pick">${it
       ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(it.sku)} · ${esc(pickSub(it.sku))}</div></div><button class="tbtn" data-act="unpick">Change</button></div>`
@@ -747,7 +769,7 @@ function renderMove() {
       <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
       <div><label for="mvReason">Reason</label><select id="mvReason">${FORM_REASONS[m.dir].map(r => `<option ${r === m.reason ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
     </div>
-    ${m.dir === 'In' ? `<div><label for="mvCost">Cost each (${esc(prefs.cur)}) for this receipt</label><input id="mvCost" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.cost)}" placeholder="${a == null ? 'Optional' : 'Average so far ' + money(r2(a))}"></div>` : ''}
+    ${m.dir === 'In' ? `<div><label for="mvCost">Cost each (${esc(prefs.cur)}) for this receipt</label><input id="mvCost" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.cost)}" placeholder="Optional"></div>` : ''}
     <div class="row2"><div><label for="mvDate">Date</label><input id="mvDate" type="date" value="${esc(m.date)}"></div><div><label for="mvNote">Note</label><input id="mvNote" value="${esc(m.note)}" placeholder="Optional" autocomplete="off"></div></div>
     <div class="stack"><p class="hint" id="mvHint"></p>
     <button class="btn primary big" data-act="saveMove">Record ${m.dir === 'In' ? 'stock in' : 'stock out'}</button>
@@ -909,8 +931,7 @@ function issueInvoice() {
     const qty = Number(l.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
     const price = linePrice(l);
     if (price == null || isNaN(price) || price < 0) return toast(`Type the price for “${it.name}”.`);
-    const a = L.avg.get(it.sku);
-    lines.push({ sku: it.sku, qty, list: it.price == null ? null : it.price, price: r2(price), cost: a == null ? null : r2(a) });
+    lines.push({ sku: it.sku, qty, list: it.price == null ? null : it.price, price: r2(price), cost: costOut(it.sku, qty) });
   }
   const name = f.cust.trim(); if (!name) return toast('Add the customer’s name.');
   const date = parseDate(f.date); if (!date) return toast('Check the date.');
@@ -969,7 +990,7 @@ function openInv(id) {
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
-    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) + ' at average cost' : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
+    <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
     <button class="btn primary big" data-act="pdfPrint" data-id="${esc(id)}">Print PDF</button>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
@@ -1051,14 +1072,14 @@ function saveOrd() {
 }
 function openOrd(id) {
   const L = live(), o = L.orders.find(x => x.id === id); if (!o) return closeSheet();
-  const open = o.status === 'Ordered', a = L.avg.get(o.sku);
+  const open = o.status === 'Ordered';
   if (open && (!ui.sub || ui.sub.id !== id)) ui.sub = { id, mode: 'recv', qty: o.qty, cost: '' };
   const s = ui.sub || {};
   openSheet(`
     <div class="top"><h2>${esc(o.name)}</h2>${closeBtn}</div>
     <p class="hint">Supplier order · ${o.qty} ordered ${esc(fmtDay(o.date))}${o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''} ${waitTag(o)}</p>
     ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
-    ${open ? sec('When it arrives', `<div class="row2"><div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label for="rcCost">Cost each (${esc(prefs.cur)})</label><input id="rcCost" type="number" inputmode="decimal" min="0" step="any" data-b="sub.cost" value="${esc(s.cost)}" placeholder="${a == null ? '' : 'Average so far ' + money(r2(a))}"></div></div>
+    ${open ? sec('When it arrives', `<div class="row2"><div><label for="rcQty">Quantity received</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" value="${esc(s.qty)}"></div><div><label for="rcCost">Cost each (${esc(prefs.cur)})</label><input id="rcCost" type="number" inputmode="decimal" min="0" step="any" data-b="sub.cost" value="${esc(s.cost)}"></div></div>
       <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') + `<button class="tbtn danger" data-act="ordCancel" data-id="${esc(id)}">Cancel this order</button>`
       : `<dl class="kv"><dt>Status</dt><dd>${esc(o.status)}${o.status === 'Received' ? ', ' + o.recQty + ' on ' + esc(o.recDate) : ''}</dd></dl>`}
     ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
@@ -1068,7 +1089,7 @@ function receiveOrd() {
   const qty = Number(s.qty); if (!Number.isInteger(qty) || qty < 1) return toast('Quantity must be a whole number, 1 or more.');
   if (s.cost === '') return toast('Type the cost each, so margins can be worked out.');
   const cost = Number(s.cost); if (isNaN(cost) || cost < 0) return toast('Cost must be zero or more.');
-  qAdd('receive', { orderId: o.id, date: todayISO(), qty, cost: r2(cost) });
+  qAdd('receive', { orderId: o.id, date: todayISO(), qty, costs: Array(qty).fill(r2(cost)) });
   closeSheet(); commit();
   const waiting = readyPres().filter(p => p.sku === o.sku).length;
   toast(`+${qty} ${o.name}.` + (waiting ? ` ${waiting} pre-order${waiting === 1 ? ' is' : 's are'} ready to ship.` : ''));
@@ -1276,7 +1297,6 @@ function settleReceive(rows) {
       r.status = 'new'; r.on = !r.similar;
       if (r.similar) r.msg = `Looks like “${r.similar.name}”.`;
     }
-    if (r.cost == null) r.msg = (r.msg ? r.msg + ' ' : '') + 'No cost given: the average cost will not change.';
     if (r.relMsg) r.msg += ' ' + r.relMsg;
   });
 }
@@ -1519,7 +1539,7 @@ function applyReceive(rows) {
     let it = r.match || made.get(norm(r.name));
     if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); dirty(); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
-    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, cost: r.cost });
+    if (r.order) qAdd('receive', { orderId: r.order.id, date, qty: r.qty, costs: Array(r.qty).fill(r.cost) });
     else qMove({ id: 'm' + uid(), date, sku: it.sku, dir: 'In', qty: r.qty, reason: 'Restock', ref: '', note: r.note, cost: r.cost });
     out.nMove++; out.nRecv++; out.done.add(i); dirty();
   });
@@ -1767,7 +1787,7 @@ document.addEventListener('click', async ev => {
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), a = L.avg.get(i.sku); return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, a == null ? '' : r2(a), i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyItems': { const L = live(); await copyText(tsv([['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, catOf(i), i.price, i.min, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
     case 'copyMoves': await copyText(tsv([['Date', 'SKU', 'Item', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.sort(cmpMove).map(m => [m.date, m.sku, (live().map.get(m.sku) || {}).name, m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
