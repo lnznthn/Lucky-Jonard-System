@@ -54,6 +54,8 @@ with sync_playwright() as pw:
     check([r[0] for r in mv] == [f'{base}-{k}' for k in (1, 2, 3, 4)] and [r[4:7] for r in mv] == [['In', 1, 'Restock']] * 4 and [r[9] for r in mv] == [100, 200, 300, 400], f'one In row per unit, Qty 1, with its cost: {[(r[0], r[9]) for r in mv]}')
     open_item(p, 'Cost Alpha'); sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/03-units-on-hand.png', full_page=True)
     check(units(p) == ['100', '200', '300', '400'] and 'Restock · Next to leave' in sheet and sheet.count('Next to leave') == 1 and 'Cost of stock on hand ₱1,000.' in sheet, 'Units on hand lists each unit oldest first, the first marked Next to leave')
+    pid = sku_of(p, 'Cost Alpha'); skus = [e.inner_text().split(' · ')[0] for e in p.query_selector_all('#sheet .units .name')]
+    check(skus == [r[10] for r in mv] == [f'{pid}-{k}' for k in (1, 2, 3, 4)] and pid not in p.inner_text('#sheet .hint'), f'each unit shows its SKU, as in Movements column K; the Product ID alone is not shown: {skus}')
     close(p)
 
     # ---- two sales: each carries the cost of the oldest unit
@@ -75,7 +77,7 @@ with sync_playwright() as pw:
     close(p); synced(p)
     alpha = [r for r in rows('Movements') if r[3] == 'Cost Alpha' and r[4] == 'In']
     check([r[9] for r in alpha] == [100, 200, 350, 400], f'the cost reached that unit’s row in Movements: {[r[9] for r in alpha]}')
-    check([r[10] for r in rows('Browse') if r[1] == 'Cost Alpha'] == ['350, 400'], f"Browse lists the unit costs: {[r[10] for r in rows('Browse') if r[1] == 'Cost Alpha']}")
+    check([r[8] for r in rows('Browse') if r[1] == 'Cost Alpha'] == [f'{pid}-3 350, {pid}-4 400'], f"Browse lists the units on hand with their SKUs and costs: {[r[8] for r in rows('Browse') if r[1] == 'Cost Alpha']}")
     p2.click('#syncBtn'); synced(p2)
     open_item(p2, 'Cost Alpha'); check(units(p2) == ['350', '400'], f'device 2 has the new cost after its next sync: {units(p2)}'); close(p2)
 
@@ -118,10 +120,11 @@ with sync_playwright() as pw:
     ctx.set_offline(True)
     tab(p, 'Sales'); p.click('#invList .item:has-text("Ana Cruz")'); p.click('button:has-text("Record a return")'); p.click('button:has-text("Record return")'); close(p)
     open_item(p, 'Cost Alpha')
-    check(units(p) == ['400', '100'] and p.inner_text('#sheet .units .item:last-child .sub') == 'Return', f'before syncing, the returned unit is last at the line’s ₱100: {units(p)}'); close(p)
+    last = p.inner_text('#sheet .units .item:last-child .name')
+    check(units(p) == ['400', '100'] and p.inner_text('#sheet .units .item:last-child .sub') == 'Return' and last.startswith(f'{pid}-5 · '), f'before syncing, the returned unit is last at the line’s ₱100, with the next SKU for now: {units(p)} {last}'); close(p)
     ctx.set_offline(False); p.click('#syncBtn'); synced(p)
     ret = [r for r in rows('Movements') if r[6] == 'Return']; rid = rows('Returns')[0][0]
-    check([r[0] for r in ret] == [f'ret-{rid}-1'] and ret[0][5] == 1 and ret[0][9] == 100, f'the sheet has one Return row for the unit at ₱100: {ret}')
+    check([r[0] for r in ret] == [f'ret-{rid}-1'] and ret[0][5] == 1 and ret[0][9] == 100 and ret[0][10] == f'{pid}-5', f'the sheet has one Return row for the unit at ₱100, with the SKU the app showed: {ret}')
     open_item(p, 'Cost Alpha'); check(units(p) == ['400', '100'], 'after syncing the unit keeps its cost'); close(p)
 
     # ---- reversing a receipt takes out that receipt's unit; reversing a sale brings its unit back at its cost

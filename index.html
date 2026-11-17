@@ -375,6 +375,14 @@ function live() {
       }
     }
   }
+  // Unit SKUs as Code.gs writes them (see unit_()): a pending In of one unit shows the next number of its product until the sheet has it.
+  const nos = new Map();
+  all.forEach(m => {
+    if (m.dir !== 'In' || (m.q && m.q.status !== 'pending')) return;
+    const had = /-(\d+)$/.exec(m.unit || ''), n = nos.get(m.sku) || 0;
+    if (had) nos.set(m.sku, Math.max(n, +had[1]));
+    else { nos.set(m.sku, n + m.qty); if (m.q && m.qty === 1) m.unit = m.sku + '-' + (n + 1); }
+  });
   const incoming = new Map(), owed = new Map();
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
@@ -385,7 +393,7 @@ function live() {
   return _live;
 }
 /**
- * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost }, one per unit),
+ * FIFO replay, the same as Code.gs: per SKU the units on hand oldest first ({ id, date, reason, cost, unit }, one per unit),
  * the deficit an Out could not take, and stock (units less deficit; one of the two is always zero). An In covers the
  * deficit first. An Out takes from the front, but a Correction that reverses an In takes that In's units first.
  */
@@ -394,7 +402,7 @@ function fifo(list) {
   list.forEach(m => {
     const s = by.get(m.sku) || by.set(m.sku, { units: [], deficit: 0, stock: 0 }).get(m.sku);
     let n = m.qty;
-    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost }); }
+    if (m.dir === 'In') { const d = Math.min(s.deficit, n); s.deficit -= d; for (let k = d; k < n; k++) s.units.push({ id: m.id, date: m.date, reason: m.reason, cost: m.cost, unit: m.unit }); }
     else {
       if (m.reason === 'Correction') s.units = s.units.filter(u => u.id === m.ref && n > 0 ? (n--, false) : true);
       s.deficit += n - s.units.splice(0, n).length;
@@ -769,7 +777,7 @@ function openItem(sku) {
     <button class="tbtn" data-act="editItem" data-sku="${esc(sku)}">Edit details</button>
     ${det.length || i.rel ? `<dl class="kv">${det.map(d => `<dt>${d[0]}</dt><dd>${esc(d[1])}</dd>`).join('')}${i.rel ? `<dt>Release date</dt><dd>${esc(i.rel)}${i.relCheck ? ' <span class="tag warn">to verify</span>' : ''}</dd>` : ''}</dl>` : ''}
     ${sec('Units on hand', u.deficit ? `<p class="hint" style="padding:22px 14px 14px">Below zero by ${u.deficit}. Units that arrive next cover this first.</p>`
-      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
+      : u.units.length ? `<div class="list units">${u.units.map((x, k) => `<div class="item"><div class="main"><div class="name">${x.unit ? esc(x.unit) + ' · ' : ''}${esc(fmtDay(x.date))}</div><div class="sub">${esc(x.reason)}${k ? '' : ' · Next to leave'}</div></div><input type="number" inputmode="decimal" min="0" step="any" data-unit="${esc(x.id)}" value="${x.cost == null ? '' : x.cost}" placeholder="No cost yet" aria-label="Unit ${k + 1} cost"></div>`).join('')}</div>`
       : '<p class="hint" style="padding:22px 14px 14px">None on hand.</p>')}
     ${u.units.length ? `<p class="hint">${[c.none < u.units.length ? 'Cost of stock on hand ' + money(c.value) + '.' : '', c.none ? (c.none === 1 ? '1 unit has' : c.none + ' units have') + ' no cost yet.' : ''].filter(Boolean).join(' ')}</p>` : ''}
     ${sec('Recent movements', recent.length ? `<div class="list">${recent.map(m => moveRow(m, false)).join('')}</div>` : '<p class="hint" style="padding:22px 14px 14px">None yet.</p>')}
@@ -1936,8 +1944,8 @@ document.addEventListener('click', async ev => {
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
     case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
     case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
-    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => x.cost == null ? '?' : x.cost).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
-    case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost])])); toast('Copied. Paste into a spreadsheet.'); break;
+    case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost)).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
+    case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.unit])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
