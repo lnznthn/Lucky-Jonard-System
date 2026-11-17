@@ -68,7 +68,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#impText'), 'with no connection code the paste box is open')
     no_toy(p, 'Update stock')
     p.click('#view .item:has-text("One item by hand")')
-    check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('#mvQ'), 'One item by hand opens the Move screen with a picker')
+    check(p.inner_text('#title') == 'Stock in and out' and p.is_visible('[data-pk="mv"]'), 'One item by hand opens the Move screen with a picker')
     p.click('#backBtn'); check(p.inner_text('#title') == 'Bodega', 'the close button leaves the Move screen')
     check(p.inner_text('#syncTxt') == 'Local only', 'sync pill says Local only before connecting')
     p.screenshot(path=f'{SHOTS}/01-empty.png')
@@ -110,7 +110,7 @@ with sync_playwright() as pw:
     # ---- manual move via Move tab
     p.click('.item:has-text("Hot Wheels 5-Pack")'); p.screenshot(path=f'{SHOTS}/05-item-sheet.png')
     p.click('button:has-text("Stock out")')
-    check(p.inner_text('#pick').find('Hot Wheels 5-Pack') >= 0, 'Stock out opens Move with the toy preselected')
+    check(p.inner_text('#view .picked').find('Hot Wheels 5-Pack') >= 0, 'Stock out opens Move with the toy preselected')
     p.click('button[aria-label="More"]'); p.click('button[aria-label="More"]')
     check(p.input_value('#mvQty') == '3' and 'Stock 10 → 7' in p.inner_text('#mvHint'), 'stepper and hint show stock 10 → 7')
     p.fill('#mvNote', 'Weekend sale'); p.screenshot(path=f'{SHOTS}/06-move.png')
@@ -193,8 +193,8 @@ with sync_playwright() as pw:
     # ---- offline: queue then reconnect
     ctx1.set_offline(True)
     tab(p, 'Stock'); p.click('.item:has-text("Plush Bear Large")'); p.click('button:has-text("Stock out")'); p.click('button:has-text("Change")')
-    p.click('button[data-d="In"]'); p.fill('#mvQ', 'train'); p.click('#sug button')
-    check('Toy Train Set' in p.inner_text('#pick') and p.is_visible('button:has-text("Record stock in")'), 'Change on the Move screen lets another toy be searched and picked')
+    p.click('button[data-d="In"]'); p.fill('[data-pk="mv"]', 'train'); p.click('[data-sug="mv"] button')
+    check('Toy Train Set' in p.inner_text('#view .picked') and p.is_visible('button:has-text("Record stock in")'), 'Change on the Move screen lets another toy be searched and picked')
     p.click('button:has-text("Record stock in")')
     p.wait_for_timeout(1500)
     check(stock_map(p)['Toy Train Set'] == 6 and 'waiting' in p.inner_text('#syncTxt') or 'failed' in p.inner_text('#syncTxt'), f"offline entry is kept ({p.inner_text('#syncTxt')})")

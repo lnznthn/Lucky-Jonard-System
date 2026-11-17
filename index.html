@@ -586,7 +586,7 @@ function copyText(text) {
 const closeBtn = `<button class="icon" data-act="close" aria-label="Close">${icon('close', 22)}</button>`;
 const waitTag = d => (d.q ? '<span class="tag warn">waiting</span>' : d.w ? '<span class="tag warn">change waiting</span>' : '');
 
-/* ---------- toy picker used by the invoice, pre-order and supplier order forms ---------- */
+/* ---------- item picker used by the Move screen and the invoice and supplier order forms ---------- */
 function pickerHtml(k, sku) {
   const it = sku && live().map.get(sku);
   return it
@@ -864,11 +864,8 @@ function saveItem(sku) {
 const newMv = (sku, dir) => ({ sku: sku || '', dir: dir || 'In', qty: 1, reason: defaultReason(dir || 'In'), date: todayISO(), note: '', c: newCosts() });
 function renderMove() {
   const m = ui.mv || (ui.mv = newMv());
-  const it = m.sku && live().map.get(m.sku);
   view().innerHTML = `
-    <div><div class="lbl">Item</div><div id="pick">${it
-      ? `<div class="picked"><div class="main"><div class="name">${esc(it.name)}</div><div class="hint">${esc(it.sku)} · ${esc(pickSub(it.sku))}</div></div><button class="tbtn" data-act="unpick">Change</button></div>`
-      : `<input id="mvQ" type="search" placeholder="Search by name or SKU" autocomplete="off" aria-label="Item"><div class="sug" id="sug"></div>`}</div></div>
+    <div><div class="lbl">Item</div>${pickerHtml('mv', m.sku)}</div>
     <div class="seg dir"><button class="${m.dir === 'In' ? 'on' : ''}" data-act="dir" data-d="In">In: stock arrives</button><button class="${m.dir === 'Out' ? 'on' : ''}" data-act="dir" data-d="Out">Out: stock leaves</button></div>
     <div class="row2">
       <div><label for="mvQty">Quantity</label><div class="step"><button class="btn" data-act="qty" data-d="-1" aria-label="Less">${icon('minus', 20)}</button><input id="mvQty" type="number" inputmode="numeric" min="1" step="1" value="${esc(m.qty)}" data-units="mv.c"><button class="btn" data-act="qty" data-d="1" aria-label="More">${icon('plus', 20)}</button></div></div>
@@ -887,12 +884,6 @@ function updateMvHint() {
   if (!it) { h.textContent = ''; return; }
   const have = stockOf(it.sku), after = have + (m.dir === 'In' ? 1 : -1) * (isNaN(q) ? 0 : q);
   h.innerHTML = `Stock <b>${have}</b> → <b style="color:${after < 0 ? 'var(--danger)' : 'inherit'}">${after}</b>${after < 0 ? ' (below zero)' : ''}`;
-}
-function renderSug(text) {
-  const box = $('#sug'); if (!box) return;
-  const n = norm(text); if (!n) { box.innerHTML = ''; return; }
-  const rows = live().list.filter(i => i.active && norm(i.name + ' ' + i.sku).includes(n)).slice(0, 8);
-  box.innerHTML = rows.length ? rows.map(i => `<button data-act="pick" data-sku="${esc(i.sku)}"><b>${esc(i.name)}</b> <span class="hint">${esc(i.sku)} · ${stockOf(i.sku)} in stock</span></button>`).join('') : `<button disabled>No match. Add it from Stock with Add item.</button>`;
 }
 function saveMove() {
   const m = ui.mv, it = m.sku && live().map.get(m.sku);
@@ -1852,8 +1843,6 @@ document.addEventListener('click', async ev => {
     case 'seeAll': ui.aSku = d.sku; ui.aq = ''; prefs.tab = 'activity'; savePrefs(); closeSheet(); render(); break;
     case 'clearSku': ui.aSku = ''; renderActivity(); break;
     case 'more': ui.aN += 150; renderActList(); break;
-    case 'pick': ui.mv.sku = d.sku; renderMove(); break;
-    case 'unpick': ui.mv.sku = ''; renderMove(); break;
     case 'dir': ui.mv.dir = d.d; if (!FORM_REASONS[d.d].includes(ui.mv.reason)) ui.mv.reason = defaultReason(d.d); renderMove(); break;
     case 'qty': { const q = Math.max(1, (parseInt(ui.mv.qty, 10) || 0) + Number(d.d)); ui.mv.qty = q; $('#mvQty').value = q; redrawCosts('mv.c', q); updateMvHint(); break; }
     case 'saveMove': saveMove(); break;
@@ -2014,7 +2003,6 @@ document.addEventListener('input', ev => {
     case 'q': ui.q = t.value; renderStockList(); break;
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
     case 'iq': ui.iq = t.value; renderInvList(); break;
-    case 'mvQ': renderSug(t.value); break;
     case 'mvQty': ui.mv.qty = t.value; updateMvHint(); break;
     case 'mvReason': ui.mv.reason = t.value; break;
     case 'mvDate': ui.mv.date = t.value; break;
