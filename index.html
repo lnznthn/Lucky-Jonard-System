@@ -381,6 +381,8 @@ const catOf = i => i.cat || 'General';
 const stockOf = sku => onHand(sku).stock;
 /** Cost of the units on hand: the sum of the known costs, and how many have none. */
 const stockCost = sku => { const u = onHand(sku).units; return { value: r2(u.reduce((s, x) => s + (x.cost || 0), 0)), none: u.filter(x => x.cost == null).length }; };
+/** A list of unit costs as one value when they agree, "1,200 to 1,500" when they differ, '' when none is known. */
+const costsText = list => { const k = list.filter(x => x != null && x !== ''), n = x => Number(x).toLocaleString(undefined, { maximumFractionDigits: 2 }); if (!k.length) return ''; const lo = Math.min(...k), hi = Math.max(...k); return lo === hi ? n(lo) : n(lo) + ' to ' + n(hi); };
 /** What selling qty now costs each: the oldest units on hand, per unit. Null when one has no cost or stock would go below zero. */
 function costOut(sku, qty) { const u = onHand(sku).units.slice(0, qty); return u.length < qty || u.some(x => x.cost == null) ? null : r2(u.reduce((s, x) => s + x.cost, 0) / qty); }
 /** The four numbers per toy: on hand, incoming from suppliers, owed to customers, left to promise. */
