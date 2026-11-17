@@ -235,6 +235,10 @@ with sync_playwright() as pw:
     check('Invoice no. 3' in sheet and '(listed ₱1,800)' in sheet and 'Margin ₱500 at average cost' in sheet, 'invoice sheet shows override and margin')
     name, size = save_img(p, 'invoice-3')
     check(name == 'tab' and size and size[0] == 1190 and size[1] < 1684, f'Save image opens a valid PNG in a new tab, 1190 px wide and cropped shorter than an A4 page: {size}')
+    ctx.grant_permissions(['clipboard-read', 'clipboard-write']); p.wait_for_selector('#sheet button:has-text("Copy image")', state='visible')
+    p.click('#sheet button:has-text("Copy image")'); p.wait_for_function("document.querySelector('#toast').textContent.startsWith('Copied')", timeout=5000)
+    clip = p.evaluate("async () => { const [it] = await navigator.clipboard.read(); return Array.from(new Uint8Array(await (await it.getType('image/png')).arrayBuffer())); }")
+    check(p.inner_text('#toast') == 'Copied. Paste it into the chat.' and png_size(bytes(clip)) == size, f'with the clipboard API, Copy image sits beside Save image and copies the PNG: {png_size(bytes(clip))}')
     p.click('#sheet [data-act="ship"]'); check(p.is_checked('#sheet [data-act="ship"]'), 'ticking Delivered marks it')
     p.click('#sheet [data-act="ship"]'); check(not p.is_checked('#sheet [data-act="ship"]'), 'unticking takes the mark off')
     p.click('#sheet [data-act="ship"]'); close(p); synced(p)
@@ -378,6 +382,7 @@ with sync_playwright() as pw:
     check(all(s and s[0] == 1190 and s[1] <= 2048 for s in sizes) and len(sizes) == 2, f'each image is a PNG 1190 px wide and at most 2048 px tall: {sizes}')
     drawn = q.evaluate('window._drawn')
     check(drawn.count('ITEM') == 2 and 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn, 'the second image repeats the column header and both carry their page number')
+    check(q.query_selector('#imgCopy') is not None and not q.is_visible('#imgCopy'), 'Copy image is hidden for a document with several images')
     cl.close()
 
     # ---- Needs you: fixed order, one badge per row, capped at four on a phone with See more and See less

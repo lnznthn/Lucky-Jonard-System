@@ -53,6 +53,7 @@ nav.tabs button.on{color:var(--text);border-top-color:var(--text)}
 .btn.sm:active:not([disabled]){box-shadow:0 1px 0 var(--raise-edge)}
 .btn.big{width:100%}
 .btn[disabled]{opacity:.5;cursor:default}
+.btn[hidden]{display:none}
 .tbtn{min-height:44px;padding:0;border:0;background:transparent;color:var(--text);font-size:15px;font-weight:500;text-decoration:underline;text-underline-offset:4px;text-align:left;align-self:flex-start}
 .tbtn.danger{color:var(--danger)}
 .tbtn.c{align-self:center}
@@ -964,13 +965,13 @@ function openInv(id) {
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
       <div class="links"><button class="btn primary" style="flex:1" data-act="retSave">Record return</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   }
-  prepImg(v);
+  prepImg(v).then(bs => { const c = $('#imgCopy'); if (c && c.dataset.id === id) c.hidden = bs.length > 1; });
   openSheet(`
     <div class="top"><h2>${esc(docTitle(v))}</h2>${closeBtn}</div>
     <p class="hint">${esc(fmtDay(v.date))} · <b>${esc(v.cust)}</b>${contact ? ' · ' + esc(contact) : ''} ${waitTag(v)}</p>
     <div class="list">${v.lines.map(l => `<div class="item"><div class="main"><div class="name">${esc(l.name)}</div><div class="sub">${l.qty} × ${money(l.price)}${l.list != null && l.list !== l.price ? ' (listed ' + money(l.list) + ')' : ''}</div></div><span class="amt">${money(r2(l.qty * l.price))}</span></div>`).join('')}</div>
     <div class="tot"><div class="big"><span>Total</span><b>${money(v.total)}</b></div>${sale ? `<p class="hint">${costKnown ? 'Margin ' + money(Math.round(v.total - cost)) + ' at average cost' : 'Margin unknown: an item has no cost'}</p>` : pre ? `<p class="hint">Paid ${money(pre.paid)} · balance ${money(pre.balance)}</p>` : ''}</div>
-    <button class="btn primary big" data-act="imgSave" data-id="${esc(id)}">Save image</button>
+    <div class="actions"><button class="btn primary" data-act="imgSave" data-id="${esc(id)}">Save image</button>${canCopyImg ? `<button class="btn" id="imgCopy" data-act="imgCopy" data-id="${esc(id)}" hidden>Copy image</button>` : ''}</div>
     ${sale ? `<label class="check"><input type="checkbox" data-act="ship" data-id="${esc(id)}" data-s="${v.ship ? '' : 'Delivered'}" ${v.ship ? 'checked' : ''}> Delivered to the customer</label>` : ''}
     ${!sale && pre ? `<button class="btn" data-act="pre" data-id="${esc(pre.id)}">Open the pre-order</button>` : ''}
     ${myRets.length ? sec('Returns', `<div class="list">${myRets.map(r => `<div class="item"><div class="main"><div class="name">${esc(r.name)} × ${r.qty} · ${esc(r.outcome)}${waitTag(r)}</div><div class="sub">${esc(fmtDay(r.date))}${r.refund ? ' · refunded ' + money(r.refund) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div></div>${r.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(r.q.id)}" data-stay="1">Delete</button>` : ''}</div>`).join('')}</div>`) : ''}
@@ -1130,7 +1131,7 @@ async function drawDoc(v) {
 }
 const docPngs = async v => Promise.all((await drawDoc(v)).map(c => new Promise(res => c.toBlob(res, 'image/png'))));
 const imgName = (v, i, n) => (v.type === SALE ? 'Invoice-' : 'Receipt-') + v.no + (n > 1 ? '-' + (i + 1) : '') + '.png';
-/** Makes the images as soon as the document is opened, so the Save tap itself has nothing to wait for. */
+/** Makes the images as soon as the document is opened, so the Save or Copy tap itself has nothing to wait for. */
 function prepImg(v) {
   const pre = v.preId && live().pres.find(p => p.id === v.preId);
   const sig = JSON.stringify([v.id, v.no, v.date, v.cust, contactOf(v), v.lines, pre && [pre.paid, pre.balance], prefs.shop, prefs.cur]);
@@ -1150,6 +1151,13 @@ async function saveImg(id) {
     urls.forEach((url, i) => { const a = document.createElement('a'); a.href = url; a.download = imgName(v, i, urls.length); document.body.appendChild(a); a.click(); a.remove(); });
     toast(urls.length > 1 ? `${urls.length} images downloaded` : 'Image downloaded');
   } catch (e) { if (w) w.close(); toast('Could not make the image: ' + e.message); }
+}
+const canCopyImg = !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
+/** Copy image: Safari allows the write only when the ClipboardItem is made during the tap, so it gets a promise of the PNG. */
+async function copyImg(id) {
+  const v = live().invs.find(x => x.id === id); if (!v) return;
+  try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': prepImg(v).then(bs => bs[0]) })]); toast('Copied. Paste it into the chat.'); }
+  catch (e) { toast('Could not copy the image: ' + e.message); }
 }
 
 /* ---------- import ---------- */
@@ -1676,6 +1684,7 @@ document.addEventListener('click', async ev => {
     case 'invIssue': issueInvoice(); break;
     case 'inv': ui.sub = null; openInv(d.id); break;
     case 'imgSave': saveImg(d.id); break;
+    case 'imgCopy': copyImg(d.id); break;
     case 'ship': {
       const v = live().invs.find(x => x.id === d.id); if (!v || v.ship === d.s) break;
       queue = queue.filter(q => !(q.kind === 'ship' && q.invId === d.id && q.status === 'pending'));   // the last tap wins
