@@ -15,7 +15,7 @@ const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { 
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
-assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.5.0');
+assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.6.0');
 assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -155,8 +155,8 @@ assert.deepEqual([z13.vinv1.ok, z13.vinv1.no], [true, 1]); assert.match(z13.vinv
 assert.match(z13.vinv1c.error, /more than the total/); assert.match(z13.vinv1d.error, /Unknown supplier order line/);
 let inv1 = r.sync.invs.find(i => i.id === 'inv1');
 assert.deepEqual([inv1.cust, inv1.contact, inv1.total, inv1.paid, inv1.balance, inv1.ship], ['Ana Reyes', 'm.me/ana', 2700, 2000, 700, '']);
-assert.deepEqual(inv1.lines, [{ line: 1, sku: 'T0100', name: 'Grandista Son Goku', qty: 1, list: 1800, price: 1700, cost: 1200, status: 'Delivered', expected: '', orderLine: '', delivered: '2026-11-15' },
-  { line: 2, sku: 'T0005', name: 'Blocks Set', qty: 2, list: 12, price: 500, cost: null, status: 'To follow', expected: '2026-12-01', orderLine: 'sl7', delivered: '' }]);
+assert.deepEqual(inv1.lines, [{ line: 1, sku: 'T0100', name: 'Grandista Son Goku', qty: 1, list: 1800, price: 1700, cost: 1200, status: 'Delivered', expected: '', orderLine: '', delivered: '2026-11-15', cond: '' },
+  { line: 2, sku: 'T0005', name: 'Blocks Set', qty: 2, list: 12, price: 500, cost: null, status: 'To follow', expected: '2026-12-01', orderLine: 'sl7', delivered: '', cond: '' }]);
 assert.deepEqual([sheet('Invoices').rowsOf().find(x => x[1] === 'inv1').slice(0, 10), sheet('Invoice lines').rowsOf().filter(x => x[1] === 'inv1').map(x => x.slice(0, 13))],
   [[1, 'inv1', '2026-11-15', 'c-ana', 'Ana Reyes', 'm.me/ana', 2700, 2000, 700, ''], [[1, 'inv1', 1, 'T0100', 'Grandista Son Goku', 1, 1800, 1700, 1200, 'Delivered', '', '', '2026-11-15'], [1, 'inv1', 2, 'T0005', 'Blocks Set', 2, 12, 500, '', 'To follow', '2026-12-01', 'sl7', '']]], 'the rows in the 2.5 layout');
 assert.deepEqual(full().moves.filter(m => m.ref === '1').map(m => [m.id, m.sku, m.qty, m.reason, m.cost]), [['inv1-1', 'T0100', 1, 'Sale', 1200]], 'only the Delivered line leaves stock');
@@ -596,4 +596,84 @@ assert.deepEqual(cellsX(), beforeX, 'running setup() again changes nothing');
 const preY = X.b.ss.insertSheet('Pre-orders'); preY.set(1, 1, 'ID'); preY.set(2, 1, 'po1');
 vm.runInContext('setup()', X.b);
 assert.equal(X.sheet('Pre-orders'), preY, 'a Pre-orders tab with rows stays');
+
+// ---------- 2.6: a condition per unit beside its cost, discount and shipping fee, payment details ----------
+const C = bench(), mvC = id => C.sheet('Movements').rowsOf().find(x => x[0] === id), brC = sku => C.sheet('Browse').rowsOf().find(x => x[0] === sku)[8];
+const COND = 'Condition must be one of MISB, MIB, MOC, CIB, Box damage, Loose complete, Loose';
+const condsOf = ids => ids.map(id => mvC(id)[11]);
+
+// (r) In units carry their condition (column L, cond in the JSON) and FIFO takes them oldest first; a value outside the list, or several, is refused
+r = C.add([item('C1', 'Cond One'), item('C2', 'Cond Two'), item('C3', 'Cond Three'), { id: 'ck', kind: 'cust', cust: { id: 'cc', name: 'Cora', contact: '0917' } },
+  move('w1', 'C1', 'In', 1, 'Opening', { cost: 10, cond: 'MISB' }), move('w2', 'C1', 'In', 1, 'Opening', { cost: 20, cond: 'Loose' }), move('w3', 'C1', 'In', 1, 'Opening', { cost: 30 }),
+  move('w4', 'C1', 'In', 1, 'Opening', { cond: 'Mint' }), move('w5', 'C1', 'In', 1, 'Opening', { cond: 'MIB / Loose' })]);
+assert.deepEqual([res(r).qw4.error, res(r).qw5.error], [COND, COND]);
+assert.deepEqual([condsOf(['w1', 'w2', 'w3']), r.sync.moves.map(m => m.cond)], [['MISB', 'Loose', ''], ['MISB', 'Loose', '']]);
+assert.equal(brC('C1'), 'C1-1 10 MISB, C1-2 20 Loose, C1-3 30', 'Browse: SKU, cost, condition when recorded');
+
+// (s) receive: conds parallel to costs, a short list leaves the rest blank, one bad value refuses the receipt
+r = C.add([{ id: 'cs', kind: 'supplier', supplier: { id: 'cs', name: 'Supplier C' } }, { id: 'co', kind: 'order', order: { id: 'co', date: '2026-11-10', supId: 'cs', expected: '', note: '', lines: [{ id: 'cl1', sku: 'C2', qty: 3 }] } },
+  { id: 'cr0', kind: 'receive', lineId: 'cl1', date: '2026-11-14', from: 0, costs: [5, 6], conds: ['MOC', 'Boxed'] }, { id: 'cr1', kind: 'receive', lineId: 'cl1', date: '2026-11-14', from: 0, costs: [5, 6], conds: ['MOC'] }]);
+assert.equal(res(r).cr0.error, COND); assert.ok(res(r).cr1.ok);
+assert.deepEqual([condsOf(['rcv-cl1-1', 'rcv-cl1-2']), brC('C2')], [['MOC', ''], 'C2-1 5 MOC, C2-2 6']);
+
+// (t) an invoice with a discount and a shipping fee: Total = max(0, subtotal - discount) + fee; each line's condition on the line and its Sale movement
+const invC = (id, no, lines, extra = {}) => ({ id: 'v' + id, kind: 'invoice', invoice: { id, no, date: '2026-11-18', custId: 'cc', lines, ...extra } });
+r = C.add([invC('c1', 1, [{ sku: 'C1', qty: 2, price: 100, cost: 15, cond: 'MISB / Loose' }, { sku: 'C2', qty: 1, price: 50, follow: true, cond: 'MIB' }, { sku: 'C3', qty: 1, price: 40, follow: true }], { disc: 30, fee: 45.5, paid: 0 }),
+  invC('c2', 2, [{ sku: 'C1', qty: 1, price: 100 }], { disc: 100.01 }), invC('c3', 3, [{ sku: 'C1', qty: 1, price: 100, cond: 'MIB / Mint' }]), invC('c4', 4, [{ sku: 'C1', qty: 1, price: 100 }], { fee: -1 })]);
+assert.deepEqual([res(r).vc2.error, res(r).vc3.error, res(r).vc4.error], ['The discount is more than the subtotal', COND, 'Shipping fee must be a number, zero or more']);
+let c1 = r.sync.invs.find(v => v.id === 'c1');
+assert.deepEqual([c1.total, c1.paid, c1.balance, c1.disc, c1.fee, c1.lines.map(l => l.cond)], [305.5, 0, 305.5, 30, 45.5, ['MISB / Loose', '', '']], 'a to-follow line has no condition yet');
+assert.deepEqual([C.sheet('Invoices').rowsOf()[0].slice(6, 12), C.sheet('Invoice lines').rowsOf().map(x => x[13]), mvC('c1-1')[11], brC('C1')], [[305.5, 0, 305.5, '', 30, 45.5], ['MISB / Loose', '', ''], 'MISB / Loose', 'C1-3 30']);
+
+// (u) the cond entry: a unit on hand only, J:L written in place with the SKU kept, moveRev raised; the same value again is not refused
+const condE = (id, moveId, cond) => ({ id, kind: 'cond', moveId, cond });
+const LEFT_C = 'That unit has already left stock, so its condition can no longer be changed.';
+const s0C = C.full(), w3 = mvC('w3');
+r = C.c('add', { have: { rows: s0C.rows, lastId: s0C.lastId, moveRev: s0C.moveRev }, entries: [condE('ce1', 'w3', 'CIB')] }).data;
+assert.ok(r.results[0].ok);
+assert.deepEqual([mvC('w3'), r.sync.moveRev, r.sync.reset, brC('C1')], [w3.slice(0, 11).concat('CIB', w3.slice(12)), s0C.moveRev + 1, true, 'C1-3 30 CIB'], 'only Condition changed; SKU C1-3 kept in K');
+r = C.add([condE('ce2', 'w1', 'MIB'), condE('ce3', 'w1', 'MISB'), condE('ce4', 'c1-1', ''), condE('ce5', 'w3', 'Mint'), condE('ce6', 'w3', 'CIB'), condE('ce7', 'nope', '')]);
+assert.deepEqual(r.results.map(x => x.error), [LEFT_C, undefined, LEFT_C, COND, undefined, 'Unknown movement'], 'sold, sold but the same value, an Out, a bad value, a retry, unknown');
+assert.equal(r.sync.moveRev, s0C.moveRev + 1, 'nothing written');
+
+// (v) deliver writes its condition on the line and the Sale movement; lineCancel works the total out again with the discount and fee
+r = C.add([{ id: 'cd0', kind: 'deliver', invId: 'c1', line: 2, date: '2026-11-19', cost: 5, cond: 'Sealed' }, { id: 'cd1', kind: 'deliver', invId: 'c1', line: 2, date: '2026-11-19', cost: 5, cond: 'MOC' },
+  { id: 'cx1', kind: 'lineCancel', invId: 'c1', line: 3, refund: 0 },
+  invC('c5', 5, [{ sku: 'C1', qty: 1, price: 20, cost: 30, cond: 'CIB' }, { sku: 'C3', qty: 1, price: 100, follow: true }], { disc: 50, fee: 10, paid: 80 }), { id: 'cx5', kind: 'lineCancel', invId: 'c5', line: 2, refund: 70 }]);
+assert.deepEqual(r.results.map(x => x.error), [COND, undefined, undefined, undefined, undefined]);
+c1 = r.sync.invs.find(v => v.id === 'c1');
+assert.deepEqual([c1.lines[1].cond, mvC('c1-2')[11], C.sheet('Invoice lines').rowsOf().find(x => x[1] === 'c1' && x[2] === 2)[13]], ['MOC', 'MOC', 'MOC']);
+assert.deepEqual(r.sync.invs.filter(v => v.id === 'c1' || v.id === 'c5').map(v => [v.total, v.paid, v.balance]), [[265.5, 0, 265.5], [10, 10, 0]], '200 - 30 + 45.5; then max(0, 20 - 50) + 10');
+
+// (w) a Restock return comes back in the condition of the first Delivered line of that product when it is a single one, else blank
+r = C.add(['c1', 'c5'].map((inv, i) => ({ id: 'cr' + i, kind: 'ret', ret: { id: 'crt' + i, date: '2026-11-20', invId: inv, sku: 'C1', qty: 1, outcome: 'Restock', refund: 0, note: '' } })));
+assert.ok(r.results.every(x => x.ok));
+assert.deepEqual([['ret-crt0-1', 'ret-crt1-1'].map(id => [mvC(id)[9], mvC(id)[11]]), brC('C1')], [[[15, ''], [30, 'CIB']], 'C1-4 15, C1-5 30 CIB']);
+
+// (x) payment details: rows with a Method, in sheet order; the tab is not protected and not wiped; a missing tab reads as none
+const pd = C.sheet('Payment details');
+assert.deepEqual([pd.getRange(1, 1, 1, 3).getValues()[0], [1, 2, 3].every(c => pd.textCols.has(c)), pd.getProtections(), C.full().pay], [['Method', 'Number', 'Name'], true, [], []]);
+[['GCash', '0917 000 0000', 'Lorenz R'], ['', 'stray', ''], ['BPI', '+63 1234', 'Lorenz R']].forEach((v, i) => v.forEach((x, j) => { if (x) pd.set(i + 2, j + 1, x); }));
+const payC = [{ method: 'GCash', number: '0917 000 0000', name: 'Lorenz R' }, { method: 'BPI', number: '+63 1234', name: 'Lorenz R' }];
+vm.runInContext('wipeAllData()', C.b);
+assert.deepEqual(C.full().pay, payC);
+C.b.ss.deleteSheet(pd);
+assert.deepEqual([C.c('sync', { have: { rows: 0 } }).ok, C.full().pay], [true, []]);
+
+// (y) setup() on a 2.5 sheet: the new last columns get their headers and formats, every row stays, old rows read blank, Payment details is made
+const Y = bench(), as25 = (n, w) => Object.keys(Y.sheet(n).cells).forEach(k => { if (+k.split(',')[1] > w) delete Y.sheet(n).cells[k]; });
+Y.add([item('Y1', 'Why One'), item('Y2', 'Why Two'), { id: 'yk', kind: 'cust', cust: { id: 'cy', name: 'Yan', contact: '0917' } }, move('y1', 'Y1', 'In', 1, 'Opening', { cost: 10 }),
+  { id: 'vy', kind: 'invoice', invoice: { id: 'y1', no: 1, date: '2026-11-01', custId: 'cy', paid: 0, lines: [{ sku: 'Y1', qty: 1, price: 100, cost: 10 }, { sku: 'Y2', qty: 1, price: 50, follow: true }] } }]);
+[['Invoices', 10], ['Invoice lines', 13], ['Movements', 11]].forEach(([n, w]) => as25(n, w)); Y.b.ss.deleteSheet(Y.sheet('Payment details'));
+const tabsY = ['Invoices', 'Invoice lines', 'Movements'], rowsY = () => tabsY.map(n => Y.sheet(n).rowsOf()), beforeY = rowsY();
+vm.runInContext('setup()', Y.b);
+assert.deepEqual([rowsY(), tabsY.map(n => Y.sheet(n).getRange(1, 1, 1, 15).getValues()[0].filter(Boolean).slice(-2))], [beforeY, [['Discount', 'Shipping fee'], ['Delivered on', 'Condition'], ['SKU', 'Condition']]], 'rows kept, headers extended');
+assert.deepEqual([Y.sheet('Movements').textCols.has(12), Y.sheet('Invoice lines').textCols.has(14), Y.sheet('Payment details').cell(1, 3), Y.sheet('Payment details').getProtections()], [true, true, 'Name', []]);
+const fy = Y.full();
+assert.deepEqual([fy.invs[0].disc, fy.invs[0].fee, fy.invs[0].lines.map(l => l.cond), fy.moves.map(m => m.cond), fy.pay], [0, 0, ['', ''], ['', ''], []], 'old rows read blank as 0 and empty');
+r = Y.add([{ id: 'yx', kind: 'lineCancel', invId: 'y1', line: 2, refund: 0 }]);
+assert.deepEqual(r.sync.invs[0].total, 100, 'a 2.5 invoice keeps working with no discount or fee');
+const cellsY = () => Y.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(x.cells).sort())]), afterY = cellsY();
+vm.runInContext('setup()', Y.b);
+assert.deepEqual(cellsY(), afterY, 'running setup() again changes nothing');
 console.log('backend tests passed');

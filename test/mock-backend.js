@@ -102,6 +102,12 @@ if (require.main === module) {
         JSON.parse(body || '[]').forEach(r => { row++; (Array.isArray(r) ? r : keys.map(k => r[k] == null ? '' : r[k])).forEach((v, j) => sh.set(row, j + 1, String(v))); });
         res.writeHead(200, cors); return res.end(String(row));
       }
+      // Test-only: replaces the rows under the Payment details header, as the owner types them in the sheet. Body: a JSON array of [method, number, name] rows.
+      if (req.url.startsWith('/_pay')) {
+        const sh = sb.sheets.find(s => s.name === 'Payment details'), rows = JSON.parse(body || '[]');
+        sh.putRows([]); rows.forEach((r, i) => r.forEach((v, j) => sh.set(i + 2, j + 1, String(v))));
+        res.writeHead(200, cors); return res.end(String(rows.length));
+      }
       // Test-only: puts whole rows into a tab as a person editing the sheet would. Body: { tab, rows: [[...], ...] } replaces rows 2 onward.
       if (req.url.startsWith('/_rows')) {
         const { tab, rows } = JSON.parse(body || '{}'), sh = sb.sheets.find(s => s.name === tab);

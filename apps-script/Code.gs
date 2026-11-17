@@ -6,17 +6,21 @@
  * After pasting a newer version, run setup() again and publish a new version of the existing deployment.
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
- * The app is the writer of the data tabs. Movements and returns are append-only, except that a cost entry
- * rewrites the Unit cost of an In movement while one of its units is on hand. Products, customers, suppliers,
+ * The app is the writer of the data tabs. Movements and returns are append-only, except that a cost or cond entry
+ * rewrites the Unit cost or Condition of an In movement while one of its units is on hand. Products, customers, suppliers,
  * supplier order lines, invoices and invoice lines are one row each; only their status-type fields change later.
  * A product is keyed by its Product ID (called sku inside this script and in the JSON); each unit it receives gets a SKU, see unit_().
  * Units leave stock first in, first out, in the order of the Movements tab; see stockOf_().
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes product changes typed in the sheet.
  */
-var VERSION_ = '2.5.0';
+var VERSION_ = '2.6.0';
 var ITEM_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Release check'];
-var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU'];
+var MOVE_HEAD_ = ['ID', 'Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'];
+// A unit's condition, in this order; CONDITIONS in index.html is the same list. Blank means not recorded.
+var CONDITIONS_ = ['MISB', 'MIB', 'MOC', 'CIB', 'Box damage', 'Loose complete', 'Loose'];
+// Payment details: typed by the owner in the sheet and sent to the app for the invoice image. The app never writes it.
+var PAY_HEAD_ = ['Method', 'Number', 'Name'];
 var IN_ONLY_ = ['Opening', 'Restock', 'Return'];
 var OUT_ONLY_ = ['Sale', 'Damaged', 'Lost'];
 var EITHER_ = ['Count', 'Correction', 'Other'];
@@ -30,7 +34,7 @@ var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // (a supplier order or quotation), which the app opens as an Ordered batch.
 var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status', 'Supplier', 'Expected'];
 // Browse: one row per product with the computed numbers, rewritten in full at the end of every sync and add.
-// Units on hand lists each unit on hand, oldest first, as its SKU and cost, with ? for a unit without a cost.
+// Units on hand lists each unit on hand, oldest first, as its SKU, its cost (? without one) and its condition when recorded.
 var BROWSE_HEAD_ = ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
 var BROWSE_TEXT_ = ['A:B', 'D:D', 'I:I', 'L:Q'];
 // Edits: product changes typed in the sheet, applied as edit entries at the start of every sync and add.
@@ -61,16 +65,16 @@ var T_ = {
   order: { name: 'Supplier orders', col: 1, head: ['ID', 'Order ID', 'Date', 'Supplier ID', 'Supplier', 'Product ID', 'Product', 'Qty', 'Cost each', 'Expected', 'Received qty', 'Status', 'Note'], text: ['A:G', 'J:J', 'L:M'],
     from: function (v) { return { id: s_(v[0]), orderId: s_(v[1]), date: dateStr_(v[2]), supId: s_(v[3]), sup: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), cost: num_(v[8]), expected: dateStr_(v[9]), recQty: Number(v[10]) || 0, status: s_(v[11]), note: String(v[12]) }; },
     to: function (o) { return [o.id, o.orderId, o.date, o.supId, o.sup, o.sku, o.name, o.qty, blank_(o.cost), o.expected, o.recQty, o.status, o.note]; } },
-  // Balance is Total less Paid.
-  inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Total', 'Paid', 'Balance', 'Shipping'], text: ['B:F', 'J:J'],
-    from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), custId: s_(v[3]), cust: s_(v[4]), contact: s_(v[5]), total: Number(v[6]), paid: Number(v[7]), balance: Number(v[8]), ship: s_(v[9]) }; },
-    to: function (o) { return [o.no, o.id, o.date, o.custId, o.cust, o.contact, o.total, o.paid, o.balance, o.ship]; } },
+  // Total is the subtotal less Discount (never below zero) plus Shipping fee, see total_(); Balance is Total less Paid. A blank Discount or fee reads as 0.
+  inv: { name: 'Invoices', col: 2, head: ['No', 'ID', 'Date', 'Customer ID', 'Customer', 'Contact', 'Total', 'Paid', 'Balance', 'Shipping', 'Discount', 'Shipping fee'], text: ['B:F', 'J:J'],
+    from: function (v) { return { no: Number(v[0]), id: s_(v[1]), date: dateStr_(v[2]), custId: s_(v[3]), cust: s_(v[4]), contact: s_(v[5]), total: Number(v[6]), paid: Number(v[7]), balance: Number(v[8]), ship: s_(v[9]), disc: Number(v[10]) || 0, fee: Number(v[11]) || 0 }; },
+    to: function (o) { return [o.no, o.id, o.date, o.custId, o.cust, o.contact, o.total, o.paid, o.balance, o.ship, o.disc, o.fee]; } },
   // Line is 1..n within the invoice. Status is Delivered (left stock), To follow (owed: no movement and no cost yet) or Cancelled.
-  // Expected and Order line say when a to-follow line should arrive; Delivered on is the day it left stock.
+  // Expected and Order line say when a to-follow line should arrive; Delivered on is the day it left stock. Condition is that of the units it took.
   line: { name: 'Invoice lines', col: 2, keys: 2, key: function (o) { return o.invId + ' line ' + o.line; },
-    head: ['Invoice no', 'Invoice ID', 'Line', 'Product ID', 'Product', 'Qty', 'Listed price', 'Charged price', 'Unit cost', 'Status', 'Expected', 'Order line', 'Delivered on'], text: ['B:B', 'D:E', 'J:M'],
-    from: function (v) { return { invNo: Number(v[0]), invId: s_(v[1]), line: Number(v[2]), sku: s_(v[3]), name: s_(v[4]), qty: Number(v[5]), list: num_(v[6]), price: Number(v[7]), cost: num_(v[8]), status: s_(v[9]), expected: dateStr_(v[10]), orderLine: s_(v[11]), delivered: dateStr_(v[12]) }; },
-    to: function (o) { return [o.invNo, o.invId, o.line, o.sku, o.name, o.qty, blank_(o.list), o.price, blank_(o.cost), o.status, o.expected, o.orderLine, o.delivered]; } },
+    head: ['Invoice no', 'Invoice ID', 'Line', 'Product ID', 'Product', 'Qty', 'Listed price', 'Charged price', 'Unit cost', 'Status', 'Expected', 'Order line', 'Delivered on', 'Condition'], text: ['B:B', 'D:E', 'J:N'],
+    from: function (v) { return { invNo: Number(v[0]), invId: s_(v[1]), line: Number(v[2]), sku: s_(v[3]), name: s_(v[4]), qty: Number(v[5]), list: num_(v[6]), price: Number(v[7]), cost: num_(v[8]), status: s_(v[9]), expected: dateStr_(v[10]), orderLine: s_(v[11]), delivered: dateStr_(v[12]), cond: s_(v[13]) }; },
+    to: function (o) { return [o.invNo, o.invId, o.line, o.sku, o.name, o.qty, blank_(o.list), o.price, blank_(o.cost), o.status, o.expected, o.orderLine, o.delivered, o.cond]; } },
   // Returns are only ever appended.
   ret: { name: 'Returns', col: 1, head: ['ID', 'Date', 'Invoice no', 'Invoice ID', 'Customer', 'Product ID', 'Product', 'Qty', 'Outcome', 'Refund', 'Note'], text: ['A:B', 'D:G', 'I:I', 'K:K'],
     from: function (v) { return { id: s_(v[0]), date: dateStr_(v[1]), invNo: Number(v[2]), invId: s_(v[3]), cust: s_(v[4]), sku: s_(v[5]), name: s_(v[6]), qty: Number(v[7]), outcome: s_(v[8]), refund: Number(v[9]), note: String(v[10]) }; },
@@ -83,15 +87,20 @@ var APP_TABS_ = ['Products', 'Movements'].concat(Object.keys(T_).map(function (k
  * Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data.
  * It also brings a 2.3 sheet to 2.4: Items becomes Products without Category and Reorder at, In rows get their unit SKU,
  * and Browse is made again when its header is not the current one. And a 2.4 sheet to 2.5, see upgrade25_().
+ * A 2.5 sheet becomes 2.6 by the header rows alone: Movements gains Condition, Invoices Discount and Shipping fee, Invoice lines
+ * Condition, each a new last column that reads blank on older rows; and the Payment details tab is made.
  */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), old = ss.getSheetByName('Items'), pr = ss.getSheetByName('Products');
   if (old && !pr) pr = old.setName('Products');
   if (pr) ['Category', 'Reorder at'].forEach(function (h) { var c = pr.getRange(1, 1, 1, pr.getMaxColumns()).getValues()[0].indexOf(h); if (c >= 0) pr.deleteColumn(c + 1); });
   asText_(ensureSheet_(ss, 'Products', ITEM_HEAD_), ['A:B', 'D:D', 'F:K']).getRange('C:C').setNumberFormat('#,##0.00');
-  asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:K']).getRange('J:J').setNumberFormat('#,##0.00');
+  asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I', 'K:L']).getRange('J:J').setNumberFormat('#,##0.00');
   locked_(function () { upgrade25_(ss); });
   Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
+  sheet_('Invoices').getRange('K:L').setNumberFormat('#,##0.00');
+  // Not protected and not wiped: the owner types these rows.
+  asText_(ensureSheet_(ss, 'Payment details', PAY_HEAD_), ['A:C']);
   asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:O']);
   var br = ss.getSheetByName('Browse');
   if (br && br.getRange(1, 1, 1, BROWSE_HEAD_.length).getValues()[0].join('|') !== BROWSE_HEAD_.join('|')) ss.deleteSheet(br);
@@ -266,7 +275,7 @@ function itemRow_(it, have) {
   return [it.sku, it.name, blank_(it.price), it.active ? 'Yes' : 'No', have || 0,
     it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
 }
-function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]), unit: s_(v[10]) }; }
+function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]), unit: s_(v[10]), cond: s_(v[11]) }; }
 // The rows of a tab that have something in column A, as objects that remember their sheet row.
 function readRows_(name, head, from) {
   var sh = sheet_(name), last = lastRowOf_(sh), out = [];
@@ -277,7 +286,8 @@ function readRows_(name, head, from) {
 function readMoves_() { return readRows_('Movements', MOVE_HEAD_, moveOf_); }
 /**
  * Stock per lower-case SKU, replayed first in, first out in sheet order, the same way as live() in the app; dates are not used.
- * Each SKU has a queue of units on hand, oldest first ({ id, cost, unit } per unit: an In of Qty 3 is three units at its cost), and a deficit.
+ * Each SKU has a queue of units on hand, oldest first ({ id, cost, unit, cond } per unit: an In of Qty 3 is three units at its cost
+ * and condition), and a deficit.
  * An In covers the deficit first and queues the rest. An Out takes units from the front, except that a Correction whose Ref is an In
  * takes that In's own units first; what the queue cannot give is added to the deficit.
  * Returns { stock, units }: stock is units on hand minus the deficit (one of the two is always zero).
@@ -288,7 +298,7 @@ function stockOf_(moves) {
     var k = m.sku.toLowerCase(), u = units[k] = units[k] || [], n = m.qty, d = owe[k] || 0;
     if (m.dir === 'In') {
       owe[k] = Math.max(d - n, 0);
-      for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost, unit: m.unit });
+      for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost, unit: m.unit, cond: m.cond });
     } else {
       if (m.reason === 'Correction') u = units[k] = u.filter(function (x) { return x.id === m.ref && n > 0 ? (n--, false) : true; });
       owe[k] = d + n - u.splice(0, n).length;
@@ -342,7 +352,7 @@ function writeBrowse_() {
     u.forEach(function (x) { if (x.cost == null) none++; else val += x.cost; });
     // Units on hand, stock value and units without cost are blank when no unit is on hand.
     return [it.sku, it.name, blank_(it.price), it.active ? 'Yes' : 'No', have, i, o, have + i - o,
-      u.map(function (x) { return (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost); }).join(', '), u.length ? r2_(val) : '', u.length ? none : '', it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
+      u.map(function (x) { return (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost) + (x.cond ? ' ' + x.cond : ''); }).join(', '), u.length ? r2_(val) : '', u.length ? none : '', it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
   });
   if (sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, BROWSE_HEAD_.length).clearContent();
   ensureRows_(sh, rows.length + 1);
@@ -363,6 +373,12 @@ function readInbox_() {
   return out;
 }
 function readTab_(k) { return readRows_(T_[k].name, T_[k].head, T_[k].from); }
+/** Payment details rows that have a Method, in sheet order. A missing tab (setup() not run since 2.5) reads as none rather than failing the sync. */
+function readPay_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Payment details'), last = sh ? sh.getLastRow() : 0;
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, PAY_HEAD_.length).getValues().filter(function (v) { return s_(v[0]); }).map(function (v) { return { method: s_(v[0]), number: s_(v[1]), name: s_(v[2]) }; });
+}
 
 // ---------- reading ----------
 
@@ -374,7 +390,8 @@ function raiseRev_() { PropertiesService.getScriptProperties().setProperty('move
  * Returns every item and document plus the movement rows the app does not have yet.
  * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
- * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns and waiting Inbox rows are always sent whole.
+ * Customers, suppliers, supplier order lines, invoices (with their lines, in Line order), returns, waiting Inbox rows and the payment
+ * details are always sent whole.
  * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
@@ -392,10 +409,10 @@ function snapshot_(have) {
   var lastId = rows > 0 ? String(sh.getRange(rows + 1, 1).getValue()) : '';
   var invs = readTab_('inv'), byInv = {}, warnings = [];
   invs.forEach(function (x) { x.lines = []; byInv[x.id] = x; });
-  readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ line: l.line, sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost, status: l.status, expected: l.expected, orderLine: l.orderLine, delivered: l.delivered }); });
+  readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ line: l.line, sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost, status: l.status, expected: l.expected, orderLine: l.orderLine, delivered: l.delivered, cond: l.cond }); });
   invs.forEach(function (x) { x.lines.sort(function (a, b) { return a.line - b.line; }); });
   return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
-    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
+    custs: readTab_('cust'), sups: readTab_('sup'), orders: readTab_('order'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), pay: readPay_(), warnings: warnings };
 }
 
 // ---------- validation ----------
@@ -419,6 +436,14 @@ function money_(v, what) {
   return r2_(n);
 }
 function moneyOrNull_(v, what) { return v === '' || v == null ? null : money_(v, what); }
+// A unit's condition: '' or one of CONDITIONS_. many: a sale line's, the conditions of the units it takes joined with ' / ', each in the list.
+function cond_(v, many) {
+  var c = s_(v);
+  if (c && (many ? c.split(' / ') : [c]).some(function (x) { return CONDITIONS_.indexOf(x) < 0; })) throw new Error('Condition must be one of ' + CONDITIONS_.join(', '));
+  return c;
+}
+// An invoice's total from its subtotal (the sum of qty x price), discount and shipping fee. index.html works it out the same way.
+function total_(sub, disc, fee) { return r2_(Math.max(0, r2_(sub) - disc) + fee); }
 function id_(v, what) {
   var id = s_(v);
   if (!id || id.length > 60) throw new Error(what + ' needs an ID');
@@ -454,7 +479,7 @@ function cleanMove_(x) {
   var reason = String(x.reason || '');
   var okReason = EITHER_.indexOf(reason) >= 0 || (dir === 'In' ? IN_ONLY_ : OUT_ONLY_).indexOf(reason) >= 0;
   if (!okReason) throw new Error(reason + ' cannot be recorded as ' + dir);
-  return { id: id, date: date, sku: String(x.sku || '').trim(), dir: dir, qty: qty, reason: reason, ref: text_(x.ref, 60), note: text_(x.note, 300), cost: moneyOrNull_(x.cost, 'Unit cost') };
+  return { id: id, date: date, sku: String(x.sku || '').trim(), dir: dir, qty: qty, reason: reason, ref: text_(x.ref, 60), note: text_(x.note, 300), cost: moneyOrNull_(x.cost, 'Unit cost'), cond: cond_(x.cond) };
 }
 
 // Next unused T0001-style SKU, given a map of lower-case SKU -> item.
@@ -477,28 +502,36 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * kind        payload                                                  effect
  * item        item, auto                                               new item
  * edit        sku, patch                                               change an item's details
- * move        move { id, date, sku, dir, qty, reason, ref, note, cost } one stock movement
+ * move        move { id, date, sku, dir, qty, reason, ref, note, cost, cond }
+ *                                                                      one stock movement; cond is '' or one condition (the units of an In)
  * cust        cust { id, name, contact }                               new customer, or new details for one
  * supplier    supplier { id, name, contact, note }                     new supplier, or new details for one
  * order       order { id, date, supId, expected, note, lines: [{ id, sku, qty, cost }] }
  *                                                                      one Supplier orders row per line (Ordered); a line ID on file is skipped
- * receive     lineId, date, from, costs                                units from+1 ... from+n of a line (n = costs.length): one In/Restock per unit,
+ * receive     lineId, date, from, costs, conds                         units from+1 ... from+n of a line (n = costs.length): one In/Restock per unit,
  *                                                                      rcv-<lineId>-<from+k>, Ref = order ID, Unit cost costs[k-1] (a number, or null
- *                                                                      for blank); Received qty = max(it, from + n), Received when it reaches Qty
+ *                                                                      for blank), Condition conds[k-1] ('' when missing); Received qty = max(it,
+ *                                                                      from + n), Received when it reaches Qty
  * orderCancel lineId                                                   line Cancelled; what was received stays
- * invoice     invoice { id, no, date, custId, paid, lines: [{ sku, qty, price, cost, follow, expected, orderLine }] }
+ * invoice     invoice { id, no, date, custId, paid, disc, fee, lines: [{ sku, qty, price, cost, cond, follow, expected, orderLine }] }
  *                                                                      invoice + lines 1..n; a line with follow: true is To follow (no movement,
- *                                                                      blank cost), any other is Delivered with an Out/Sale movement <id>-<line>,
- *                                                                      Ref = invoice no; paid blank = paid in full
- * deliver     invId, line, date, cost                                  To follow line Delivered + its Out/Sale movement <invId>-<line>
+ *                                                                      blank cost and condition), any other is Delivered with an Out/Sale movement
+ *                                                                      <id>-<line>, Ref = invoice no, carrying its cost and cond; Total per total_()
+ *                                                                      (disc, fee blank = 0; disc at most the subtotal); paid blank = paid in full
+ * deliver     invId, line, date, cost, cond                            To follow line Delivered + its Out/Sale movement <invId>-<line>
  * pay         invId, paid                                              new total paid on an invoice
- * lineCancel  invId, line, refund                                      To follow line Cancelled; Total less its amount, Paid less the refund
+ * lineCancel  invId, line, refund                                      To follow line Cancelled; Total per total_() over the lines not Cancelled,
+ *                                                                      Paid less the refund
  * follow      invId, line, expected, orderLine                         new expected date or order line on a To follow line
  * ship        invId, ship ('Delivered' or '')                          delivered mark on an invoice
  * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return of Delivered units + movements per RETURN_STOCK_: for Restock one
- *                                                                      In/Return per unit, ret-<id>-1 ..., at the cost of the invoice line
+ *                                                                      In/Return per unit, ret-<id>-1 ..., at the cost of the first Delivered line of
+ *                                                                      that product, and its condition when that is a single one
  * cost        moveId, cost (a number, or null to clear it)             Unit cost (column J) of an In movement with a unit still on hand; raises moveRev
+ * cond        moveId, cond ('' or one condition)                       Condition (column L) of the same; raises moveRev
  * inboxDone   rows [{ row, name, added?, type?, qty? }], mark          Inbox rows handled ('Done' or 'Dismissed')
+ *
+ * A condition is one of CONDITIONS_; an invoice line and its Sale movement may carry several joined with ' / ', see cond_().
  *
  * Two phones can each invent the same next SKU while offline. An item sent with auto: true that meets a
  * different item on its SKU is renumbered, the rest of the batch follows the new SKU, and the result carries
@@ -553,11 +586,12 @@ function keyRows_(sh, col, lower, n) {
 }
 function keyOf_(v) { return v.length < 2 ? s_(v[0]) : s_(v[0]) && s_(v[1]) ? s_(v[0]) + ' line ' + s_(v[1]) : ''; }
 // The tabs whose rows change in place: [sheet name, key column, key of a record, records, record -> row, width, first column (default 1),
-// key cells (default 1)]. On Movements only the Unit cost (column J) is ever written in place, by a cost entry.
+// key cells (default 1)]. On Movements only Unit cost and Condition change in place, by a cost or cond entry: the row's J:L is written in
+// one call, with the SKU it already had in K.
 function tabsOf_(p) {
   var out = [['Products', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
   ['cust', 'sup', 'order', 'inv', 'line'].forEach(function (k) { out.push([T_[k].name, T_[k].col, T_[k].key || idKey_, p.tabs[k], T_[k].to, T_[k].head.length, 1, T_[k].keys]); });
-  out.push(['Movements', 1, idKey_, p.moves, function (m) { return [blank_(m.cost)]; }, 1, 10]);
+  out.push(['Movements', 1, idKey_, p.moves, function (m) { return [blank_(m.cost), m.unit, m.cond]; }, 3, 10]);
   return out;
 }
 /** Plan-time check: { entryId: message } for each entry that touched a row whose key is now missing or repeated. */
@@ -578,7 +612,7 @@ function check_(p) {
 /**
  * Writes a plan. Rows changed in place go first, each one to the row that holds its key at that moment
  * (the key cell is read again just before the write, and the column again if it moved), as one row in one call.
- * A cost written on Movements raises moveRev. New rows follow, after the last used row of the key column, without those of
+ * A row written on Movements raises moveRev. New rows follow, after the last used row of the key column, without those of
  * entries refused on the way. Then On hand, then the Inbox marks.
  */
 function write_(p, skip) {
@@ -716,10 +750,10 @@ function plan_(entries, skip) {
   function orderLine_(id) { if (s_(id) && !orderById[s_(id)]) throw new Error('Unknown supplier order line'); return s_(id); }
   function allMoves_() { return moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); })); }
   // Every In row gets the next unit SKU of its product.
-  function pushMove_(id, date, it, dir, qty, reason, ref, note, cost) {
+  function pushMove_(id, date, it, dir, qty, reason, ref, note, cost, cond) {
     if (existingIds[id]) return;
     existingIds[id] = true;
-    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, blank_(cost), unit_(unitNo, { sku: it.sku, dir: dir, qty: qty })], by: who });
+    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, blank_(cost), unit_(unitNo, { sku: it.sku, dir: dir, qty: qty }), cond || ''], by: who });
   }
   // The number the phone picked, or the next free one when a different document already holds it.
   function docNo_(asked) {
@@ -770,7 +804,7 @@ function plan_(entries, skip) {
 
       } else if (e.kind === 'move') {
         var m = cleanMove_(e.move);
-        if (!existingIds[m.id]) pushMove_(m.id, m.date, toy_(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost);
+        if (!existingIds[m.id]) pushMove_(m.id, m.date, toy_(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.cond);
 
       } else if (e.kind === 'cust') {
         var c = e.cust || {}, cid = id_(c.id, 'Customer'), cname = text_(c.name, 120);
@@ -798,18 +832,19 @@ function plan_(entries, skip) {
         }).forEach(function (ol) { if (!orderById[ol.id]) { orders.push(made_(ol)); orderById[ol.id] = ol; } });
 
       } else if (e.kind === 'receive') {
-        // One movement per unit with its own cost; a blank cost is allowed and can be typed later. When every movement is
+        // One movement per unit with its own cost and condition; either may be blank and typed later. When every movement is
         // already on file this is a retry and changes nothing, even on a line received or cancelled since.
         var ro = orderById[s_(e.lineId)];
         if (!ro) throw new Error('Unknown supplier order line');
         var rf = Number(e.from), rcs = (e.costs || []).map(function (c) { return moneyOrNull_(c, 'Unit cost'); }), rn = qty_(rcs.length);
+        var rks = rcs.map(function (c, j) { return cond_((e.conds || [])[j]); });
         if (!(rf >= 0) || Math.floor(rf) !== rf) throw new Error('Received so far must be a whole number');
         var rids = rcs.map(function (c, j) { return 'rcv-' + ro.id + '-' + (rf + j + 1); });
         if (!rids.every(function (id) { return existingIds[id]; })) {
           if (ro.status === 'Cancelled') throw new Error('That order line was cancelled');
           if (rf + rn > ro.qty) throw new Error('Only ' + Math.max(ro.qty - rf, 0) + ' of ' + ro.name + ' are still due on that order line');
           var rd = date_(e.date), rcit = toy_(ro.sku);
-          rcs.forEach(function (c, j) { pushMove_(rids[j], rd, rcit, 'In', 1, 'Restock', ro.orderId, '', c); });
+          rcs.forEach(function (c, j) { pushMove_(rids[j], rd, rcit, 'In', 1, 'Restock', ro.orderId, '', c, rks[j]); });
         }
         var rq = Math.max(ro.recQty, rf + rn), rs = ro.status === 'Ordered' && rq >= ro.qty ? 'Received' : ro.status;
         if (rq !== ro.recQty || rs !== ro.status) { ro.recQty = rq; ro.status = rs; touch_(ro); }
@@ -821,39 +856,40 @@ function plan_(entries, skip) {
         if (co.status !== 'Cancelled') { co.status = 'Cancelled'; touch_(co); }
 
       } else if (e.kind === 'invoice') {
-        // A to-follow line is owed: no movement and no cost until a deliver entry ships it. paid blank means paid in full.
+        // A to-follow line is owed: no movement, no cost and no condition until a deliver entry ships it. paid blank means paid in full.
         var v = e.invoice || {}, vid = id_(v.id, 'Invoice');
         if (invById[vid]) { results.push(numbered_(e, invById[vid], v.no)); return; }
         var vc = cust_(v.custId), vdate = date_(v.date);
         if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one product');
         if (v.lines.length > 50) throw new Error('An invoice can hold 50 lines at most');
-        var total = 0, vlines = v.lines.map(function (l) {
+        var sub = 0, vlines = v.lines.map(function (l) {
           var lit = toy_(l.sku), f = l.follow === true, lq = qty_(l.qty), lp = money_(l.price, 'Price');
-          total += lq * lp;
-          return { it: lit, qty: lq, price: lp, cost: f ? null : moneyOrNull_(l.cost, 'Unit cost'), follow: f,
+          sub += lq * lp;
+          return { it: lit, qty: lq, price: lp, cost: f ? null : moneyOrNull_(l.cost, 'Unit cost'), cond: f ? '' : cond_(l.cond, true), follow: f,
             expected: f && s_(l.expected) ? date_(l.expected, 'Expected arrival') : '', orderLine: f ? orderLine_(l.orderLine) : '' };
         });
         if (!vc.contact && vlines.some(function (l) { return l.follow; })) throw new Error('A to-follow line needs the customer\'s phone or Messenger');
-        total = r2_(total);
-        var paid = v.paid === '' || v.paid == null ? total : money_(v.paid, 'Amount paid');
+        var disc = moneyOrNull_(v.disc, 'Discount') || 0, fee = moneyOrNull_(v.fee, 'Shipping fee') || 0;
+        if (disc > r2_(sub)) throw new Error('The discount is more than the subtotal');
+        var total = total_(sub, disc, fee), paid = v.paid === '' || v.paid == null ? total : money_(v.paid, 'Amount paid');
         if (paid > total) throw new Error('Amount paid is more than the total');
-        var inv = { no: docNo_(v.no), id: vid, date: vdate, custId: vc.id, cust: vc.name, contact: vc.contact, total: total, paid: paid, balance: r2_(total - paid), ship: '' };
+        var inv = { no: docNo_(v.no), id: vid, date: vdate, custId: vc.id, cust: vc.name, contact: vc.contact, total: total, paid: paid, balance: r2_(total - paid), ship: '', disc: disc, fee: fee };
         invs.push(made_(inv)); invById[vid] = inv; invByNo[inv.no] = inv;
         vlines.forEach(function (l, i) {
           lines.push(made_({ invNo: inv.no, invId: vid, line: i + 1, sku: l.it.sku, name: l.it.name, qty: l.qty, list: l.it.price, price: l.price, cost: l.cost,
-            status: l.follow ? 'To follow' : 'Delivered', expected: l.expected, orderLine: l.orderLine, delivered: l.follow ? '' : vdate }));
-          if (!l.follow) pushMove_(vid + '-' + (i + 1), vdate, l.it, 'Out', l.qty, 'Sale', String(inv.no), '', l.cost);
+            status: l.follow ? 'To follow' : 'Delivered', expected: l.expected, orderLine: l.orderLine, delivered: l.follow ? '' : vdate, cond: l.cond }));
+          if (!l.follow) pushMove_(vid + '-' + (i + 1), vdate, l.it, 'Out', l.qty, 'Sale', String(inv.no), '', l.cost, l.cond);
         });
         results.push(numbered_(e, inv, v.no)); return;
 
       } else if (e.kind === 'deliver') {
-        // Ships a to-follow line under its invoice number at the cost the app worked out at that moment. A Delivered line is left as it is.
+        // Ships a to-follow line under its invoice number at the cost and condition the app worked out at that moment. A Delivered line is left as it is.
         var dl = line_(e.invId, e.line);
         if (dl.status === 'Cancelled') throw new Error('That line was cancelled');
         if (dl.status === 'To follow') {
-          var dd = date_(e.date), dc = moneyOrNull_(e.cost, 'Unit cost');
-          pushMove_(dl.invId + '-' + dl.line, dd, toy_(dl.sku), 'Out', dl.qty, 'Sale', String(dl.invNo), '', dc);
-          dl.status = 'Delivered'; dl.cost = dc; dl.delivered = dd; touch_(dl);
+          var dd = date_(e.date), dc = moneyOrNull_(e.cost, 'Unit cost'), dk = cond_(e.cond, true);
+          pushMove_(dl.invId + '-' + dl.line, dd, toy_(dl.sku), 'Out', dl.qty, 'Sale', String(dl.invNo), '', dc, dk);
+          dl.status = 'Delivered'; dl.cost = dc; dl.cond = dk; dl.delivered = dd; touch_(dl);
         }
 
       } else if (e.kind === 'pay') {
@@ -864,14 +900,15 @@ function plan_(entries, skip) {
         if (np !== pi.paid) { pi.paid = np; pi.balance = r2_(pi.total - np); touch_(pi); }
 
       } else if (e.kind === 'lineCancel') {
-        // The line's amount leaves the total and the refund leaves Paid. A Cancelled line is left as it is.
+        // The total is worked out again from the lines left, with the invoice's discount and fee; the refund leaves Paid. A Cancelled line is left as it is.
         var cl = line_(e.invId, e.line), ci = invById[cl.invId];
         if (cl.status === 'Delivered') throw new Error('That line was already delivered; record a return instead');
         if (cl.status === 'To follow') {
-          var refund = moneyOrNull_(e.refund, 'Refund') || 0;
+          var refund = moneyOrNull_(e.refund, 'Refund') || 0, lsub = 0;
           if (refund > ci.paid) throw new Error('The refund is more than what was paid');
-          ci.total = r2_(ci.total - cl.qty * cl.price); ci.paid = r2_(ci.paid - refund); ci.balance = r2_(ci.total - ci.paid);
           cl.status = 'Cancelled'; touch_(cl); touch_(ci);
+          lines.forEach(function (l) { if (l.invId === ci.id && l.status !== 'Cancelled') lsub += l.qty * l.price; });
+          ci.total = total_(lsub, ci.disc, ci.fee); ci.paid = r2_(ci.paid - refund); ci.balance = r2_(ci.total - ci.paid);
         }
 
       } else if (e.kind === 'follow') {
@@ -896,27 +933,28 @@ function plan_(entries, skip) {
           if (!ri) throw new Error('Unknown invoice');
           var rit = toy_(r.sku), rqty = qty_(r.qty), outcome = s_(r.outcome);
           if (!RETURN_STOCK_.hasOwnProperty(outcome)) throw new Error('Outcome must be Restock or Write-off');
-          // Only Delivered lines left stock. A restocked unit comes back at the Unit cost of the first of them for that product.
-          var sold = 0, back = 0, rcost;
-          lines.forEach(function (l) { if (l.invId === ri.id && l.sku === rit.sku && l.status === 'Delivered') { if (rcost === undefined) rcost = l.cost; sold += l.qty; } });
+          // Only Delivered lines left stock. A restocked unit comes back at the Unit cost of the first of them for that product,
+          // and in its condition when that is a single one.
+          var sold = 0, back = 0, rcost, rcond;
+          lines.forEach(function (l) { if (l.invId === ri.id && l.sku === rit.sku && l.status === 'Delivered') { if (rcost === undefined) { rcost = l.cost; rcond = l.cond.indexOf(' / ') < 0 ? l.cond : ''; } sold += l.qty; } });
           rets.forEach(function (x) { if (x.invId === ri.id && x.sku === rit.sku) back += x.qty; });
           if (!sold) throw new Error(rit.name + ' was not delivered on invoice ' + ri.no);
           if (rqty > sold - back) throw new Error('Only ' + (sold - back) + ' of ' + rit.name + ' can still be returned on invoice ' + ri.no);
           var rdate = date_(r.date);
           var ret = { id: retId, date: rdate, invNo: ri.no, invId: ri.id, cust: ri.cust, sku: rit.sku, name: rit.name, qty: rqty, outcome: outcome, refund: moneyOrNull_(r.refund, 'Refund') || 0, note: text_(r.note, 300) };
           rets.push(made_(ret)); retById[retId] = ret;
-          if (RETURN_STOCK_[outcome] === 'In') for (var k = 1; k <= rqty; k++) pushMove_('ret-' + retId + '-' + k, rdate, rit, 'In', 1, 'Return', retId, 'Invoice ' + ri.no, rcost);
+          if (RETURN_STOCK_[outcome] === 'In') for (var k = 1; k <= rqty; k++) pushMove_('ret-' + retId + '-' + k, rdate, rit, 'In', 1, 'Return', retId, 'Invoice ' + ri.no, rcost, rcond);
         }
 
-      } else if (e.kind === 'cost') {
-        // Only while a unit of that In is on hand, after every movement so far including this request's. The same value again
-        // changes nothing and is not refused, so a retry after a lost response still succeeds once the unit has been sold.
-        var mid = s_(e.moveId), mc = moneyOrNull_(e.cost, 'Unit cost'), now = allMoves_();
+      } else if (e.kind === 'cost' || e.kind === 'cond') {
+        // A unit's cost or condition, only while a unit of that In is on hand, after every movement so far including this request's.
+        // The same value again changes nothing and is not refused, so a retry after a lost response still succeeds once the unit has been sold.
+        var f = e.kind, mid = s_(e.moveId), mc = f === 'cost' ? moneyOrNull_(e.cost, 'Unit cost') : cond_(e.cond), now = allMoves_();
         var tm = now.filter(function (x) { return x.id === mid; })[0], nm = newMoves.filter(function (x) { return x.v[0] === mid; })[0];
         if (!tm) throw new Error('Unknown movement');
         var left = tm.dir === 'In' && (stockOf_(now).units[tm.sku.toLowerCase()] || []).some(function (u) { return u.id === mid; });
-        if (tm.dir !== 'In' || (!left && tm.cost !== mc)) throw new Error('That unit has already left stock, so its cost can no longer be changed.');
-        if (tm.cost !== mc) { if (nm) nm.v[9] = blank_(mc); else { tm.cost = mc; touch_(tm); } }
+        if (tm.dir !== 'In' || (!left && tm[f] !== mc)) throw new Error('That unit has already left stock, so its ' + (f === 'cost' ? 'cost' : 'condition') + ' can no longer be changed.');
+        if (tm[f] !== mc) { if (nm) nm.v[f === 'cost' ? 9 : 11] = blank_(mc); else { tm[f] = mc; touch_(tm); } }
 
       } else if (e.kind === 'inboxDone') {
         // Marked after the other writes, by markInbox_; a row that cannot be found is left waiting.
