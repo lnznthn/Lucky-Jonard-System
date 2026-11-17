@@ -136,6 +136,7 @@ details[open]>summary svg{transform:rotate(180deg)}
 details>.stack{padding-top:8px}
 .check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--text);margin:0;cursor:pointer}
 .logo{max-height:48px;max-width:120px;border:1px solid var(--line);flex:none}
+.guide{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}.guide a{color:var(--text);font-weight:500;text-underline-offset:4px}
 .prow{display:flex;align-items:flex-start;gap:12px;min-height:60px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .prow:last-child{border-bottom:0}
 .prow input[type=checkbox]{margin:1px 0 0;flex:none}
@@ -246,8 +247,16 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.6.0';
+const VERSION = '2.7.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
+// One app serves every shop, each with its own sheet and back end: entries go only to a back end (VERSION_ in Code.gs) at this version or later.
+const BACKEND_MIN = '2.7.0';
+// The New shop guide in Settings: a template sheet to copy ('' until there is one; the guide then says to paste Code.gs into a blank sheet).
+const TEMPLATE_URL = '';
+const CODE_URL = 'https://github.com/lnznthn/Lucky-Jonard-System/blob/main/apps-script/Code.gs';   // GitHub forwards the old name after a rename
+const LOGO_MAX = 120000;   // the longest logo data URL the back end keeps (in Script Properties, in chunks)
+// The longest value of each shop field the back end takes, with the name its refusal uses; Settings checks them first.
+const SHOP_MAX = { name: ['Shop name', 120], contact: ['Address', 500], foot: ['Notes', 500], cur: ['Currency', 4] };
 
 /* ---------- small helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -285,7 +294,7 @@ function fmtDay(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: iso.slice(0, 4) === t.slice(0, 4) ? undefined : 'numeric' });
 }
 const fmtNum = n => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const money = n => prefs.cur + fmtNum(n);
+const money = n => esc(prefs.cur) + fmtNum(n);   // the currency comes from the sheet's Shop tab, so it is escaped like any typed text
 const signed = (dir, q) => (dir === 'In' ? '+' : '−') + q;
 const r2 = n => Math.round(n * 100) / 100;
 const blank = v => v == null || v === '';
@@ -344,11 +353,12 @@ let cfg = store.get('cfg', { url: '', key: '' });
 let items = store.get('items', []);       // synced items
 let moves = store.get('moves', []);       // synced movements, in sheet order
 let docs = Object.assign({ custs: [], sups: [], orders: [], invs: [], rets: [], inbox: [], pay: [] }, store.get('docs', {}));   // synced documents; pay is the sheet's Payment details tab
-let meta = store.get('meta', {});
+let meta = store.get('meta', {});          // the pull's place in Movements, the logo's rev and the back end's version (ver)
 let queue = store.get('queue', []);       // entries waiting for the sheet
 let prefs = Object.assign({ tab: 'home', cur: '₱', theme: 'auto' }, store.get('prefs', {}));
 if (prefs.tab === 'move') prefs.tab = 'home';
 else if (prefs.tab === 'import') prefs.tab = 'stock';   // 2.4.1 had Update inventory as its own page
+// The shop's details (and cur) are the sheet's, cached here for the invoice image, money() and the Home header; each sync overwrites them.
 prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.shop);
 // paid: '' means paid in full. disc is the discount field typed last ('pct' or 'amt') and its value; fee is the shipping fee ('' for none).
 // On a line, follow is the owner's Pre-order choice (unset: on when the line asks more than is free to sell),
@@ -543,6 +553,10 @@ const qLast = (kind, k, payload) => { queue = queue.filter(q => !(q.kind === kin
 /** An In is written one unit per row: <id>-1 ... <id>-N, each Qty 1 with that unit's cost and condition (conds runs parallel to costs), as Code.gs writes receipts and returns. */
 const perUnit = (move, costs, conds) => costs.map((cost, k) => ({ ...move, id: move.id + '-' + (k + 1), qty: 1, cost, cond: conds[k] || '' }));
 const qIns = (move, costs, conds) => perUnit(move, costs, conds).forEach(qMove);
+const shopWaits = () => queue.some(q => q.kind === 'shop' && q.status === 'pending');
+/** The shop fields that changed, merged into the pending shop entry so one entry carries them all and the last value wins.
+ *  Keyed on fill: the one-time move-up (fill: true) stays ahead of it, and this entry's values land after it. */
+const qShop = patch => { const p = queue.find(q => q.kind === 'shop' && !q.fill && q.status === 'pending'); qLast('shop', 'fill', { shop: Object.assign({}, p && p.shop, patch) }); };
 /** The records in an entry that carry a SKU. */
 const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? q.order.lines : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
@@ -564,6 +578,7 @@ function describe(q) {
     case 'ship': return 'Shipping status';
     case 'ret': return `Return of ${itemName(q.ret.sku)}`;
     case 'inboxDone': return 'Clearing rows from Claude';
+    case 'shop': return 'Shop details';
     case 'cost': case 'cond': { const m = live().all.find(x => x.id === q.moveId); return (q.kind === 'cost' ? 'Cost' : 'Condition') + ' of a unit' + (m ? ' of ' + itemName(m.sku) : ''); }
     default: return 'Entry';
   }
@@ -591,11 +606,23 @@ function applySnapshot(s) {
   if (s.reset) moves = s.moves;
   else { const seen = new Set(moves.map(m => m.id)); s.moves.forEach(m => { if (!seen.has(m.id)) moves.push(m); }); }
   docs = { custs: s.custs, sups: s.sups || [], orders: s.orders, invs: s.invs, rets: s.rets, inbox: s.inbox, pay: s.pay || [] };
-  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev };   // moveRev changes when a cost is rewritten in Movements
+  // The shop's details overwrite this device's copy, the logo only when sent (the sheet's logoRev differs from ours); while a shop
+  // entry still waits, the values typed here stand and the logo's rev is kept, so the next sync after it lands brings what changed.
+  const take = s.shop && !shopWaits();
+  if (take) { prefs.shop = { name: s.shop.name || '', contact: s.shop.contact || '', foot: s.shop.foot || '', logo: s.logo == null ? prefs.shop.logo : s.logo }; prefs.cur = s.shop.cur || '₱'; savePrefs(); }
+  // moveRev changes when a cost is rewritten in Movements; ver is the back end's version, '' from one older than 2.7.
+  meta = { rows: s.rows, lastId: s.lastId, syncedAt: s.syncedAt, moveRev: s.moveRev, logoRev: take ? s.shop.logoRev : meta.logoRev, ver: s.version || '' };
   ui.warn = s.warnings;   // problems the sheet found in its tabs, kept in memory until the next sync
   saveSynced(); dirty();
 }
 const wire = q => { const { status, error, ...w } = q; return w; };
+/** True when version a is below b, comparing major.minor.patch as numbers. */
+const verLess = (a, b) => { const x = String(a).split('.'), y = String(b).split('.'); for (let i = 0; i < 3; i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d < 0; } return false; };
+const sheetOld = () => !!meta.ver && verLess(meta.ver, BACKEND_MIN);
+/** Entries wait on this device while the shop's sheet runs a back end older than this app needs; everything else works as offline. */
+const held = () => !!cfg.url && sheetOld() && queued('pending') > 0;
+const UPDATE_STEPS = 'Paste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version.';
+const heldText = () => `This shop’s sheet runs back end ${meta.ver}; this app needs ${BACKEND_MIN}. To update the sheet: ${UPDATE_STEPS}`;
 async function syncNow(manual) {
   if (ui.busy) return;
   if (!cfg.url) { if (manual) toast('Not connected yet. Everything is saved on this device.'); return; }
@@ -604,6 +631,9 @@ async function syncNow(manual) {
   const waitBefore = live().inbox.length;
   try {
     let batch, pushed = false;
+    // Before sending entries to a back end of unknown or older version, ask its version; an older one gets nothing, not even a pull.
+    if (queued('pending') && (!meta.ver || sheetOld())) { meta.ver = String((await api('ping')).version || '0'); store.set('meta', meta); }
+    if (held()) throw Object.assign(new Error(heldText()), { held: true });
     while ((batch = queue.filter(q => q.status === 'pending').slice(0, 100)).length) {
       const data = await api('add', { entries: batch.map(wire), have: meta });
       const res = new Map(data.results.map(r => [r.id, r]));
@@ -620,7 +650,7 @@ async function syncNow(manual) {
     else if (waitNow > waitBefore && !addOn()) toast(`${plural(waitNow, 'row')} from Claude to review`);
     else if (manual) toast('Synced');
   } catch (e) {
-    ui.err = e.message; if (manual || !e.network) toast(e.message);
+    ui.err = e.message; if (manual || !e.network && !e.held) toast(e.message);   // a held queue says so on Home, not at every sync
   } finally {
     ui.busy = false; dirty();
     // Do not rebuild the screen under someone who is typing; the next keystroke or tap refreshes it.
@@ -640,6 +670,7 @@ function renderSync() {
   let cls = 'sync', txt;   // plain text: attention colour while entries wait, danger when refused or failed
   if (!cfg.url) { txt = pend ? pend + ' saved here' : 'Local only'; if (failed) cls += ' err'; }
   else if (ui.busy) txt = 'Syncing';
+  else if (held()) { cls += ' err'; txt = 'Sheet out of date'; }
   else if (ui.err) { cls += ' err'; txt = 'Sync failed'; }
   else if (failed) { cls += ' err'; txt = failed + ' need attention'; }
   else if (pend) { cls += ' pending'; txt = pend + ' waiting'; }
@@ -769,6 +800,7 @@ function needsRows() {
   const ready = readyLines(), owing = L.invs.filter(v => v.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
   const short = act.filter(STOCK_TEST.short), verify = act.filter(STOCK_TEST.verify), noprice = act.filter(STOCK_TEST.noprice);
   const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
+  if (held()) out.push(row(`Update the sheet: it runs back end ${esc(meta.ver)}, this app needs ${BACKEND_MIN}`, `${UPDATE_STEPS} ${plural(queued('pending'), 'entry waits', 'entries wait')} here until then.`, 'data-act="settings"'));
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
   // One row per customer, for their oldest invoice with ready lines; four customers or more make one row that opens the To follow list.
   const by = new Map(); ready.forEach(x => { const k = x.v.custId || x.v.cust; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
@@ -1853,7 +1885,7 @@ function readyLine(imp, idx) {
   return [k('new') ? plural(k('new'), 'new product') : '', k('count') ? plural(k('count'), 'count change') : '', k('recv') ? plural(k('recv'), 'receipt') : '', k('ord') ? plural(k('ord'), 'order line') : '', det ? det + ' with new details' : '', k('same') ? k('same') + ' already right' : ''].filter(Boolean).join(', ');
 }
 /** The cost of the units a review row adds, next to its quantity: " at ₱1,200 each", " · no cost yet", nothing when it adds none. */
-const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${prefs.cur}${costsText(r.costs)} each` : ' · no cost yet';
+const costNote = r => !r.costs || !r.costs.length ? '' : costsText(r.costs) ? ` at ${esc(prefs.cur)}${costsText(r.costs)} each` : ' · no cost yet';
 function prowHtml(imp, i) {
   const r = imp.rows[i], can = canTick(r), fixable = imp.mode !== 'moves' && r.src;
   let detail = '';
@@ -2045,20 +2077,31 @@ function openSettings() {
   openSheet(`
     <div class="top"><h2>Settings</h2>${closeBtn}</div>
     ${sec('Connection', `<div><label for="sCode">Connection code (web app URL, then #, then key)</label><input id="sCode" placeholder="https://script.google.com/…/exec#key" value="${esc(cfg.url ? cfg.url + '#' + cfg.key : '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-      <p class="hint">${cfg.url ? (ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
-      <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>`, '', 'pad')}
-    ${sec('Invoice image', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" autocomplete="off"></div>
-      <div><label for="sContact">Contact details (one per line)</label><textarea id="sContact" rows="3">${esc(sh.contact)}</textarea></div>
-      <div><label for="sFoot">Line at the foot of the page</label><input id="sFoot" value="${esc(sh.foot)}" placeholder="Optional" autocomplete="off"></div>
+      <p class="hint">${cfg.url ? (held() ? esc(heldText()) : ui.err ? 'Last sync failed: ' + esc(ui.err) : meta.syncedAt ? 'Last synced ' + esc(new Date(meta.syncedAt).toLocaleString()) : 'Connected.') : 'Not connected. The app works on this device and keeps everything until you connect.'}${pend ? ` ${pend} waiting.` : ''}${failed ? ` ${failed} refused.` : ''}</p>
+      <div class="links"><button class="btn" style="flex:1" data-act="saveCfg">Test and save</button>${cfg.url ? `<button class="tbtn" data-act="redownload">Re-download everything</button>` : ''}</div>
+      ${cfg.url ? '' : guideHtml()}`, '', 'pad')}
+    ${sec('Shop', `<div><label for="sShop">Shop name</label><input id="sShop" value="${esc(sh.name)}" maxlength="${SHOP_MAX.name[1]}" autocomplete="off"></div>
+      <div><label for="sContact">Address (one line each)</label><textarea id="sContact" rows="3" maxlength="${SHOP_MAX.contact[1]}">${esc(sh.contact)}</textarea></div>
+      <div><label for="sFoot">Notes line</label><input id="sFoot" value="${esc(sh.foot)}" maxlength="${SHOP_MAX.foot[1]}" placeholder="Optional" autocomplete="off"></div>
+      <div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="${SHOP_MAX.cur[1]}"></div>
       <div><div class="lbl">Logo</div><div class="links">${sh.logo ? `<img class="logo" src="${esc(sh.logo)}" alt="Logo">` : ''}<label class="btn sm" style="margin:0 0 3px;color:var(--text)">${sh.logo ? 'Replace' : 'Choose a picture'}<input id="sLogo" type="file" accept="image/*" hidden></label>${sh.logo ? `<button class="tbtn danger" data-act="logoOff">Remove</button>` : ''}</div></div>
-      <p class="hint">The shop name also heads the Home page on this device.</p>
+      <p class="hint" id="shopHint">${cfg.url ? 'Shared by every device on this shop’s sheet: a change reaches the others at their next sync.' : 'Kept on this device until it is connected, then shared by every device on this shop’s sheet.'} They go on the invoice image, and the shop name heads Home.</p>
+      <button class="btn primary big" data-act="saveShop">Save shop details</button>
       ${payHtml()}`, '', 'pad')}
-    ${sec('Preferences', `<div><div class="lbl">Theme</div><div class="seg">${[['auto', 'Device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => `<button class="${prefs.theme === k ? 'on' : ''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
-      <div><label for="sCur">Currency symbol</label><input id="sCur" value="${esc(prefs.cur)}" maxlength="4"></div>`, '', 'pad')}
-    <button class="btn primary big" data-act="savePrefs">Save invoice details and preferences</button>
+    ${sec('Preferences', `<div><div class="lbl">Theme</div><div class="seg">${[['auto', 'Device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => `<button class="${prefs.theme === k ? 'on' : ''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>`, '', 'pad')}
     ${sec('Data', `<div><div class="lbl">Copy for a spreadsheet</div><div class="actions"><button class="btn" data-act="copyItems">Products and stock</button><button class="btn" data-act="copyMoves">All movements</button></div></div>
       <button class="tbtn danger" data-act="wipe">Erase data on this device</button><p class="hint" style="margin-top:-12px">Does not touch the Google Sheet. Anything still waiting to sync is lost.</p>`, '', 'pad')}
     <p class="hint">${esc(APP_NAME)} ${VERSION}</p>`, 'settings');
+}
+/** New shop: how a shop gets its own sheet and back end, shown in Connection while this device is not connected. */
+function guideHtml() {
+  const a = (href, t) => `<a href="${esc(href)}" target="_blank" rel="noopener">${t}</a>`;
+  return `<div id="guide"><div class="lbl">New shop</div><ol class="guide">
+    <li>${TEMPLATE_URL ? `Make a copy of the ${a(TEMPLATE_URL, 'Bodega template')}.` : `Create a blank Google Sheet, open Extensions > Apps Script, paste ${a(CODE_URL, 'Code.gs')} in place of what is there, save, and reload the sheet.`}</li>
+    <li>In the sheet, choose Bodega > Set up or upgrade this sheet and approve the permissions. Google warns that the script is not verified: choose Advanced > Go to … (unsafe).</li>
+    <li>In Extensions > Apps Script, choose Deploy > New deployment > Web app, with Execute as Me and Who has access Anyone.</li>
+    <li>Choose Bodega > Show connection code and paste the code above.</li>
+    <li>Fill in the Shop group below and the sheet’s Payment details tab.</li></ol></div>`;
 }
 /** Payment details, read only: the rows of the sheet's Payment details tab, which the invoice image draws. They live only in the sheet (the code is public). */
 function payHtml() {
@@ -2068,15 +2111,45 @@ function payHtml() {
       : cfg.url ? 'None yet. Add rows (Method, Number, Name) to the sheet’s Payment details tab and they appear on the invoice image after the next sync.'
       : 'They come from the sheet’s Payment details tab once the sheet is connected, and appear on the invoice image.'}</p></div>`;
 }
-/** What is typed in the shop fields, kept when the sheet is redrawn for a new logo. */
-function readShopFields() { if ($('#sShop')) { prefs.shop.name = $('#sShop').value.trim(); prefs.shop.contact = $('#sContact').value.trim(); prefs.shop.foot = $('#sFoot').value.trim(); } }
+/** Saves the Shop group: the fields typed differently from what the group showed go to the sheet in one shop entry (logo: a new picture,
+ *  or '' to remove it), and this device's copy takes them at once. Comparing with what was shown, not with the copy, keeps a sync that
+ *  arrived while Settings was open from being undone. Returns whether anything changed, or null when a field is too long (nothing is saved). */
+function saveShop(logo) {
+  const box = { name: '#sShop', contact: '#sContact', foot: '#sFoot', cur: '#sCur' }, patch = {};
+  Object.entries(box).forEach(([k, id]) => { const e = $(id), v = e.value.trim(), was = e.defaultValue.trim(); if (v !== was) patch[k] = k === 'cur' ? v || '₱' : v; });
+  const long = Object.keys(patch).find(k => patch[k].length > SHOP_MAX[k][1]);
+  if (long) { toast(`${SHOP_MAX[long][0]} is too long: at most ${SHOP_MAX[long][1]} characters.`); return null; }
+  if (logo != null && logo !== prefs.shop.logo) patch.logo = logo;
+  if (!Object.keys(patch).length) return false;
+  const { cur, ...shop } = patch; Object.assign(prefs.shop, shop); if (cur != null) prefs.cur = cur; savePrefs();
+  qShop(patch); commit(); return true;
+}
+/** A picture as a JPEG data URL on white, at most 480 px a side and smaller until it fits LOGO_MAX; '' when even 120 px does not. */
+function logoUrl(im) {
+  for (const side of [480, 360, 240, 120]) {
+    const k = Math.min(1, side / Math.max(im.width, im.height)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+    const url = c.toDataURL('image/jpeg', 0.9); if (url.length <= LOGO_MAX) return url;
+  }
+  return '';
+}
 async function setLogo(file) {
   const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(''); fr.readAsDataURL(file); });
   const im = url && await loadImg(url); if (!im) return toast('That picture could not be read.');
-  const k = Math.min(1, 480 / Math.max(im.width, im.height)), c = document.createElement('canvas');
-  c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
-  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
-  readShopFields(); prefs.shop.logo = c.toDataURL('image/jpeg', 0.9); savePrefs(); openSettings(); toast('Logo saved');
+  const logo = logoUrl(im); if (!logo) return toast('That picture is too large for a logo. Choose a smaller one.');
+  if (saveShop(logo) != null) { openSettings(); toast('Logo saved'); }
+}
+/** Once per device, before its first sync with a 2.7 back end: shop details typed here when they were kept per device go to the sheet
+ *  with fill, which sets only the sheet's blank fields, so no device overwrites another's details or what the owner typed in the sheet. */
+async function shopUp() {
+  if (prefs.shopUp) return;
+  const s = prefs.shop, up = {};
+  ['name', 'contact', 'foot'].forEach(k => { if (s[k]) up[k] = s[k].slice(0, SHOP_MAX[k][1]); });   // 2.6 had no limits; the sheet refuses longer
+  if (prefs.cur !== '₱') up.cur = prefs.cur;
+  if (s.logo) { let l = s.logo; if (!/^data:image\/(png|jpeg);base64,/.test(l) || l.length > LOGO_MAX) { const im = await loadImg(l); l = im ? logoUrl(im) : ''; } if (l) up.logo = l; }
+  if (Object.keys(up).length) { qAdd('shop', { shop: up, fill: true }); saveQueue(); dirty(); }
+  prefs.shopUp = true; savePrefs();
 }
 function parseCode(s) {
   s = String(s || '').trim(); const i = s.lastIndexOf('#');
@@ -2236,14 +2309,18 @@ document.addEventListener('click', async ev => {
       if (!c.url) { cfg = { url: '', key: '' }; store.set('cfg', cfg); ui.err = ''; closeSheet(); render(); toast('Disconnected. Data stays on this device.'); break; }
       if (!/^https:\/\/|^http:\/\/localhost/.test(c.url) || !c.key) { toast('Paste the web app URL, then #, then the key.'); break; }
       const prev = cfg; cfg = c;
-      try { await api('ping'); store.set('cfg', cfg); closeSheet(); toast('Connected'); syncNow(false); }
+      try {
+        const ver = String((await api('ping')).version || '');
+        if (c.url !== prev.url || c.key !== prev.key) meta = {};   // a new code may be another shop's sheet: its movements, logo (LOGO_REV counts per sheet) and version start afresh
+        meta.ver = ver; store.set('meta', meta); store.set('cfg', cfg); closeSheet(); toast('Connected'); syncNow(false);
+      }
       catch (e) { cfg = prev; toast(e.message); }
       break;
     }
     case 'redownload': meta = {}; closeSheet(); syncNow(true); break;
     case 'theme': prefs.theme = d.v; savePrefs(); applyTheme(); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); break;
-    case 'savePrefs': readShopFields(); prefs.cur = $('#sCur').value.trim() || '₱'; savePrefs(); dirty(); closeSheet(); render(); toast('Saved'); break;
-    case 'logoOff': readShopFields(); prefs.shop.logo = ''; savePrefs(); openSettings(); break;
+    case 'saveShop': { const changed = saveShop(); if (changed != null) { closeSheet(); toast(changed ? 'Saved' : 'Nothing changed'); } break; }
+    case 'logoOff': if (saveShop('') != null) openSettings(); break;
     case 'copyItems': { const L = live(); await copyText(tsv([['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'], ...L.list.map(i => { const n = nums(i.sku), u = onHand(i.sku).units, c = stockCost(i.sku), has = u.length > 0; return [i.sku, i.name, i.price, i.active ? 'Yes' : 'No', n.have, n.inc, n.owed, n.ltp, has ? u.map(x => (x.unit ? x.unit + ' ' : '') + (x.cost == null ? '?' : x.cost) + (x.cond ? ' ' + x.cond : '')).join(', ') : '', has ? c.value : '', has ? c.none : '', i.mfr, i.brand, i.line, i.chr, i.rel, i.relCheck ? 'Verify' : '']; })])); toast('Copied. Paste into a spreadsheet.'); break; }
     case 'copyMoves': await copyText(tsv([['Date', 'Product ID', 'Product', 'Direction', 'Qty', 'Reason', 'Ref', 'Note', 'Unit cost', 'SKU', 'Condition'], ...live().all.slice().sort(cmpMove).map(m => [m.date, m.sku, itemName(m.sku), m.dir, m.qty, m.reason, m.ref, m.note, m.cost, m.unit, m.cond])])); toast('Copied. Paste into a spreadsheet.'); break;
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
@@ -2309,7 +2386,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catc
 applyTheme();
 $('#setBtn').innerHTML = icon('sliders', 20); $('#backBtn').innerHTML = icon('close', 22);
 render();
-if (cfg.url) syncNow(false);
+shopUp().then(() => { renderSync(); if (cfg.url) syncNow(false); });
 </script>
 </body>
 </html>

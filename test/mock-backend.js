@@ -47,8 +47,10 @@ function makeSandbox() {
   const sheets = [];
   const props = {};
   const copies = [];
+  const ui = { menus: [], dialogs: [] };   // what onOpen() and the dialogs showed, for the tests
   const ss = {
     onSetValues: null,
+    id: 'mock-sheet', getId: () => ss.id,   // a test sets ss.id to play a copy of the sheet
     getSheetByName: n => sheets.find(s => s.name === n) || null,
     insertSheet: n => { const s = new Sheet(n, ss); sheets.push(s); return s; },
     getSheets: () => sheets,
@@ -59,11 +61,16 @@ function makeSandbox() {
   sheets.push(new Sheet('Sheet1', ss));
   let locked = false;
   const sandbox = {
-    sheets, props, copies,
+    sheets, props, copies, ui,
     ss,
+    url: 'https://script.google.com/macros/s/mock-deployment/exec',   // what ScriptApp.getService().getUrl() returns; null before a deployment
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET' },
-      newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; } },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) },
+      newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; },
+      getUi: () => ({ createMenu: name => ({ name, items: [], addItem(caption, fn) { this.items.push([caption, fn]); return this; }, addToUi() { ui.menus.push({ name: this.name, items: this.items }); } }),
+        showModalDialog: (out, title) => { ui.dialogs.push({ title, html: out.html }); } }) },
+    HtmlService: { createHtmlOutput: html => ({ html, setWidth() { return this; }, setHeight() { return this; } }) },
+    ScriptApp: { getService: () => ({ getUrl: () => sandbox.url }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; }, setProperties: o => { Object.assign(props, o); }, deleteProperty: k => { delete props[k]; } }) },
     LockService: { getScriptLock: () => ({ waitLock() { if (locked) throw new Error('locked'); locked = true; }, releaseLock() { locked = false; } }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ text: s, setMimeType() { return this; } }) },
     Utilities: { getUuid: () => require('crypto').randomUUID(), formatDate: d => d.toISOString().slice(0, 10) },
@@ -107,6 +114,13 @@ if (require.main === module) {
         const sh = sb.sheets.find(s => s.name === 'Payment details'), rows = JSON.parse(body || '[]');
         sh.putRows([]); rows.forEach((r, i) => r.forEach((v, j) => sh.set(i + 2, j + 1, String(v))));
         res.writeHead(200, cors); return res.end(String(rows.length));
+      }
+      // Test-only: makes the script report another version (ping, sync and add replies, doGet) until /_reset, to try the app's version guard.
+      // Body: "2.6.0", as JSON or plain text.
+      if (req.url.startsWith('/_ver')) {
+        let v; try { v = JSON.parse(body); } catch (e) { v = body.trim(); }
+        sb.VERSION_ = String(v);
+        res.writeHead(200, cors); return res.end(sb.VERSION_);
       }
       // Test-only: puts whole rows into a tab as a person editing the sheet would. Body: { tab, rows: [[...], ...] } replaces rows 2 onward.
       if (req.url.startsWith('/_rows')) {

@@ -201,7 +201,7 @@ with sync_playwright() as pw:
     p.click('button[aria-label="Settings"]'); p.fill('#sShop', 'Sample Toy Shop'); p.fill('#sContact', 'm.me/sampletoys\n0917 000 0000'); p.fill('#sFoot', 'Thank you for your order.')
     p.set_input_files('#sLogo', logo); p.wait_for_selector('#sheet img.logo')
     check(p.input_value('#sShop') == 'Sample Toy Shop', 'typed shop fields survive the logo upload'); p.screenshot(path=f'{SHOTS}/15-settings.png')
-    p.click('#sheet [data-act="savePrefs"]')
+    p.click('#sheet [data-act="saveShop"]')
     check(home(p) and p.inner_text('#title') == 'Sample Toy Shop', 'with a shop name set, Home is headed by it')
     tab(p, 'Sales'); p.click('.item:has-text("No. 2")'); save_img(p, 'invoice-2-branded'); close(p)
 
