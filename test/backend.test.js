@@ -9,15 +9,15 @@ function bench() {
   const add = entries => { const s = full(); return c('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
   return { b, c, full, add, sheet: n => b.sheets.find(x => x.name === n) };
 }
-const A = bench(), sb = A.b, call = A.c, { sheet, add, full } = A;
+const A = bench(), call = A.c, { sheet, add, full } = A;
 const res = d => Object.fromEntries(d.results.map(x => [x.id, x]));
 const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { sku, name, cat: 'Cars', price: 99.5, min: 2, active: true, ...extra } });
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
 assert.equal(call('ping').ok, true);
-assert.deepEqual(sb.sheets.find(s => s.name === 'Items').formulas, {}, 'Items holds no formula');
-assert.equal(sb.sheets.find(s => s.name === 'Sheet1'), undefined, 'default tab removed');
+assert.deepEqual(sheet('Items').formulas, {}, 'Items holds no formula');
+assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
 let r = call('add', { have: { rows: 0, lastId: '' }, entries: [
