@@ -74,24 +74,12 @@ var T_ = {
 /** Run once, and again after pasting a newer Code.gs. Creates and formats the tabs and makes the connection key. Never deletes data. */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var items = ensureSheet_(ss, 'Items', ITEM_HEAD_);
-  var moves = ensureSheet_(ss, 'Movements', MOVE_HEAD_);
-  // Text columns stay text, so a SKU like 0012 or a note starting with "=" is never reinterpreted.
-  items.getRange('A:C').setNumberFormat('@');
-  items.getRange('F:F').setNumberFormat('@');
-  items.getRange('H:M').setNumberFormat('@');
-  items.getRange('D:D').setNumberFormat('#,##0.00');
-  moves.getRange('A:E').setNumberFormat('@');
-  moves.getRange('G:I').setNumberFormat('@');
-  moves.getRange('J:J').setNumberFormat('#,##0.00');
-  Object.keys(T_).forEach(function (k) {
-    var sh = ensureSheet_(ss, T_[k].name, T_[k].head);
-    T_[k].text.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
-  });
-  ensureSheet_(ss, 'Inbox', INBOX_HEAD_).getRange('A:M').setNumberFormat('@');
+  asText_(ensureSheet_(ss, 'Items', ITEM_HEAD_), ['A:C', 'F:F', 'H:M']).getRange('D:D').setNumberFormat('#,##0.00');
+  asText_(ensureSheet_(ss, 'Movements', MOVE_HEAD_), ['A:E', 'G:I']).getRange('J:J').setNumberFormat('#,##0.00');
+  Object.keys(T_).forEach(function (k) { asText_(ensureSheet_(ss, T_[k].name, T_[k].head), T_[k].text); });
+  asText_(ensureSheet_(ss, 'Inbox', INBOX_HEAD_), ['A:M']);
   browseSheet_(ss);
-  var ed = ensureSheet_(ss, 'Edits', EDIT_HEAD_);
-  ed.getRange('A:E').setNumberFormat('@');
+  var ed = asText_(ensureSheet_(ss, 'Edits', EDIT_HEAD_), ['A:E']);
   ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
   // A warning, not a lock: the owner can still edit, but is asked first.
   ['Items', 'Movements'].concat(Object.keys(T_).map(function (k) { return T_[k].name; })).forEach(function (n) {
@@ -188,6 +176,8 @@ function ensureSheet_(ss, name, head) {
   sh.setFrozenRows(1);
   return sh;
 }
+// Text columns stay text, so a SKU like 0012 or a note starting with "=" is never reinterpreted.
+function asText_(sh, cols) { cols.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); }); return sh; }
 function sheet_(name) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
   if (!sh) throw new Error('The "' + name + '" tab is missing. Run setup() again in the script editor.');
@@ -231,7 +221,7 @@ function readItems_(warn) {
 }
 // One 13-column Items row; On hand is the number the script last worked out.
 function itemRow_(it, have) {
-  return [it.sku, it.name, it.cat, it.price == null ? '' : it.price, it.min == null ? '' : it.min, it.active ? 'Yes' : 'No', have || 0,
+  return [it.sku, it.name, it.cat, blank_(it.price), blank_(it.min), it.active ? 'Yes' : 'No', have || 0,
     it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
 }
 function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) }; }
@@ -274,11 +264,7 @@ function writeOnHand_() {
   sh.getRange(2, 7, last - 1, 1).setValues(skus.map(function (v) { var k = s_(v[0]).toLowerCase(); return [k ? stock[k] || 0 : '']; }));
 }
 function browseSheet_(ss) {
-  var sh = ss.getSheetByName('Browse');
-  if (sh) return sh;
-  sh = ensureSheet_(ss, 'Browse', BROWSE_HEAD_);
-  BROWSE_TEXT_.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
-  return sh;
+  return ss.getSheetByName('Browse') || asText_(ensureSheet_(ss, 'Browse', BROWSE_HEAD_), BROWSE_TEXT_);
 }
 /** Rewrites Browse: contents below the header cleared, then one write. A filter on the tab stays. */
 function writeBrowse_() {
@@ -364,7 +350,7 @@ function qty_(v) {
 function money_(v, what) {
   var n = Number(v);
   if (v === '' || v == null || isNaN(n) || n < 0 || n > 1e9) throw new Error(what + ' must be a number, zero or more');
-  return Math.round(n * 100) / 100;
+  return r2_(n);
 }
 function moneyOrNull_(v, what) { return v === '' || v == null ? null : money_(v, what); }
 function id_(v, what) {
@@ -651,7 +637,7 @@ function plan_(entries, skip) {
   function pushMove_(id, date, it, dir, qty, reason, ref, note, cost) {
     if (existingIds[id]) return;
     existingIds[id] = true;
-    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, cost == null ? '' : cost], by: who });
+    newMoves.push({ v: [id, date, it.sku, it.name, dir, qty, reason, ref, note, blank_(cost)], by: who });
   }
   // The number the phone picked, or the next free one when a different document already holds it.
   function docNo_(asked) {
@@ -742,11 +728,11 @@ function plan_(entries, skip) {
         if (preById[pid]) { results.push(numbered_(e, invById[rid] || { no: preById[pid].recNo }, q.no)); return; }
         var pit = toy_(q.sku), pc = cust_(q.custId);
         if (!pc.contact) throw new Error('A pre-order needs the customer\'s phone or Messenger');
-        var pq = qty_(q.qty), pp = money_(q.price, 'Price'), paid = money_(q.paid, 'Amount paid'), tot = Math.round(pq * pp * 100) / 100;
+        var pq = qty_(q.qty), pp = money_(q.price, 'Price'), paid = money_(q.paid, 'Amount paid'), tot = r2_(pq * pp);
         if (paid > tot) throw new Error('Amount paid is more than the total');
         var pdate = date_(q.date);
         var rec = { no: docNo_(q.no), id: rid, date: pdate, type: TYPE_RECEIPT_, custId: pc.id, cust: pc.name, contact: pc.contact, total: tot, ship: '', preId: pid };
-        var pre = { id: pid, date: pdate, custId: pc.id, cust: pc.name, contact: pc.contact, sku: pit.sku, name: pit.name, qty: pq, price: pp, paid: paid, balance: Math.round((tot - paid) * 100) / 100, status: PRE_OPEN_, kept: null, recNo: rec.no, invNo: null, note: text_(q.note, 300) };
+        var pre = { id: pid, date: pdate, custId: pc.id, cust: pc.name, contact: pc.contact, sku: pit.sku, name: pit.name, qty: pq, price: pp, paid: paid, balance: r2_(tot - paid), status: PRE_OPEN_, kept: null, recNo: rec.no, invNo: null, note: text_(q.note, 300) };
         pres.push(made_(pre)); preById[pid] = pre;
         invs.push(made_(rec)); invById[rid] = rec; invByNo[rec.no] = rec;
         lines.push(made_({ invNo: rec.no, invId: rid, sku: pit.sku, name: pit.name, qty: pq, list: pit.price, price: pp, cost: null }));
@@ -756,9 +742,9 @@ function plan_(entries, skip) {
         var pp_ = preById[s_(e.preId)];
         if (!pp_) throw new Error('Unknown pre-order');
         if (pp_.status !== PRE_OPEN_) throw new Error('That pre-order is closed');
-        var np = money_(e.paid, 'Amount paid'), pt = Math.round(pp_.qty * pp_.price * 100) / 100;
+        var np = money_(e.paid, 'Amount paid'), pt = r2_(pp_.qty * pp_.price);
         if (np > pt) throw new Error('Amount paid is more than the total');
-        pp_.paid = np; pp_.balance = Math.round((pt - np) * 100) / 100; touch_(pp_);
+        pp_.paid = np; pp_.balance = r2_(pt - np); touch_(pp_);
 
       } else if (e.kind === 'preCancel') {
         var pcx = preById[s_(e.preId)];
@@ -766,7 +752,7 @@ function plan_(entries, skip) {
         if (pcx.status === PRE_DONE_) throw new Error('That pre-order was already fulfilled');
         if (pcx.status === PRE_OPEN_) {
           // Kept is the deposit the shop keeps; zero means the customer was refunded in full.
-          var kept = money_(e.kept == null || e.kept === '' ? 0 : e.kept, 'Deposit kept');
+          var kept = moneyOrNull_(e.kept, 'Deposit kept') || 0;
           if (kept > pcx.paid) throw new Error('The deposit kept is more than what was paid');
           pcx.status = PRE_CANCEL_; pcx.kept = kept; touch_(pcx);
         }
@@ -789,7 +775,7 @@ function plan_(entries, skip) {
         }
         var total = 0;
         vlines.forEach(function (l) { total += l.qty * l.price; });
-        var inv = { no: docNo_(v.no), id: vid, date: vdate, type: TYPE_SALE_, custId: vc.id, cust: vc.name, contact: vc.contact, total: Math.round(total * 100) / 100, ship: '', preId: vpre ? vpre.id : '' };
+        var inv = { no: docNo_(v.no), id: vid, date: vdate, type: TYPE_SALE_, custId: vc.id, cust: vc.name, contact: vc.contact, total: r2_(total), ship: '', preId: vpre ? vpre.id : '' };
         invs.push(made_(inv)); invById[vid] = inv; invByNo[inv.no] = inv;
         vlines.forEach(function (l, i) {
           lines.push(made_({ invNo: inv.no, invId: vid, sku: l.it.sku, name: l.it.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost }));
@@ -821,7 +807,7 @@ function plan_(entries, skip) {
           if (!sold) throw new Error(rit.name + ' is not on invoice ' + ri.no);
           if (rqty > sold - back) throw new Error('Only ' + (sold - back) + ' of ' + rit.name + ' can still be returned on invoice ' + ri.no);
           var rdate = date_(r.date);
-          var ret = { id: retId, date: rdate, invNo: ri.no, invId: ri.id, cust: ri.cust, sku: rit.sku, name: rit.name, qty: rqty, outcome: outcome, refund: money_(r.refund == null || r.refund === '' ? 0 : r.refund, 'Refund'), note: text_(r.note, 300) };
+          var ret = { id: retId, date: rdate, invNo: ri.no, invId: ri.id, cust: ri.cust, sku: rit.sku, name: rit.name, qty: rqty, outcome: outcome, refund: moneyOrNull_(r.refund, 'Refund') || 0, note: text_(r.note, 300) };
           rets.push(made_(ret)); retById[retId] = ret;
           if (RETURN_STOCK_[outcome] === 'In') for (var k = 1; k <= rqty; k++) pushMove_('ret-' + retId + '-' + k, rdate, rit, 'In', 1, 'Return', retId, 'Invoice ' + ri.no, rcost);
         }
