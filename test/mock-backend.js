@@ -9,7 +9,6 @@ class Range {
   getValues() { const out = []; for (let i = 0; i < this.nr; i++) { const row = []; for (let j = 0; j < this.nc; j++) { const v = this.sh.cell(this.r + i, this.c + j); row.push(v === undefined ? '' : v); } out.push(row); } return out; }
   getValue() { return this.getValues()[0][0]; }
   setValues(vals) { if (vals.length !== this.nr || vals[0].length !== this.nc) throw new Error('Mock: range size ' + this.nr + 'x' + this.nc + ' does not match values ' + vals.length + 'x' + vals[0].length); vals.forEach((row, i) => row.forEach((v, j) => this.sh.set(this.r + i, this.c + j, v))); this.sh.writes++; const h = this.sh.ss.onSetValues; if (h) h(this.sh, this); return this; }
-  setValue(v) { this.sh.set(this.r, this.c, v); return this; }
   setNumberFormat(f) { if (f === '@' && this.r === 1 && this.nr === this.sh.max) for (let j = 0; j < this.nc; j++) this.sh.textCols.add(this.c + j); return this; }
   setFontWeight() { return this; }
   clearContent() { for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) { delete this.sh.cells[(this.r + i) + ',' + (this.c + j)]; delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)]; } return this; }
@@ -25,7 +24,6 @@ class Sheet {
   setFrozenRows(n) { this.frozen = n; }
   protect() { const p = { desc: '', warn: false, setDescription(d) { this.desc = d; return this; }, getDescription() { return this.desc; }, setWarningOnly(w) { this.warn = w; return this; } }; this.protections.push(p); return p; }
   getProtections() { return this.protections; }
-  getFilter() { return this.filter; }
   // Test helpers: rows 2..last as arrays, and putting them back in a new order (what sorting the tab does).
   rowsOf() { const out = []; for (let r = 2; r <= this.getLastRow(); r++) { const row = []; for (let c = 1; c <= 20; c++) row.push(this.cells[r + ',' + c]); out.push(row); } return out; }
   putRows(rows) { const last = this.getLastRow(); for (let r = 2; r <= last; r++) for (let c = 1; c <= 20; c++) delete this.cells[r + ',' + c]; rows.forEach((row, i) => row.forEach((v, j) => { if (v !== undefined) this.cells[(i + 2) + ',' + (j + 1)] = v; })); }
@@ -57,7 +55,7 @@ function makeSandbox() {
   const sandbox = {
     sheets, props, copies, logs: [],
     ss,
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET' },
       newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) },
     LockService: { getScriptLock: () => ({ waitLock() { if (locked) throw new Error('locked'); locked = true; }, releaseLock() { locked = false; } }) },

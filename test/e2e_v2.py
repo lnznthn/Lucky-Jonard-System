@@ -3,7 +3,6 @@
 import datetime, json, os, re, sys, urllib.request
 from playwright.sync_api import sync_playwright
 
-import os
 APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
 APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots2'
@@ -28,10 +27,8 @@ def stock_names(p): return [e.inner_text().strip() for e in p.query_selector_all
 TODAY = datetime.date.today().isoformat()
 def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
 def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); out = {}
-    for row in p.query_selector_all('#stockList .item'):
-        out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
-    return out
+    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
+    return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
 def paste_import(p, mode, text):
     update_stock(p)
     if not p.is_visible('#impText'): p.click('#manual summary')

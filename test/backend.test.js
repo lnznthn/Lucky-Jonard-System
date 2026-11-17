@@ -1,9 +1,16 @@
 // Direct tests of Code.gs through the mock. Run: node test/backend.test.js
 const vm = require('vm'), assert = require('assert');
 const { load } = require('./mock-backend');
-const sb = load();
-const key = sb.props.KEY;
-const call = (action, extra = {}, k = key) => { sb.__e = { postData: { contents: JSON.stringify({ key: k, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', sb).text); };
+// A fresh sheet with its own key; c() calls doPost like the app, full() is a sync of everything, add() posts entries on top of it.
+function bench() {
+  const b = load(), k = b.props.KEY;
+  const c = (action, extra = {}, kk = k) => { b.__e = { postData: { contents: JSON.stringify({ key: kk, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', b).text); };
+  const full = () => c('sync', { have: { rows: 0 } }).data;
+  const add = entries => { const s = full(); return c('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
+  return { b, c, full, add, sheet: n => b.sheets.find(x => x.name === n) };
+}
+const A = bench(), sb = A.b, call = A.c, { sheet, add, full } = A;
+const res = d => Object.fromEntries(d.results.map(x => [x.id, x]));
 const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { sku, name, cat: 'Cars', price: 99.5, min: 2, active: true, ...extra } });
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
@@ -19,7 +26,7 @@ let r = call('add', { have: { rows: 0, lastId: '' }, entries: [
   move('m4', 'T0001', 'In', 1, 'Sale'), move('m5', 'T0001', 'In', 0, 'Restock'), move('m6', 'T0001', 'In', 1, 'Restock', { date: '2026-02-30' }),
   item('T0003', 'plush  BEAR!'), { ...item('T0001', 'Other name'), id: 'dupsku' },
 ] }).data;
-const byId = Object.fromEntries(r.results.map(x => [x.id, x]));
+const byId = res(r);
 assert.ok(byId.iT0001.ok && byId.iT0002.ok && byId.qm1.ok && byId.qm2.ok);
 assert.match(byId.qm3.error, /Unknown item/); assert.match(byId.qm4.error, /cannot be recorded as In/);
 assert.match(byId.qm5.error, /Qty/); assert.match(byId.qm6.error, /Date/);
@@ -47,14 +54,14 @@ r = call('add', { have: { rows: 3, lastId: 'm7' }, entries: [
   { id: 'e4', kind: 'edit', sku: 'T9999', patch: { price: 1 } },
   item('T0005', 'Blocks Set'), { id: 'e5', kind: 'edit', sku: 'T0005', patch: { price: 12, cat: 'Blocks' } },
 ] }).data;
-const e = Object.fromEntries(r.results.map(x => [x.id, x]));
+const e = res(r);
 assert.ok(e.e1.ok && !e.e2.ok && e.e3.ok && !e.e4.ok && e.e5.ok);
 const items = Object.fromEntries(r.sync.items.map(i => [i.sku, i]));
 assert.equal(items.T0002.name, 'Plush Bear Large'); assert.equal(items.T0002.price, 250); assert.equal(items.T0001.active, false);
 assert.equal(items.T0005.price, 12); assert.equal(items.T0005.cat, 'Blocks'); assert.equal(items.T0001.name, 'Hot Wheels Mix');
 
 // 5. item name snapshot on movement rows stays the name at the time of the move
-r = call('sync', { have: { rows: 0 } }).data; assert.equal(r.moves.length, 3);
+r = full(); assert.equal(r.moves.length, 3);
 
 // 6. SKU collision between two phones: auto SKU is renumbered, dependents follow, wrong toy never credited
 r = call('add', { have: { rows: 3, lastId: 'm7' }, entries: [
@@ -69,11 +76,11 @@ const d1 = r.sync.moves.find(m => m.id === 'd1'); assert.equal(d1.sku, renum.sku
 r = call('add', { have: { rows: r.sync.rows, lastId: 'd1' }, entries: [
   { ...item('T0777', 'Dino Figure'), auto: true, id: 'dupname' }, move('x1', 'T0777', 'In', 2, 'Opening'), move('x2', 'T0002', 'In', 1, 'Restock'),
 ] }).data;
-const z = Object.fromEntries(r.results.map(x => [x.id, x]));
+const z = res(r);
 assert.match(z.dupname.error, /already exists/); assert.match(z.qx1.error, /refused/); assert.ok(z.qx2.ok);
 assert.ok(!r.sync.moves.some(m => m.id === 'x1'));
 // 8. retry of the renumbered batch (response was lost): same result, nothing duplicated
-const before = call('sync', { have: { rows: 0 } }).data;
+const before = full();
 r = call('add', { have: { rows: before.rows, lastId: before.lastId }, entries: [
   { ...item('T0001', 'Dino Figure'), auto: true }, move('d1', 'T0001', 'In', 4, 'Opening'),
 ] }).data;
@@ -81,10 +88,6 @@ assert.ok(r.results.every(x => x.ok)); assert.equal(r.results[0].sku, renum.sku)
 assert.equal(r.sync.rows, before.rows, 'no duplicate movement'); assert.equal(r.sync.items.length, before.items.length, 'no duplicate item');
 
 // ---------- v2: toy details, receipt cost, customers, supplier orders, pre-orders, invoices, returns ----------
-const sheet = n => sb.sheets.find(s => s.name === n);
-const add = entries => { const s = call('sync', { have: { rows: 0 } }).data; return call('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
-const res = d => Object.fromEntries(d.results.map(x => [x.id, x]));
-const full = () => call('sync', { have: { rows: 0 } }).data;
 ['Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns'].forEach(n => assert.ok(sheet(n), n + ' tab exists'));
 
 // 9. item details: stored, patched, validated; On hand is a written number
@@ -254,13 +257,6 @@ assert.deepEqual(r.sync.inbox, []);
 assert.ok(!JSON.stringify(full()).includes('"_row"') && !JSON.stringify(full()).includes('"_dirty"'));
 assert.match(add([{ id: 'u1', kind: 'nuke' }]).results[0].error, /Unknown entry type/);
 // ---------- 2.2: writes find rows by key, On hand is a number, Browse, Edits, warnings ----------
-function bench() {
-  const b = load(), k = b.props.KEY;
-  const c = (action, extra = {}) => { b.__e = { postData: { contents: JSON.stringify({ key: k, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', b).text); };
-  const fullB = () => c('sync', { have: { rows: 0 } }).data;
-  const addB = entries => { const s = fullB(); return c('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
-  return { b, c, full: fullB, add: addB, sheet: n => b.sheets.find(x => x.name === n) };
-}
 const edit = (id, sku, patch) => ({ id, kind: 'edit', sku, patch });
 const MSG = (tab, key, what) => `The ${tab} tab was changed in Google Sheets (${key} ${what}). Nothing was written for this entry; fix the tab and sync again.`;
 const W = bench();

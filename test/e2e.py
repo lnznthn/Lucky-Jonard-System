@@ -1,12 +1,11 @@
 # End-to-end test: python3 test/e2e.py  (needs static server on 8765, mock backend on 8766, Chrome)
-import json, sys, urllib.request
+import json, os, sys, urllib.request
 from playwright.sync_api import sync_playwright
 
-import os
 APP_PORT, API_PORT = os.environ.get('APP_PORT', '8765'), os.environ.get('API_PORT', '8766')
 APP, API = f'http://localhost:{APP_PORT}/index.html', f'http://localhost:{API_PORT}'
 SHOTS = '/tmp/shots'
-import os; os.makedirs(SHOTS, exist_ok=True)
+os.makedirs(SHOTS, exist_ok=True)
 fails = []
 def check(cond, msg):
     print(('PASS ' if cond else 'FAIL ') + msg)
@@ -28,19 +27,13 @@ def no_toy(p, where):
 def synced(pg): pg.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
 def post_inbox(rows):
     urllib.request.urlopen(urllib.request.Request(API + '/_inbox', data=json.dumps(rows).encode(), method='POST')).read()
-def stock_map_here(p):
-    return {row.query_selector('.name').inner_text().strip(): int(row.query_selector('.qty').inner_text()) for row in p.query_selector_all('#stockList .item')}
 def stock_map(p):
-    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]'); out = {}
-    for row in p.query_selector_all('#stockList .item'):
-        out[row.query_selector('.name').inner_text().strip()] = int(row.query_selector('.qty').inner_text())
-    return out
+    tab(p, 'Stock'); p.click('#view .seg button[data-f="all"]')
+    return {r.query_selector('.name').inner_text().strip(): int(r.query_selector('.qty').inner_text()) for r in p.query_selector_all('#stockList .item')}
 def paste_import(p, mode, text):
     update_stock(p)
     if not p.is_visible('#impText'): p.click('#manual summary')
-    if mode == 'moves': p.click('button[data-m="moves"]')
-    else: p.click('button[data-m="count"]')
-    p.fill('#impText', text); p.click('button:has-text("Preview")')
+    p.click(f'button[data-m="{mode}"]'); p.fill('#impText', text); p.click('button:has-text("Preview")')
 def connect(p, code=CODE):
     p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')
 
@@ -150,7 +143,7 @@ with sync_playwright() as pw:
 
     # ---- connect: queue flushes into the sheet
     check(p.inner_text('#syncTxt').endswith('saved here'), 'pill counts items saved on the device')
-    connect(p); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    connect(p); synced(p)
     d = dump()
     check(len(d['Items']['rows']) - 1 == 4, f"sheet has 4 items: {len(d['Items']['rows']) - 1}")
     mv_rows = d['Movements']['rows'][1:]
@@ -165,7 +158,7 @@ with sync_playwright() as pw:
     # ---- reverse a synced movement
     activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")'); p.click('button:has-text("Reverse this movement")')
     check(stock_map(p)['Hot Wheels 5-Pack'] == 10, 'reversal restores 10')
-    p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    synced(p)
     activity(p); p.click('.item:has-text("Hot Wheels 5-Pack"):has-text("−3")')
     check(p.is_disabled('button:has-text("Already reversed")'), 'second reversal blocked')
     p.click('button[aria-label="Close"]')
@@ -173,7 +166,7 @@ with sync_playwright() as pw:
 
     # ---- device 2 connects and sees the same numbers
     ctx2 = b.new_context(viewport={'width': 390, 'height': 844}); p2 = ctx2.new_page(); p2.on('dialog', lambda d: d.accept()); p2.on('pageerror', lambda e: errors.append('p2 ' + str(e)))
-    p2.goto(APP); connect(p2); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    p2.goto(APP); connect(p2); synced(p2)
     check(stock_map(p2) == stock_map(p), f'device 2 matches device 1: {stock_map(p2)}')
 
     # ---- movements import: dup, unknown item, bad reason, negative warning
@@ -181,13 +174,13 @@ with sync_playwright() as pw:
     txt = p2.inner_text('#impOut'); p2.screenshot(path=f'{SHOTS}/09-moves-preview.png')
     check('Below zero' in txt and 'No item matches “Hot Wheels 5 Pak”' in txt and 'Sale cannot be recorded as In' in txt, 'moves preview flags below-zero, unknown item, bad reason')
     check('Apply 3 changes' in txt, 'moves preview applies the 3 good rows')
-    apply(p2, 'Apply 3 changes'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    apply(p2, 'Apply 3 changes'); synced(p2)
     check(stock_map(p2)['Hot Wheels 5-Pack'] == 15 and stock_map(p2)['Toy Train Set'] == 5, f'stock after movement import: {stock_map(p2)}')
     paste_import(p2, 'moves', "2026-11-10\tHot Wheels 5-Pack\tIn\t5\tRestock\tdelivery")
     check('Duplicate?' in p2.inner_text('#impOut') and 'Apply 0 changes' in p2.inner_text('#impOut'), 'pasting the same movement again is held as a duplicate')
 
     # ---- device 1 catches up
-    p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    p.click('#syncBtn'); synced(p)
     check(stock_map(p) == stock_map(p2), 'device 1 pulls device 2 changes incrementally')
 
     # ---- offline: queue then reconnect
@@ -198,8 +191,8 @@ with sync_playwright() as pw:
     p.click('button:has-text("Record stock in")')
     p.wait_for_timeout(1500)
     check(stock_map(p)['Toy Train Set'] == 6 and 'waiting' in p.inner_text('#syncTxt') or 'failed' in p.inner_text('#syncTxt'), f"offline entry is kept ({p.inner_text('#syncTxt')})")
-    ctx1.set_offline(False); p.click('#syncBtn'); p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
-    p2.click('#syncBtn'); p2.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
+    ctx1.set_offline(False); p.click('#syncBtn'); synced(p)
+    p2.click('#syncBtn'); synced(p2)
     check(stock_map(p2)['Toy Train Set'] == 6, 'offline entry reached device 2 after reconnect')
 
     def add_toy(pg, name, start, sku=None):
