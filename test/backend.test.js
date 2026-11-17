@@ -249,12 +249,6 @@ putRow(7, ['2026-11-15', 'Count', 'Mark Test', '1', '', '', '', '', '', '', '', 
 r = add([{ id: 'ib4', kind: 'inboxDone', rows: [{ row: 6, name: 'No Date Toy' }], mark: 'Dismissed' }, { id: 'ib5', kind: 'inboxDone', rows: [{ row: 7, name: 'Mark Test' }], mark: 'Weird' }]);
 assert.ok(r.results.every(x => x.ok)); assert.equal(ib.cell(6, 13), 'Dismissed', 'retrying is harmless'); assert.equal(ib.cell(7, 13), 'Done', 'an unknown mark becomes Done');
 assert.deepEqual(r.sync.inbox, []);
-// A sheet set up before the Inbox tab existed: sync and inboxDone still work
-sb.sheets.splice(sb.sheets.indexOf(ib), 1);
-assert.deepEqual(full().inbox, []);
-r = add([{ id: 'ib6', kind: 'inboxDone', rows: [{ row: 2, name: 'Grandista Son Goku' }], mark: 'Done' }, move('ib7', 'T0002', 'In', 1, 'Restock')]);
-assert.ok(r.results.every(x => x.ok), 'no Inbox tab: entries still apply'); assert.deepEqual(r.sync.inbox, []);
-vm.runInContext('setup()', sb); assert.ok(sheet('Inbox') && sheet('Inbox').textCols.has(12), 'setup adds the Inbox tab again, columns as text');
 
 // 20. nothing internal leaks, and unknown kinds are refused
 assert.ok(!JSON.stringify(full()).includes('"_row"') && !JSON.stringify(full()).includes('"_dirty"'));

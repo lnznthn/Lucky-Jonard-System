@@ -136,7 +136,7 @@ function wipeAllData() {
 /** Run by hand, if wanted, after wipeAllData(): clears Status Done on Inbox rows so they come back for review. Dismissed and Working stay. */
 function reopenInbox() {
   locked_(function () {
-    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox'), last = sh ? sh.getLastRow() : 0, n = 0;
+    var sh = sheet_('Inbox'), last = sh.getLastRow(), n = 0;
     // Only the Done cells, so a row an intake run marks Working meanwhile keeps its status.
     if (last >= 2) sh.getRange(2, 13, last - 1, 1).getValues().forEach(function (v, i) { if (s_(v[0]) === 'Done') { sh.getRange(i + 2, 13).clearContent(); n++; } });
     Logger.log('Reopened ' + n + ' Inbox rows.');
@@ -163,7 +163,7 @@ function doPost(e) {
   try {
     switch (body.action) {
       case 'ping': return out_({ ok: true, data: { version: VERSION_ } });
-      case 'sync': return out_({ ok: true, data: syncAll_(body.have) });
+      case 'sync': return out_({ ok: true, data: addEntries_([], body.have).sync });
       case 'add': return out_({ ok: true, data: addEntries_(body.entries || [], body.have) });
       default: return out_({ ok: false, error: 'Unknown action' });
     }
@@ -193,8 +193,6 @@ function sheet_(name) {
   if (!sh) throw new Error('The "' + name + '" tab is missing. Run setup() again in the script editor.');
   return sh;
 }
-function itemsSheet_() { return sheet_('Items'); }
-function movesSheet_() { return sheet_('Movements'); }
 
 // Last row with something in the key column (default A). getLastRow() would count other columns.
 function lastRowOf_(sh, col) {
@@ -215,7 +213,7 @@ function dateStr_(v) {
 
 /** Items, first row per SKU. warn, when given, collects a sentence for each SKU found on more than one row. */
 function readItems_(warn) {
-  var sh = itemsSheet_();
+  var sh = sheet_('Items');
   var last = lastRowOf_(sh);
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, ITEM_HEAD_.length).getValues();
@@ -237,16 +235,14 @@ function itemRow_(it, have) {
     it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
 }
 function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) }; }
-function readMoves_() {
-  var sh = movesSheet_(), last = lastRowOf_(sh);
-  if (last < 2) return [];
-  var vals = sh.getRange(2, 1, last - 1, MOVE_HEAD_.length).getValues(), out = [];
-  for (var i = 0; i < vals.length; i++) {
-    if (!String(vals[i][0]).trim()) continue;
-    var m = moveOf_(vals[i]); m._row = i + 2; out.push(m);
-  }
+// The rows of a tab that have something in column A, as objects that remember their sheet row.
+function readRows_(name, head, from) {
+  var sh = sheet_(name), last = lastRowOf_(sh), out = [];
+  if (last < 2) return out;
+  sh.getRange(2, 1, last - 1, head.length).getValues().forEach(function (v, i) { if (s_(v[0])) { var o = from(v); o._row = i + 2; out.push(o); } });
   return out;
 }
+function readMoves_() { return readRows_('Movements', MOVE_HEAD_, moveOf_); }
 /**
  * Stock per lower-case SKU, replayed first in, first out in sheet order, the same way as live() in the app; dates are not used.
  * Each SKU has a queue of units on hand, oldest first ({ id, cost } per unit: an In of Qty 3 is three units at its cost), and a deficit.
@@ -271,7 +267,7 @@ function stockOf_(moves) {
 }
 /** Writes On hand (column G) for every item in one call, aligned by the SKU in each row now. */
 function writeOnHand_() {
-  var sh = itemsSheet_(), last = lastRowOf_(sh);
+  var sh = sheet_('Items'), last = lastRowOf_(sh);
   if (last < 2) return;
   var stock = stockOf_(readMoves_()).stock;
   var skus = sh.getRange(2, 1, last - 1, 1).getValues();
@@ -302,12 +298,10 @@ function writeBrowse_() {
   sh.getRange(1, 1, rows.length + 1, BROWSE_HEAD_.length).setValues([BROWSE_HEAD_].concat(rows));
 }
 
-/** Inbox rows still waiting: a name and no status. Tolerates a sheet set up before the Inbox tab existed. */
+/** Inbox rows still waiting: a name and no status. */
 function inboxType_(v) { return /^r/i.test(s_(v)) ? 'receive' : 'count'; }
 function readInbox_() {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox');
-  if (!sh) return [];
-  var last = sh.getLastRow();
+  var sh = sheet_('Inbox'), last = sh.getLastRow();
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, INBOX_HEAD_.length).getValues(), out = [];
   for (var i = 0; i < vals.length; i++) {
@@ -317,18 +311,7 @@ function readInbox_() {
   }
   return out;
 }
-function readTab_(k) {
-  var t = T_[k], sh = sheet_(t.name);
-  var last = lastRowOf_(sh);
-  if (last < 2) return [];
-  var vals = sh.getRange(2, 1, last - 1, t.head.length).getValues();
-  var out = [];
-  for (var i = 0; i < vals.length; i++) {
-    if (!String(vals[i][0]).trim()) continue;
-    var o = t.from(vals[i]); o._row = i + 2; out.push(o);
-  }
-  return out;
-}
+function readTab_(k) { return readRows_(T_[k].name, T_[k].head, T_[k].from); }
 
 // ---------- reading ----------
 
@@ -341,10 +324,10 @@ function raiseRev_() { PropertiesService.getScriptProperties().setProperty('move
  * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
  * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
  * Customers, supplier orders, pre-orders, invoices (with their lines), returns and waiting Inbox rows are always sent whole.
- * warnings lists problems found in the tabs, one plain sentence each; older apps ignore it.
+ * warnings lists problems found in the tabs, one plain sentence each.
  */
 function snapshot_(have) {
-  var sh = movesSheet_(), rev = moveRev_();
+  var sh = sheet_('Movements'), rev = moveRev_();
   var rows = lastRowOf_(sh) - 1;
   var from = 0, reset = true;
   if (have && have.moveRev === rev && have.rows > 0 && have.rows <= rows && have.lastId) {
@@ -467,22 +450,16 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * Invoice and receipt numbers are plain sequential numbers picked by the phone. A number already used by a
  * different document is replaced by the next free one and the result carries { no, fromNo }.
  * Pending rows of the Edits tab are applied first, as edit entries. Their results go to the Edits tab, not the app.
+ * Browse is rewritten last. A sync is an add with no entries.
  * Returns { results: [{ id, ok, error, sku?, from?, no?, fromNo? }], sync, warnings }.
  */
 function addEntries_(entries, have) {
-  var eds = editRows_(), mine = eds.filter(function (x) { return x.entry; }).map(function (x) { return x.entry; });
-  var results = apply_(mine.concat(entries));
+  var eds = editRows_(), mine = eds.filter(function (x) { return x.entry; }).map(function (x) { return x.entry; }), all = mine.concat(entries);
+  var results = all.length ? apply_(all) : [];
   finishEdits_(eds, results.slice(0, mine.length));
   writeBrowse_();
   var sync = snapshot_(have);
   return { results: results.slice(mine.length), sync: sync, warnings: sync.warnings };
-}
-/** sync: applies the Edits tab, rewrites Browse, and returns the snapshot. */
-function syncAll_(have) {
-  var eds = editRows_(), mine = eds.filter(function (x) { return x.entry; }).map(function (x) { return x.entry; });
-  if (eds.length) finishEdits_(eds, mine.length ? apply_(mine) : []);
-  writeBrowse_();
-  return snapshot_(have);
 }
 
 /**
@@ -564,8 +541,8 @@ function write_(p, skip) {
   });
   var keep = function (o) { return !skip[o._by[0]]; };
   var items = p.newItems.filter(keep), moves = p.newMoves.filter(function (m) { return !skip[m.by]; });
-  append_(itemsSheet_(), 1, items.map(function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }));
-  append_(movesSheet_(), 1, moves.map(function (m) { return m.v; }));
+  append_(sheet_('Items'), 1, items.map(function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }));
+  append_(sheet_('Movements'), 1, moves.map(function (m) { return m.v; }));
   Object.keys(T_).forEach(function (k) { append_(sheet_(T_[k].name), T_[k].col, p.tabs[k].filter(function (o) { return !o._row && keep(o); }).map(T_[k].to)); });
   if (changed || items.length || moves.length) writeOnHand_();
   markInbox_(p.marks.filter(function (m) { return !skip[m.by]; }));
@@ -582,9 +559,8 @@ function append_(sh, col, rows) {
  * found, or already has a Status, is left alone and keeps waiting.
  */
 function markInbox_(marks) {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox');
-  if (!sh || !marks.length) return;
-  var last = sh.getLastRow();
+  if (!marks.length) return;
+  var sh = sheet_('Inbox'), last = sh.getLastRow();
   if (last < 2) return;
   var vals = sh.getRange(2, 1, last - 1, INBOX_HEAD_.length).getValues();
   marks.forEach(function (m) {
@@ -604,11 +580,8 @@ function markInbox_(marks) {
 
 /** Pending rows of the Edits tab: a SKU or field filled and no Status. Each becomes an edit entry, or carries the reason it cannot. */
 function editRows_() {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Edits');
-  if (!sh) return [];
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var out = [];
+  var sh = sheet_('Edits'), last = sh.getLastRow(), out = [];
+  if (last < 2) return out;
   sh.getRange(2, 1, last - 1, EDIT_HEAD_.length).getValues().forEach(function (v, i) {
     if (s_(v[3]) || (!s_(v[0]) && !s_(v[1]) && !s_(v[2]))) return;
     var x = { row: i + 2, sku: s_(v[0]), field: s_(v[1]), value: v[2] };
@@ -637,7 +610,7 @@ function editPatch_(field, v) {
 /** Writes Done or Refused and the reason on each Edits row, found again by its row, SKU, field and value. */
 function finishEdits_(eds, results) {
   if (!eds.length) return;
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Edits'), last = sh.getLastRow();
+  var sh = sheet_('Edits'), last = sh.getLastRow();
   if (last < 2) return;
   var vals = sh.getRange(2, 1, last - 1, EDIT_HEAD_.length).getValues(), byId = {};
   results.forEach(function (r) { byId[r.id] = r; });
