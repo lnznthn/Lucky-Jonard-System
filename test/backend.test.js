@@ -156,7 +156,7 @@ r = add([invoice('inv2', 2, [{ sku: 'T0100', qty: 1, price: 1500, cost: 1255.56 
 let z14 = res(r);
 assert.deepEqual([z14.vinv2.ok, z14.vinv2.no, z14.vinv2.fromNo], [true, 2, undefined]);
 assert.deepEqual([z14.vinv3.ok, z14.vinv3.no, z14.vinv3.fromNo], [true, 3, 2], 'a taken number moves to the next free one');
-assert.match(z14.vinv4.error, /at least one toy/); assert.match(z14.vinv5.error, /Price/);
+assert.match(z14.vinv4.error, /at least one item/); assert.match(z14.vinv5.error, /Price/);
 let inv2 = r.sync.invs.find(i => i.id === 'inv2');
 assert.deepEqual([inv2.type, inv2.cust, inv2.total, inv2.ship], ['Sale', 'Ben Cruz', 2000, '']);
 assert.deepEqual(inv2.lines.map(l => [l.sku, l.qty, l.list, l.price, l.cost]), [['T0100', 1, 1800, 1500, 1255.56], ['T0002', 2, 250, 250, null]]);

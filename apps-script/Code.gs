@@ -761,7 +761,7 @@ function plan_(entries, skip) {
         var v = e.invoice || {}, vid = id_(v.id, 'Invoice');
         if (invById[vid]) { results.push(numbered_(e, invById[vid], v.no)); return; }
         var vc = cust_(v.custId), vdate = date_(v.date);
-        if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one toy');
+        if (!v.lines || !v.lines.length) throw new Error('An invoice needs at least one item');
         if (v.lines.length > 50) throw new Error('An invoice can hold 50 lines at most');
         var vlines = v.lines.map(function (l) {
           var lit = toy_(l.sku);
