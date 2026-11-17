@@ -1152,7 +1152,7 @@ function saveReturn() {
 
 /* ---------- Orders: pre-orders and supplier orders ---------- */
 function renderOrders() {
-  if (wide()) { view().innerHTML = `<div class="cols"><div>${preListHtml()}</div><div>${ordListHtml()}</div></div>`; return; }
+  if (wide()) { view().innerHTML = preListHtml() + ordListHtml(); return; }   // two tables, one under the other
   const pre = ui.ordSeg === 'pre';
   view().innerHTML = `<div class="seg"><button class="${pre ? 'on' : ''}" data-act="ordSeg" data-s="pre">Pre-orders</button><button class="${pre ? '' : 'on'}" data-act="ordSeg" data-s="sup">Supplier orders</button></div>${pre ? preListHtml() : ordListHtml()}`;
 }
@@ -1163,6 +1163,12 @@ function preRow(p, ready) {
 function preListHtml() {
   const L = live(), ready = readyPres(), rs = new Set(ready.map(p => p.id));
   const open = L.pres.filter(p => p.status === PRE_OPEN && !rs.has(p.id)), closed = L.pres.filter(p => p.status !== PRE_OPEN).reverse();
+  // Desktop: one table, ready to ship first; Status sorts in that order too.
+  const rank = p => rs.has(p.id) ? 0 : p.status === PRE_OPEN ? 1 : p.status === PRE_DONE ? 2 : 3, said = ['Ready to ship', 'Waiting for stock', PRE_DONE, PRE_CANCEL];
+  if (wide()) return `<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>
+    ${L.pres.length ? sec('Pre-orders', table('pres', [['Date', p => p.date, p => esc(fmtDay(p.date))], ['Customer', p => p.cust, p => esc(p.cust) + waitTag(p)], ['Contact', contactOf], ['Item', p => p.name, null, 'w'], ['Qty', p => p.qty, null, 'n'],
+      ['Price', p => p.price, p => money(p.price), 'n'], ['Paid', p => p.paid, p => money(p.paid), 'n'], ['Balance', p => p.status === PRE_OPEN ? p.balance : null, p => p.status === PRE_OPEN ? money(p.balance) : '', 'n'], ['Status', rank, p => said[rank(p)]]],
+      [...ready, ...open, ...closed.slice(0, 200)], p => `data-act="pre" data-id="${esc(p.id)}"`), ready.length ? `<span class="badge">${ready.length}</span>` : '') : `<p class="empty">No pre-orders yet.</p>`}`;
   return `<p class="hint">To take a pre-order, start a <b>New sale</b>. An item that is not free to sell is saved as a pre-order.</p>
     ${ready.length ? sec('Ready to ship', `<div class="list">${ready.map(p => preRow(p, true)).join('')}</div>`, `<span class="badge">${ready.length}</span>`) : ''}
     ${open.length ? sec('Waiting for stock', `<div class="list">${open.map(p => preRow(p)).join('')}</div>`) : ''}
@@ -1190,6 +1196,11 @@ function openPre(id) {
 function ordRow(o) { return row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`, o.status === 'Received' ? 'received ' + esc(fmtDay(o.recDate)) : 'ordered ' + esc(fmtDay(o.date)) + (o.expected ? ' · expected ' + esc(fmtDay(o.expected)) : ''), `data-act="ord" data-id="${esc(o.id)}"`, `<span class="qty">${o.status === 'Received' ? o.recQty : o.qty}</span>`); }
 function ordListHtml() {
   const L = live(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
+  const rank = o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status);
+  if (wide()) return `<div><button class="btn primary" data-act="ordNew">New supplier order</button></div>
+    ${L.orders.length ? sec('Supplier orders', table('ords', [['Date', o => o.date, o => esc(fmtDay(o.date))], ['Item', o => o.name, o => esc(o.name) + waitTag(o), 'w'], ['Qty', o => o.status === 'Received' ? o.recQty : o.qty, null, 'n'],
+      ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : ''], ['Status', rank, o => o.status === 'Ordered' ? 'On the way' : o.status === 'Received' ? 'Received ' + esc(fmtDay(o.recDate)) : esc(o.status)]],
+      [...open, ...closed.slice(0, 200)], o => `data-act="ord" data-id="${esc(o.id)}"`)) : `<p class="empty">No supplier orders yet. Add one when stock is ordered and paid for.</p>`}`;
   return `<button class="btn primary big" data-act="ordNew">New supplier order</button>
     ${open.length ? sec('On the way', `<div class="list">${open.map(ordRow).join('')}</div>`) : `<p class="empty">${L.orders.length ? 'Nothing on the way.' : 'No supplier orders yet. Add one when stock is ordered and paid for.'}</p>`}
     ${closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(ordRow).join('')}</div></details>` : ''}`;
