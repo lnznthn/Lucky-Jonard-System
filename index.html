@@ -608,13 +608,14 @@ const sec = (title, inner, extra, cls) => `<section class="sec ${cls || ''}"><h2
 const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
 
 /* Home: the month's numbers, the two ways in, then one list of what needs doing */
-const STOCK_FILTERS = { short: 'Promised beyond supply', noprice: 'No price yet', verify: 'Release date to verify' };
+const STOCK_FILTERS = { short: 'Promised beyond supply', noprice: 'No price yet', nocost: 'No cost yet', verify: 'Release date to verify' };
 /** The rows of "Needs you", in their fixed order. Each is a job phrased as an action. */
 function needsRows() {
   const L = live(), today = todayISO(), act = L.list.filter(i => i.active), out = [];
   const failed = queue.filter(q => q.status === 'failed').length;
   const ready = readyPres(), owing = L.pres.filter(p => p.status === PRE_OPEN && p.balance > 0), due = L.orders.filter(o => o.status === 'Ordered' && o.expected && o.expected <= today);
   const short = act.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; }), verify = act.filter(i => i.relCheck), noprice = act.filter(i => i.price == null);
+  const nocost = act.reduce((n, i) => n + stockCost(i.sku).none, 0);
   if (failed) out.push(row(`Fix ${plural(failed, 'entry', 'entries')} the sheet refused`, 'Open Activity to see why', 'data-act="tab" data-t="activity"'));
   if (ready.length >= 4) out.push(row(`Ship ${ready.length} pre-orders now in stock`, 'The items have arrived', 'data-act="homeGo" data-to="pre"'));
   else {
@@ -627,6 +628,7 @@ function needsRows() {
   if (due.length) out.push(row(`Receive ${plural(due.length, 'supplier order')} due`, due.slice(0, 2).map(o => esc(o.name)).join(', ') + (due.length > 2 ? ' and more' : ''), 'data-act="homeGo" data-to="sup"'));
   if (owing.length) out.push(row(`Collect ${money(r2(owing.reduce((s, p) => s + p.balance, 0)))} on ${plural(owing.length, 'pre-order')}`, 'Balances still open', 'data-act="homeGo" data-to="pre"'));
   if (noprice.length) out.push(row(`Price ${plural(noprice.length, 'item')}`, 'A sale needs the price typed each time', 'data-act="homeGo" data-to="noprice"'));
+  if (nocost) out.push(row(`Add the cost of ${plural(nocost, 'unit')}`, 'Without it, the margin on a sale stays unknown', 'data-act="homeGo" data-to="nocost"'));
   if (verify.length) out.push(row(`Check ${plural(verify.length, 'release date')}`, 'Best guesses still to confirm', 'data-act="homeGo" data-to="verify"'));
   return out;
 }
@@ -677,6 +679,7 @@ function renderStockList() {
   if (ui.filter === 'out') rows = rows.filter(i => ['out', 'neg'].includes(status(i)));
   if (ui.filter === 'short') rows = rows.filter(i => { const n = nums(i.sku); return n.owed > 0 && n.ltp < 0; });
   if (ui.filter === 'noprice') rows = rows.filter(i => i.price == null);
+  if (ui.filter === 'nocost') rows = rows.filter(i => stockCost(i.sku).none > 0);
   if (ui.filter === 'verify') rows = rows.filter(i => i.relCheck);
   const box = $('#stockList'); if (!box) return;
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
