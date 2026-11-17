@@ -53,7 +53,7 @@ with sync_playwright() as pw:
     check(p.is_visible('#sellBody button:has-text("Issue invoice")') and p.is_visible('#invList') and not p.is_visible('[data-act="sellNew"]') and p.inner_text('header.top h1') == 'Sales', 'Sales shows the New sale form and the invoice list together')
     tops = lambda sel: p.eval_on_selector_all(sel, 'els => els.map(e => Math.round(e.getBoundingClientRect().top))')
     t = tops('#iCust, #iContact, #iDate'); check(len(t) == 3 and len(set(t)) == 1, f'Customer, Phone or Messenger and Date sit in one row: {t}')
-    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Quantity', f'Price each (₱)', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
+    check([x.inner_text().strip() for x in p.query_selector_all('#sellBody thead th')] == ['Product', '', 'Quantity', f'Price each (₱)', 'Cost each', 'Amount', ''] and p.is_visible('#sellBody tbody tr [data-pk="inv.lines.0"]'), 'the sale lines are rows of a table')
     pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.lines.0.qty"]', '2')
     check(p.inner_text('#amt0') == '₱3,600' and '3 in stock' in p.inner_text('#sellBody tbody tr:first-child'), f"a line shows its stock hint and its amount: {p.inner_text('#amt0')}")
     p.click('button:has-text("Add another product")'); check(p.is_visible('#sellBody tbody tr [data-pk="inv.lines.1"]'), 'Add another product adds a row'); p.click('#sellBody button:has-text("Remove") >> nth=1')
@@ -70,7 +70,7 @@ with sync_playwright() as pw:
     # A pre-order that stays waiting, then one whose item arrives: ready rows list first.
     pick(p, 'inv.lines.0', 'zoro'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '700'); p.fill('[data-b="inv.cust"]', 'Cy Lim'); p.fill('[data-b="inv.contact"]', 'cy.lim')
     t = tops('#iCust, #iContact, #iDate, #iPaid, #iNote'); check(len(t) == 5 and len(set(t)) == 1, f'in pre-order mode Paid now and Note join the top row: {t}')
-    check(p.eval_on_selector('#invNotice', 'e => e.closest("td").colSpan') == 6, 'the pre-order notice spans the full width under its line')
+    check(p.eval_on_selector('#invNotice', 'e => e.closest("td").colSpan') == 7, 'the pre-order notice spans the full width under its line')
     p.click('button:has-text("Save pre-order")'); p.click('button[aria-label="Close"]')
     pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.fill('[data-b="inv.contact"]', '+63 917 000 0000'); p.fill('[data-b="inv.paid"]', '500')
     check(p.is_visible('#invNotice'), 'an item not in stock turns the form into a pre-order')
