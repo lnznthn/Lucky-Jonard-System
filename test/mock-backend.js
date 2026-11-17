@@ -14,14 +14,13 @@ class Range {
   setFontWeight() { return this; }
   clearContent() { for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) { delete this.sh.cells[(this.r + i) + ',' + (this.c + j)]; delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)]; } return this; }
   setDataValidation(rule) { this.sh.validation = { r: this.r, c: this.c, nr: this.nr, nc: this.nc, rule }; return this; }
-  getFormula() { return this.sh.formulas[this.r + ',' + this.c] || ''; }
-  setFormula(f) { this.sh.formulas[this.r + ',' + this.c] = f; return this; }
 }
 class Sheet {
   constructor(name, ss) { this.name = name; this.ss = ss || {}; this.cells = {}; this.formulas = {}; this.max = 1000; this.frozen = 0; this.textCols = new Set(); this.protections = []; this.validation = null; this.filter = null; this.writes = 0; }
   cell(r, c) { return this.cells[r + ',' + c]; }
   set(r, c, v) { if (r > this.max) throw new Error('Mock: row ' + r + ' beyond grid ' + this.max); if (typeof v === 'string' && /^[=+@-]/.test(v) && !this.textCols.has(c) && r > 1) throw new Error('Mock: column ' + c + ' is not text-formatted, so "' + v + '" would become a formula'); this.cells[r + ',' + c] = v; delete this.formulas[r + ',' + c]; }
   getMaxRows() { return this.max; }
+  getMaxColumns() { return 26; }
   insertRowsAfter(after, n) { this.max += n; }
   setFrozenRows(n) { this.frozen = n; }
   protect() { const p = { desc: '', warn: false, setDescription(d) { this.desc = d; return this; }, getDescription() { return this.desc; }, setWarningOnly(w) { this.warn = w; return this; } }; this.protections.push(p); return p; }
@@ -43,17 +42,20 @@ class Sheet {
 function makeSandbox() {
   const sheets = [];
   const props = {};
+  const copies = [];
   const ss = {
     onSetValues: null,
     getSheetByName: n => sheets.find(s => s.name === n) || null,
     insertSheet: n => { const s = new Sheet(n, ss); sheets.push(s); return s; },
     getSheets: () => sheets,
     deleteSheet: s => { sheets.splice(sheets.indexOf(s), 1); },
+    // A copy keeps each tab's cells as they were at that moment.
+    copy: n => { const c = { name: n, sheets: sheets.map(s => ({ name: s.name, cells: { ...s.cells } })) }; copies.push(c); return c; },
   };
   sheets.push(new Sheet('Sheet1', ss));
   let locked = false;
   const sandbox = {
-    sheets, props, logs: [],
+    sheets, props, copies, logs: [],
     ss,
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' },
       newDataValidation: () => { const b = { list: null, strict: false, requireValueInList(l) { this.list = l; return this; }, setAllowInvalid(a) { this.strict = !a; return this; }, build() { return { list: this.list, strict: this.strict }; } }; return b; } },
@@ -67,11 +69,10 @@ function makeSandbox() {
   };
   return sandbox;
 }
-// file: another version of the script (a test runs the 2.0.0 copy to make a sheet as that release left it).
-function load(file) {
+function load() {
   const sb = makeSandbox();
   vm.createContext(sb);
-  vm.runInContext(fs.readFileSync(file || path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), sb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8'), sb);
   vm.runInContext('setup()', sb);
   return sb;
 }
@@ -79,14 +80,12 @@ module.exports = { load };
 
 if (require.main === module) {
   const port = +process.argv[2] || 8766;
-  // MOCK_CODE=test/Code-2.0.0.gs serves the older backend, to check that the app still works against it.
-  const file = process.env.MOCK_CODE && path.resolve(process.env.MOCK_CODE);
-  let sb = load(file);
+  let sb = load();
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
   http.createServer((req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
     if (req.url.startsWith('/_key')) { res.writeHead(200, cors); return res.end(sb.props.KEY); }
-    if (req.url.startsWith('/_reset')) { sb = load(file); res.writeHead(200, cors); return res.end(sb.props.KEY); }
+    if (req.url.startsWith('/_reset')) { sb = load(); res.writeHead(200, cors); return res.end(sb.props.KEY); }
     if (req.url.startsWith('/_dump')) {
       const dump = {}; sb.sheets.forEach(s => { const rows = []; for (let r = 1; r <= s.getLastRow(); r++) { const row = []; for (let c = 1; c <= 20; c++) row.push(s.cell(r, c) === undefined ? '' : s.cell(r, c)); rows.push(row); } dump[s.name] = { rows, formulas: s.formulas }; });
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); return res.end(JSON.stringify(dump));
