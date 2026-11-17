@@ -27,15 +27,17 @@ assert.match(byId.iT0003.error, /already exists/); assert.match(byId.dupsku.erro
 assert.equal(r.sync.items.length, 2); assert.equal(r.sync.moves.length, 2); assert.equal(r.sync.rows, 2); assert.equal(r.sync.reset, true);
 
 // 2. idempotent retry (lost response)
-r = call('add', { have: { rows: 2, lastId: 'm2' }, entries: [item('T0001', 'Hot Wheels Mix'), move('m1', 'T0001', 'In', 10, 'Opening'), move('m2', 'T0001', 'Out', 3, 'Sale')] }).data;
+r = call('add', { have: { rows: 2, lastId: 'm2', moveRev: 0 }, entries: [item('T0001', 'Hot Wheels Mix'), move('m1', 'T0001', 'In', 10, 'Opening'), move('m2', 'T0001', 'Out', 3, 'Sale')] }).data;
 assert.ok(r.results.every(x => x.ok)); assert.equal(r.sync.rows, 2); assert.equal(r.sync.moves.length, 0); assert.equal(r.sync.reset, false);
 
 // 3. incremental sync and reset detection
-r = call('add', { have: { rows: 2, lastId: 'm2' }, entries: [move('m7', 'T0002', 'In', 5, 'Restock', { note: '=SUM(1)' })] }).data;
+r = call('add', { have: { rows: 2, lastId: 'm2', moveRev: 0 }, entries: [move('m7', 'T0002', 'In', 5, 'Restock', { note: '=SUM(1)' })] }).data;
 assert.equal(r.sync.moves.length, 1); assert.equal(r.sync.moves[0].id, 'm7'); assert.equal(r.sync.moves[0].note, '=SUM(1)');
-assert.equal(call('sync', { have: { rows: 3, lastId: 'WRONG' } }).data.reset, true);
-assert.equal(call('sync', { have: { rows: 3, lastId: 'm7' } }).data.moves.length, 0);
-assert.equal(call('sync', { have: { rows: 99, lastId: 'm7' } }).data.reset, true);
+assert.equal(call('sync', { have: { rows: 3, lastId: 'WRONG', moveRev: 0 } }).data.reset, true);
+assert.equal(call('sync', { have: { rows: 3, lastId: 'm7', moveRev: 0 } }).data.moves.length, 0);
+assert.equal(call('sync', { have: { rows: 99, lastId: 'm7', moveRev: 0 } }).data.reset, true);
+assert.equal(call('sync', { have: { rows: 3, lastId: 'm7' } }).data.moveRev, 0, 'every snapshot carries moveRev');
+assert.deepEqual([call('sync', { have: { rows: 3, lastId: 'm7' } }).data.reset, call('sync', { have: { rows: 3, lastId: 'm7', moveRev: 7 } }).data.moves.length], [true, 3], 'a missing or different moveRev sends every movement');
 
 // 4. edits: name, price, archive, and name clash
 r = call('add', { have: { rows: 3, lastId: 'm7' }, entries: [
@@ -80,7 +82,7 @@ assert.equal(r.sync.rows, before.rows, 'no duplicate movement'); assert.equal(r.
 
 // ---------- v2: toy details, receipt cost, customers, supplier orders, pre-orders, invoices, returns ----------
 const sheet = n => sb.sheets.find(s => s.name === n);
-const add = entries => { const s = call('sync', { have: { rows: 0 } }).data; return call('add', { have: { rows: s.rows, lastId: s.lastId }, entries }).data; };
+const add = entries => { const s = call('sync', { have: { rows: 0 } }).data; return call('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
 const res = d => Object.fromEntries(d.results.map(x => [x.id, x]));
 const full = () => call('sync', { have: { rows: 0 } }).data;
 ['Customers', 'Supplier orders', 'Pre-orders', 'Invoices', 'Invoice lines', 'Returns'].forEach(n => assert.ok(sheet(n), n + ' tab exists'));
@@ -262,7 +264,7 @@ function bench() {
   const b = load(), k = b.props.KEY;
   const c = (action, extra = {}) => { b.__e = { postData: { contents: JSON.stringify({ key: k, action, ...extra }) } }; return JSON.parse(vm.runInContext('doPost(__e)', b).text); };
   const fullB = () => c('sync', { have: { rows: 0 } }).data;
-  const addB = entries => { const s = fullB(); return c('add', { have: { rows: s.rows, lastId: s.lastId }, entries }).data; };
+  const addB = entries => { const s = fullB(); return c('add', { have: { rows: s.rows, lastId: s.lastId, moveRev: s.moveRev }, entries }).data; };
   return { b, c, full: fullB, add: addB, sheet: n => b.sheets.find(x => x.name === n) };
 }
 const edit = (id, sku, patch) => ({ id, kind: 'edit', sku, patch });
@@ -462,4 +464,56 @@ r = U.add([{ id: 'ut', kind: 'ret', ret: { id: 'urt', date: '2026-11-17', invId:
 assert.ok(r.results[0].ok);
 assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'urt').map(x => x.slice(0, 10)), [1, 2].map(k => ['ret-urt-' + k, '2026-11-17', 'U3', 'Unit Three', 'In', 1, 'Return', 'urt', 'Invoice 3', 80]));
 assert.deepEqual(brU('U3'), [3, 0, 0, 3, '95, 80, 80', 255, 0]);
+
+// (m) a cost changed on a unit on hand: column J only, Browse, moveRev raised, and a second device gets every movement again
+const costE = (id, moveId, cost) => ({ id, kind: 'cost', moveId, cost });
+const mvRow = (b, id) => b.sheet('Movements').rowsOf().find(x => x[0] === id);
+const s0 = U.full(), rowBefore = mvRow(U, 'rcv-uo1-4');
+r = U.c('add', { have: { rows: s0.rows, lastId: s0.lastId, moveRev: s0.moveRev }, entries: [costE('cc1', 'rcv-uo1-4', 450)] }).data;
+assert.ok(r.results[0].ok);
+assert.deepEqual(mvRow(U, 'rcv-uo1-4'), rowBefore.slice(0, 9).concat(450, rowBefore.slice(10)), 'only Unit cost changed');
+assert.deepEqual(brU('U1'), [2, 0, 0, 2, '300, 450', 750, 0]);
+assert.equal(r.sync.moveRev, s0.moveRev + 1, 'a cost write raises moveRev');
+assert.deepEqual([r.sync.reset, r.sync.moves.length, r.sync.moves.find(m => m.id === 'rcv-uo1-4').cost], [true, s0.rows, 450], 'the reply carries every movement');
+let s1 = U.c('sync', { have: { rows: s0.rows, lastId: s0.lastId, moveRev: s0.moveRev } }).data;
+assert.deepEqual([s1.reset, s1.moves.length, s1.moves.find(m => m.id === 'rcv-uo1-4').cost], [true, s0.rows, 450], 'a device holding the old moveRev gets everything');
+s1 = U.c('sync', { have: { rows: s1.rows, lastId: s1.lastId, moveRev: s1.moveRev } }).data;
+assert.deepEqual([s1.reset, s1.moves.length], [false, 0], 'and then syncs incrementally again');
+r = U.add([costE('cc1', 'rcv-uo1-4', 450), costE('cc2', 'rcv-uo1-3', null)]);
+assert.ok(r.results.every(x => x.ok)); assert.equal(r.sync.moveRev, s0.moveRev + 2, 'a retry writes nothing; clearing a cost is a write');
+assert.equal(mvRow(U, 'rcv-uo1-3')[9], ''); assert.deepEqual(brU('U1'), [2, 0, 0, 2, '?, 450', 450, 1]);
+
+// (n) refused: a unit that left stock (also earlier in the same request), an Out, an unknown ID, a bad value; nothing changes
+const LEFT = 'That unit has already left stock, so its cost can no longer be changed.';
+const tabsN = () => ['Movements', 'Invoice lines', 'Invoices'].map(n => U.sheet(n).rowsOf());
+let beforeN = tabsN(), revN = U.full().moveRev;
+r = U.add([costE('cn1', 'rcv-uo1-1', 999), costE('cn2', 'us1-1', 1), costE('cn3', 'nope', 1), costE('cn4', 'rcv-uo1-4', -1), costE('cn5', 'n2', 1), costE('cn6', 'rcv-uo1-1', 100)]);
+let zn = res(r);
+assert.deepEqual([zn.cn1.error, zn.cn2.error, zn.cn3.error, zn.cn5.error], [LEFT, LEFT, 'Unknown movement', LEFT], 'sold, an Out, unknown, a unit that only covered a deficit');
+assert.match(zn.cn4.error, /Unit cost/); assert.ok(zn.cn6.ok, 'the value it already has is not refused, so a retry after the sale succeeds');
+assert.deepEqual(tabsN(), beforeN, 'no movement and no invoice changed'); assert.equal(r.sync.moveRev, revN);
+r = U.add([saleU('us4', 4, [{ sku: 'U1', qty: 1, price: 500, cost: null }]), costE('cn7', 'rcv-uo1-3', 310), costE('cn8', 'n4', 75)]);
+zn = res(r);
+assert.ok(zn.vus4.ok && zn.cn8.ok); assert.equal(zn.cn7.error, LEFT, 'the sale earlier in the request took that unit');
+assert.deepEqual([mvRow(U, 'rcv-uo1-3')[9], brU('U1')[4], brU('U2')[4]], ['', '450', '75']);
+
+// (o) the Movements key check: a sorted tab still gets the cost on the right row; a duplicated or deleted row refuses the entry
+const K = bench();
+K.add([item('K1', 'Key One'), move('k1', 'K1', 'In', 1, 'Opening', { cost: 1 }), move('k2', 'K1', 'In', 1, 'Opening', { cost: 2 }), move('k3', 'K1', 'In', 1, 'Opening', { cost: 3 })]);
+const jK = () => Object.fromEntries(K.sheet('Movements').rowsOf().map(x => [x[0], x[9]]));
+K.sheet('Movements').putRows(K.sheet('Movements').rowsOf().reverse());
+r = K.add([costE('ko1', 'k2', 20)]);
+assert.ok(r.results[0].ok); assert.deepEqual(jK(), { k1: 1, k2: 20, k3: 3 });
+const mk = K.sheet('Movements').rowsOf();
+K.sheet('Movements').putRows(mk.concat([mk.find(x => x[0] === 'k1')]));
+let revK = K.full().moveRev;
+r = K.add([costE('ko2', 'k1', 10), costE('ko3', 'k3', 30)]);
+assert.equal(res(r).ko2.error, MSG('Movements', 'k1', 'appears twice')); assert.ok(res(r).ko3.ok);
+assert.ok(K.sheet('Movements').rowsOf().filter(x => x[0] === 'k1').every(x => x[9] === 1), 'neither copy written'); assert.equal(r.sync.moveRev, revK + 1);
+K.sheet('Movements').putRows(mk);
+fired = 0; K.b.ss.onSetValues = sh => { if (sh.name === 'Movements' && !fired++) sh.putRows(sh.rowsOf().filter(x => x[0] !== 'k1')); };
+r = K.add([costE('ko4', 'k3', 33), costE('ko5', 'k1', 11)]);
+K.b.ss.onSetValues = null;
+assert.ok(fired && res(r).ko4.ok); assert.equal(res(r).ko5.error, MSG('Movements', 'k1', 'not found'));
+assert.deepEqual(jK(), { k2: 20, k3: 33 }, 'the refused cost was written nowhere');
 console.log('backend tests passed');

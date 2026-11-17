@@ -209,7 +209,10 @@ function readMoves_() {
   var sh = movesSheet_(), last = lastRowOf_(sh);
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, MOVE_HEAD_.length).getValues(), out = [];
-  for (var i = 0; i < vals.length; i++) if (String(vals[i][0]).trim()) out.push(moveOf_(vals[i]));
+  for (var i = 0; i < vals.length; i++) {
+    if (!String(vals[i][0]).trim()) continue;
+    var m = moveOf_(vals[i]); m._row = i + 2; out.push(m);
+  }
   return out;
 }
 /**
@@ -298,18 +301,22 @@ function readTab_(k) {
 
 // ---------- reading ----------
 
+// moveRev is raised whenever movement rows change other than by appending (a cost entry, wipeAllData()), so the next sync sends them all.
+function moveRev_() { return Number(PropertiesService.getScriptProperties().getProperty('moveRev')) || 0; }
+function raiseRev_() { PropertiesService.getScriptProperties().setProperty('moveRev', String(moveRev_() + 1)); }
+
 /**
  * Returns every item and document plus the movement rows the app does not have yet.
- * have = { rows, lastId } describes the movement rows the app already holds. If the sheet still has
- * that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
+ * have = { rows, lastId, moveRev } describes the movement rows the app already holds. If moveRev is the script's and the sheet
+ * still has that last row in the same place, only later rows are sent; otherwise everything is sent with reset = true.
  * Customers, supplier orders, pre-orders, invoices (with their lines), returns and waiting Inbox rows are always sent whole.
  * warnings lists problems found in the tabs, one plain sentence each; older apps ignore it.
  */
 function snapshot_(have) {
-  var sh = movesSheet_();
+  var sh = movesSheet_(), rev = moveRev_();
   var rows = lastRowOf_(sh) - 1;
   var from = 0, reset = true;
-  if (have && have.rows > 0 && have.rows <= rows && have.lastId) {
+  if (have && have.moveRev === rev && have.rows > 0 && have.rows <= rows && have.lastId) {
     if (String(sh.getRange(have.rows + 1, 1).getValue()) === String(have.lastId)) { from = have.rows; reset = false; }
   }
   var moves = [];
@@ -321,7 +328,7 @@ function snapshot_(have) {
   var invs = readTab_('inv'), byInv = {}, warnings = [];
   invs.forEach(function (x) { x.lines = []; byInv[x.id] = x; });
   readTab_('line').forEach(function (l) { if (byInv[l.invId]) byInv[l.invId].lines.push({ sku: l.sku, name: l.name, qty: l.qty, list: l.list, price: l.price, cost: l.cost }); });
-  return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, syncedAt: new Date().toISOString(),
+  return { items: readItems_(warnings), moves: moves, rows: rows, lastId: lastId, reset: reset, moveRev: rev, syncedAt: new Date().toISOString(),
     custs: readTab_('cust'), orders: readTab_('order'), pres: readTab_('pre'), invs: invs, rets: readTab_('ret'), inbox: readInbox_(), warnings: warnings };
 }
 
@@ -419,6 +426,7 @@ function index_(list, key) { var m = {}; list.forEach(function (o) { if (!m.hasO
  * ship        invId, ship ('Delivered' or '')                          delivered mark on a sale invoice
  * ret         ret { id, date, invId, sku, qty, outcome, refund, note } return against an invoice + movements per RETURN_STOCK_: for Restock one
  *                                                                      In/Return per unit, ret-<id>-1 ..., at the cost of the invoice line
+ * cost        moveId, cost (a number, or null to clear it)             Unit cost (column J) of an In movement with a unit still on hand; raises moveRev
  * inboxDone   rows [{ row, name, added?, type?, qty? }], mark          Inbox rows handled ('Done' or 'Dismissed')
  *
  * Two phones can each invent the same next SKU while offline. An item sent with auto: true that meets a
@@ -477,10 +485,12 @@ function keyRows_(sh, col, lower) {
   });
   return map;
 }
-// The tabs whose rows change in place: [sheet name, key column, key of a record, records, record -> row, width].
+// The tabs whose rows change in place: [sheet name, key column, key of a record, records, record -> row, width, first column (default 1)].
+// On Movements only the Unit cost (column J) is ever written in place, by a cost entry.
 function tabsOf_(p) {
   var out = [['Items', 1, itemKey_, p.items, function (it) { return itemRow_(it, p.stock[it.sku.toLowerCase()]); }, ITEM_HEAD_.length]];
   ['cust', 'order', 'pre', 'inv'].forEach(function (k) { out.push([T_[k].name, T_[k].col, idKey_, p.tabs[k], T_[k].to, T_[k].head.length]); });
+  out.push(['Movements', 1, idKey_, p.moves, function (m) { return [blank_(m.cost)]; }, 1, 10]);
   return out;
 }
 /** Plan-time check: { entryId: message } for each entry that touched a row whose key is now missing or repeated. */
@@ -501,8 +511,8 @@ function check_(p) {
 /**
  * Writes a plan. Rows changed in place go first, each one to the row that holds its key at that moment
  * (the key cell is read again just before the write, and the column again if it moved), as one row in one call.
- * New rows follow, after the last used row of the key column, without those of entries refused on the way.
- * Then On hand, then the Inbox marks.
+ * A cost written on Movements raises moveRev. New rows follow, after the last used row of the key column, without those of
+ * entries refused on the way. Then On hand, then the Inbox marks.
  */
 function write_(p, skip) {
   var changed = false;
@@ -516,8 +526,9 @@ function write_(p, skip) {
       var rows = map[key] || [], at = rows.length === 1 ? rows[0] : 0, cell = at ? s_(sh.getRange(at, t[1]).getValue()) : '';
       if (!at || (lower ? cell.toLowerCase() : cell) !== key) { map = keyRows_(sh, t[1], lower); rows = map[key] || []; at = rows.length === 1 ? rows[0] : 0; }
       if (!at) { o._by.forEach(function (id) { skip[id] = skip[id] || moved_(t[0], shown, rows.length); }); return; }
-      sh.getRange(at, 1, 1, width).setValues([t[4](o)]);
+      sh.getRange(at, t[6] || 1, 1, width).setValues([t[4](o)]);
       if (lower) changed = true;
+      if (t[0] === 'Movements') raiseRev_();
     });
   });
   var keep = function (o) { return !skip[o._by[0]]; };
@@ -811,6 +822,16 @@ function plan_(entries, skip) {
           if (RETURN_STOCK_[outcome] === 'In') for (var k = 1; k <= rqty; k++) pushMove_('ret-' + retId + '-' + k, rdate, rit, 'In', 1, 'Return', retId, 'Invoice ' + ri.no, rcost);
         }
 
+      } else if (e.kind === 'cost') {
+        // Only while a unit of that In is on hand, after every movement so far including this request's. The same value again
+        // changes nothing and is not refused, so a retry after a lost response still succeeds once the unit has been sold.
+        var mid = s_(e.moveId), mc = moneyOrNull_(e.cost, 'Unit cost'), now = moveList.concat(newMoves.map(function (x) { return moveOf_(x.v); }));
+        var tm = now.filter(function (x) { return x.id === mid; })[0], nm = newMoves.filter(function (x) { return x.v[0] === mid; })[0];
+        if (!tm) throw new Error('Unknown movement');
+        var left = tm.dir === 'In' && (stockOf_(now).units[tm.sku.toLowerCase()] || []).some(function (u) { return u.id === mid; });
+        if (tm.dir !== 'In' || (!left && tm.cost !== mc)) throw new Error('That unit has already left stock, so its cost can no longer be changed.');
+        if (tm.cost !== mc) { if (nm) nm.v[9] = blank_(mc); else { tm.cost = mc; touch_(tm); } }
+
       } else if (e.kind === 'inboxDone') {
         // Marked after the other writes, by markInbox_; a row that cannot be found is left waiting.
         var mark = e.mark === 'Dismissed' ? 'Dismissed' : 'Done';
@@ -827,6 +848,6 @@ function plan_(entries, skip) {
   });
 
   var stock = stockOf_(moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); }))).stock;
-  return { results: results, items: items, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
+  return { results: results, items: items, moves: moveList, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
     tabs: { cust: custs, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
 }
