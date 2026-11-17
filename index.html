@@ -161,9 +161,10 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 @media(min-width:900px){
   .app{max-width:none;margin:0 0 0 228px}
   header.top{padding:18px 24px 10px 32px}
-  main{padding:6px 32px 48px;max-width:1160px}
-  main.v-stock{max-width:1000px}
-  main.v-import,main.v-activity,main.v-move{max-width:760px}
+  main{padding:6px 32px 48px;max-width:1600px}
+  main.v-stock{max-width:none}
+  main.v-home{max-width:1160px}
+  main.v-move{max-width:760px}
   nav.tabs{top:0;right:auto;width:228px;flex-direction:column;justify-content:flex-start;border-top:0;border-right:1px solid var(--line);padding:18px 12px}
   nav.tabs .in{flex-direction:column;gap:2px;max-width:none}
   nav.tabs .brand{display:block;font:400 28px/1 var(--display);letter-spacing:.02em;padding:6px 14px 22px}
@@ -171,12 +172,31 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   nav.tabs button.on{font-weight:600}
   .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
   .cols.sell{grid-template-columns:minmax(0,460px) minmax(0,1fr)}
+  /* Tables: hairline rows like the lists; the header stays in view, and a wide table scrolls sideways inside its own box. */
+  .tbl{overflow:auto;max-height:calc(100dvh - 92px);border:1px solid var(--line)}
+  .sec>.tbl{border:0;margin-top:10px}
+  .tbl table{width:100%;border-collapse:separate;border-spacing:0}
+  .tbl thead{position:sticky;top:0;z-index:1}
+  .tbl th,.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+  .tbl th{background:var(--bg);font-size:13px;font-weight:500;color:var(--muted)}
+  .tbl th[aria-sort]{color:var(--text)}
+  .tbl th button{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0;border:0;background:none;color:inherit;font:inherit}
+  .tbl th svg.up{transform:rotate(180deg)}
+  .tbl .n{text-align:right;font-variant-numeric:tabular-nums}
+  .tbl .w{white-space:normal;min-width:14em}
+  .tbl tbody tr:last-child td{border-bottom:0}
+  .tbl tr[data-act]{cursor:pointer}
+  .tbl tr:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+  .tbl .out{color:var(--attn)}.tbl .neg{color:var(--danger)}
+  .tbl .filt th{padding:0 6px 8px}
+  .tbl .filt select,.tbl .filt input{min-height:40px;padding:0 8px}
+  .tbl .rng{display:flex;gap:6px}.tbl .rng input{width:6.5em}
   .layer{align-items:center}
   .sheet{max-width:560px;max-height:88dvh;border-bottom:1px solid var(--line);padding:20px 24px 24px}
   .toast{left:calc(50% + 114px);bottom:28px}
   .applybar{bottom:0}
 }
-@media(hover:hover){button.item:hover .name,.sug button:not([disabled]):hover b,nav.tabs button:hover{text-decoration:underline;text-underline-offset:4px}.icon:hover,.sync:hover{color:var(--text)}}
+@media(hover:hover){button.item:hover .name,.sug button:not([disabled]):hover b,nav.tabs button:hover{text-decoration:underline;text-underline-offset:4px}.icon:hover,.sync:hover{color:var(--text)}.tbl tr[data-act]:hover td{background:var(--field)}}
 </style>
 </head>
 <body>
@@ -286,7 +306,7 @@ prefs.shop = Object.assign({ name: '', contact: '', foot: '', logo: '' }, prefs.
 // paid: '' means paid in full (pre-order mode); force: 'sale' sells a line that is short instead of saving a pre-order.
 const newInv = () => ({ cust: '', contact: '', date: todayISO(), lines: [{ sku: '', qty: 1, price: '' }], preId: '', paid: '', note: '', force: '' });
 let ui = { q: '', cat: 'All', filter: 'all', aq: '', aSku: '', aN: 150, mv: null, mode: 'count', text: '', imp: null, rdate: todayISO(), err: '', busy: false,
-  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null };
+  sellSeg: 'list', ordSeg: 'pre', iq: '', inv: newInv(), f: null, sub: null, sheetFn: null, img: null, manual: null, homeMore: false, from: 'home', warn: [], impResult: null, sort: {}, tf: {} };
 let _live = null;
 const dirty = () => { _live = null; };
 const saveQueue = () => store.set('queue', queue);
@@ -599,7 +619,7 @@ function render() {
   const lit = w ? prefs.tab : ROUTE_TAB[prefs.tab] || prefs.tab;
   const tabs = w ? [...TABS, ['import', 'Update stock' + (waiting ? ' · ' + waiting : '')], ['activity', 'Activity']] : TABS;
   $('#tabs').innerHTML = (w ? `<div class="brand">${esc(APP_NAME)}</div>` : '') + tabs.map(([k, n]) => `<button data-act="tab" data-t="${k}" class="${lit === k ? 'on' : ''}" ${lit === k ? 'aria-current="page"' : ''}>${icon(k, 20)}${esc(n)}</button>`).join('');
-  ({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]();
+  keepScroll(({ home: renderHome, stock: renderStock, sell: renderSell, orders: renderOrders, move: renderMove, activity: renderActivity, import: renderImport })[prefs.tab]);
   if (ui.sheetFn && !$('#layer').hidden) ui.sheetFn();
   renderSync();
 }
@@ -610,6 +630,21 @@ mqWide.addEventListener('change', () => render());
 const row = (title, sub, attrs, right) => `<button class="item" ${attrs}><div class="main"><div class="name">${title}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${right == null ? CHEV : right}</button>`;
 const sec = (title, inner, extra, cls) => `<section class="sec ${cls || ''}"><h2>${title}${extra || ''}</h2>${inner}</section>`;
 const summary = text => `<summary><span>${text}</span>${DOWN}</summary>`;
+/**
+ * A desktop table. cols are [header, sort value, cell html (default: the value as text), class ('n' numbers, 'w' wraps)];
+ * a column with no sort value does not sort. A header click sorts by it and a second click reverses, kept in ui.sort[id]:
+ * text ignores case, numbers sort as numbers, ISO dates as text (2024, then 2024-07, then 2024-07-15), blanks last either way.
+ * attrs(row) gives a row its data-act, so a click opens its sheet; head adds rows under the header; max caps the rows shown.
+ */
+function table(id, cols, rows, attrs, head, max) {
+  const s = ui.sort[id], blank = v => v == null || v === '';
+  if (s) { const v = cols[s.k][1]; rows = rows.map(r => [v(r), r]).sort(([a], [b]) => blank(a) || blank(b) ? blank(a) - blank(b) : s.d * (typeof a === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))).map(x => x[1]); }
+  return `<div class="tbl" data-tbl="${id}"><table><thead><tr>${cols.map(([h, v, , c], k) => `<th class="${c || ''}" ${s && s.k === k ? `aria-sort="${s.d > 0 ? 'ascending' : 'descending'}"` : ''}>${v ? `<button data-act="sort" data-t="${id}" data-k="${k}">${h}${s && s.k === k ? icon('chev', 14, s.d > 0 ? 'up' : '') : ''}</button>` : h}</th>`).join('')}</tr>${head || ''}</thead>
+    <tbody>${rows.length ? rows.slice(0, max || rows.length).map(r => { const a = attrs(r); return `<tr ${a ? 'tabindex="0" ' + a : ''}>${cols.map(([, v, html, c]) => `<td class="${c || ''}">${html ? html(r) : esc(v(r))}</td>`).join('')}</tr>`; }).join('') : `<tr><td class="empty" colspan="${cols.length}">Nothing matches.</td></tr>`}</tbody></table></div>`;
+}
+/** Rebuilds part of the page while every table keeps its scroll position (a sort, a filter or a sync must not jump it back). */
+function keepScroll(fn) { const at = [...document.querySelectorAll('[data-tbl]')].map(e => [e.dataset.tbl, e.scrollLeft, e.scrollTop]); fn(); at.forEach(([id, l, t]) => { const e = $(`[data-tbl="${id}"]`); if (e) { e.scrollLeft = l; e.scrollTop = t; } }); }
+const relCell = x => esc(x.rel) + (x.rel && x.relCheck ? '<span class="tag warn">to verify</span>' : '');
 
 /* Home: the month's numbers, the two ways in, then one list of what needs doing */
 const STOCK_FILTERS = { short: 'Promised beyond supply', noprice: 'No price yet', nocost: 'No cost yet', verify: 'Release date to verify' };
@@ -670,14 +705,15 @@ function renderStock() {
     <div><label for="q">Search</label><div style="display:flex;gap:12px;align-items:flex-start"><input id="q" type="search" placeholder="Name, brand, character or SKU" value="${esc(ui.q)}" autocomplete="off"><button class="btn sm" data-act="newItem">Add item</button></div></div>
     <div class="stack">
     <div class="seg">${[['all', 'All'], ['out', 'Out'], ['arch', 'Archived']].map(([k, n]) => `<button class="${ui.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${n}</button>`).join('')}</div>
-    ${L.cats.length > 1 ? `<div class="seg" aria-label="Category">${['All', ...L.cats].map(c => `<button class="${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${c === 'All' ? 'Every category' : esc(c)}</button>`).join('')}</div>` : ''}
+    ${L.cats.length > 1 && !wide() ? `<div class="seg" aria-label="Category">${['All', ...L.cats].map(c => `<button class="${ui.cat === c ? 'on' : ''}" data-act="cat" data-c="${esc(c)}">${c === 'All' ? 'Every category' : esc(c)}</button>`).join('')}</div>` : ''}
     <div class="links"><p class="hint" style="flex:1">${STOCK_FILTERS[ui.filter] ? 'Showing only: ' + STOCK_FILTERS[ui.filter] : `${plural(act.length, 'item')} · ${plural(units, 'unit')}${value ? ' · ' + money(Math.round(value)) + ' at retail' : ''}`}</p>${STOCK_FILTERS[ui.filter] ? '<button class="tbtn" data-act="filter" data-f="all">Show all</button>' : ''}<button class="tbtn" data-act="tab" data-t="activity">Activity</button></div>
     <div id="stockList"></div></div>`;
   renderStockList();
 }
 function renderStockList() {
-  const L = live(), q = norm(ui.q);
+  const L = live(), q = norm(ui.q), w = wide();
   let rows = L.list.filter(i => ui.filter === 'arch' ? !i.active : i.active);
+  const scope = rows;
   if (ui.cat !== 'All') rows = rows.filter(i => catOf(i) === ui.cat);
   if (q) rows = rows.filter(i => norm([i.name, i.sku, catOf(i), i.mfr, i.brand, i.line, i.chr].join(' ')).includes(q));
   if (ui.filter === 'out') rows = rows.filter(i => ['out', 'neg'].includes(status(i)));
@@ -686,11 +722,29 @@ function renderStockList() {
   if (ui.filter === 'nocost') rows = rows.filter(i => stockCost(i.sku).none > 0);
   if (ui.filter === 'verify') rows = rows.filter(i => i.relCheck);
   const box = $('#stockList'); if (!box) return;
+  // The table keeps its filter row when nothing matches, so a filter can be undone.
+  if (w) { const f = parseRel(ui.tf.from), t = parseRel(ui.tf.to); rows = rows.filter(i => ['mfr', 'brand', 'line', 'chr'].every(k => !ui.tf[k] || i[k] === ui.tf[k]) && (!f || i.rel >= f) && (!t || (i.rel && i.rel.slice(0, t.length) <= t))); }
+  if (w) return keepScroll(() => { box.innerHTML = stockTable(rows, scope) + (rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''); });
   if (!rows.length) { box.innerHTML = `<p class="empty">Nothing matches.</p>`; return; }
   box.innerHTML = `<div class="list">${rows.slice(0, 400).map(i => {
     const s = status(i), n = nums(i.sku);
     return row(esc(i.name), `${esc(catOf(i))} · ${i.price != null ? money(i.price) : 'no price yet'}${n.inc ? ' · ' + n.inc + ' arriving' : ''}${n.owed ? ' · ' + n.owed + ' owed' : ''}`, `data-act="item" data-sku="${esc(i.sku)}"`, `<span class="qty ${s}">${n.have}</span>`);
   }).join('')}</div>${rows.length > 400 ? `<p class="hint">Showing the first 400. Search to narrow down.</p>` : ''}`;
+}
+/** Stock on desktop: every field of an item, sortable, for reading only. The filter row offers the values in use in scope (All or Archived). */
+function stockTable(list, scope) {
+  const rows = list.map(i => ({ i, n: nums(i.sku), u: onHand(i.sku).units })), cost = r => r.u.map(x => x.cost).filter(x => x != null);
+  const pick = (k, get, label) => { const v = k === 'cat' ? (ui.cat === 'All' ? '' : ui.cat) : ui.tf[k] || '';
+    return `<th><select data-tf="${k}" aria-label="${label}"><option value="">Any</option>${[...new Set(scope.map(get).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></th>`; };
+  const rel = (k, ph) => `<input data-tf="${k}" value="${esc(ui.tf[k] || '')}" placeholder="${ph}" aria-label="Release date ${ph.toLowerCase()}" autocomplete="off">`;
+  const filt = `<tr class="filt"><th></th><th></th>${pick('cat', catOf, 'Category')}${[['mfr', 'Manufacturer'], ['brand', 'Brand'], ['line', 'Product line'], ['chr', 'Character']].map(([k, l]) => pick(k, i => i[k], l)).join('')}<th><div class="rng">${rel('from', 'From')}${rel('to', 'To')}</div></th>${'<th></th>'.repeat(7)}</tr>`;
+  return table('stock', [['Name', r => r.i.name, null, 'w'], ['SKU', r => r.i.sku], ['Category', r => catOf(r.i)], ['Manufacturer', r => r.i.mfr], ['Brand', r => r.i.brand], ['Product line', r => r.i.line], ['Character', r => r.i.chr],
+    ['Release date', r => r.i.rel, r => relCell(r.i)], ['Price', r => r.i.price, r => r.i.price == null ? '–' : money(r.i.price), 'n'],
+    ['On hand', r => r.n.have, r => `<span class="${status(r.i)}">${r.n.have}</span>`, 'n'], ['Incoming', r => r.n.inc, null, 'n'], ['Owed', r => r.n.owed, null, 'n'],
+    [`<span title="${esc(LTP_TEXT)}">Left to promise</span>`, r => r.n.ltp, r => `<span class="${r.n.ltp < 0 ? 'neg' : ''}">${r.n.ltp}</span>`, 'n'],
+    ['Unit cost', r => cost(r).length ? Math.min(...cost(r)) : null, r => cost(r).length ? esc(prefs.cur + costsText(cost(r))) : '–', 'n'],
+    ['Stock cost', r => cost(r).length ? stockCost(r.i.sku).value : null, r => cost(r).length ? money(stockCost(r.i.sku).value) : '–', 'n']],
+    rows, r => `data-act="item" data-sku="${esc(r.i.sku)}"`, filt, 400);
 }
 function openItem(sku) {
   const L = live(), i = L.map.get(sku); if (!i) return;
@@ -1702,6 +1756,7 @@ document.addEventListener('click', async ev => {
     case 'sync': syncNow(true); break;
     case 'settings': openSettings(); break;
     case 'close': closeSheet(); break;
+    case 'sort': { const s = ui.sort[d.t], k = +d.k; ui.sort[d.t] = { k, d: s && s.k === k ? -s.d : 1 }; render(); break; }
     case 'cat': ui.cat = d.c; renderStock(); break;
     case 'filter': ui.filter = d.f; renderStock(); break;
     case 'newItem': openItemEditor(null); break;
@@ -1757,7 +1812,7 @@ document.addEventListener('click', async ev => {
     case 'homeGo': {
       if (d.to === 'sale' || d.to === 'invs') { prefs.tab = 'sell'; ui.sellSeg = d.to === 'sale' ? 'new' : 'list'; }
       else if (d.to === 'pre' || d.to === 'sup') { prefs.tab = 'orders'; ui.ordSeg = d.to; }
-      else { prefs.tab = 'stock'; ui.filter = d.to; ui.cat = 'All'; ui.q = ''; }
+      else { prefs.tab = 'stock'; ui.filter = d.to; ui.cat = 'All'; ui.q = ''; ui.tf = {}; }
       savePrefs(); render(); window.scrollTo(0, 0); break;
     }
     case 'sellNew': ui.sellSeg = 'new'; render(); window.scrollTo(0, 0); break;
@@ -1869,6 +1924,8 @@ document.addEventListener('input', ev => {
     return;
   }
   if (t.dataset.pk) { renderPk(t.dataset.pk, t.value); return; }
+  // The Stock filter row redraws the table under the field being used; Category is the same filter as the phone's tabs.
+  if (t.dataset.tf) { const k = t.dataset.tf; if (k === 'cat') ui.cat = t.value || 'All'; else ui.tf[k] = t.value; renderStockList(); const n = $(`[data-tf="${k}"]`); n.focus(); if (n.tagName === 'INPUT') n.setSelectionRange(n.value.length, n.value.length); return; }
   switch (t.id) {
     case 'q': ui.q = t.value; renderStockList(); break;
     case 'aq': ui.aq = t.value; ui.aN = 150; renderActList(); break;
@@ -1893,7 +1950,7 @@ document.addEventListener('change', ev => {
 // Pasting Claude's block shows the preview at once; the Preview button is for after hand edits.
 document.addEventListener('toggle', ev => { if (ev.target.id === 'manual') ui.manual = ev.target.open; if (ev.target.dataset && ev.target.dataset.grp && ui.imp) ui.imp.open[ev.target.dataset.grp] = ev.target.open; }, true);
 document.addEventListener('paste', ev => { if (ev.target.id === 'impText') setTimeout(() => { ui.text = $('#impText').value; ui.imp = { src: 'paste', mode: ui.mode, rows: IMP[ui.mode].parse(ui.text) }; renderImpOut(); }, 0); });
-document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#layer').hidden) closeSheet(); if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
 window.addEventListener('online', () => scheduleSync());
 
