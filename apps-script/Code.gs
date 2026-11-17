@@ -6,8 +6,10 @@
  * After pasting a newer version, run setup() again and publish a new version of the existing deployment.
  * The app talks to the deployment URL with a shared key; see README.md and ARCHITECTURE.md.
  *
- * The app is the writer of the data tabs. Movements, invoice lines and returns are append-only. Items, customers,
+ * The app is the writer of the data tabs. Movements, invoice lines and returns are append-only, except that a cost entry
+ * rewrites the Unit cost of an In movement while one of its units is on hand. Items, customers,
  * supplier orders, pre-orders and invoices are one row each; only their status-type fields change later.
+ * Units leave stock first in, first out, in the order of the Movements tab; see stockOf_().
  * No write trusts a row number: a changed record is written to the row that holds its key at that moment.
  * Browse is a copy the script rewrites for the owner to sort and filter; Edits takes item changes typed in the sheet.
  */
@@ -28,8 +30,9 @@ var RETURN_STOCK_ = { 'Restock': 'In', 'Write-off': null };
 // Nothing in this tab counts as stock until the app applies it.
 var INBOX_HEAD_ = ['Added', 'Type', 'Name', 'Qty', 'Cost each', 'Manufacturer', 'Brand', 'Toy line', 'Character', 'Release date', 'Verify', 'Note', 'Status'];
 // Browse: one row per item with the computed numbers, rewritten in full at the end of every sync and add.
-var BROWSE_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Stock value at cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
-var BROWSE_TEXT_ = ['A:C', 'F:F', 'M:R'];
+// Unit costs lists the cost of each unit on hand, oldest first, with ? for a unit without one.
+var BROWSE_HEAD_ = ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check'];
+var BROWSE_TEXT_ = ['A:C', 'F:F', 'K:K', 'N:S'];
 // Edits: item changes typed in the sheet, applied as edit entries at the start of every sync and add.
 var EDIT_HEAD_ = ['SKU', 'Field', 'New value', 'Status', 'Note'];
 var EDIT_FIELDS_ = { 'Name': 'name', 'Category': 'cat', 'Price': 'price', 'Reorder at': 'min', 'Active': 'active', 'Manufacturer': 'mfr', 'Brand': 'brand',
@@ -88,7 +91,9 @@ function setup() {
     T_[k].text.forEach(function (a1) { sh.getRange(a1).setNumberFormat('@'); });
   });
   ensureSheet_(ss, 'Inbox', INBOX_HEAD_).getRange('A:M').setNumberFormat('@');
-  browseSheet_(ss);
+  // Formatted on every run, so a Browse tab made by an older release gets the text columns where they are now.
+  var br = browseSheet_(ss);
+  BROWSE_TEXT_.forEach(function (a1) { br.getRange(a1).setNumberFormat('@'); });
   var ed = ensureSheet_(ss, 'Edits', EDIT_HEAD_);
   ed.getRange('A:E').setNumberFormat('@');
   ed.getRange(2, 2, ed.getMaxRows() - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(EDIT_FIELDS_), true).setAllowInvalid(false).build());
@@ -199,28 +204,36 @@ function itemRow_(it, have) {
   return [it.sku, it.name, it.cat, it.price == null ? '' : it.price, it.min == null ? '' : it.min, it.active ? 'Yes' : 'No', have || 0,
     it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
 }
+function moveOf_(v) { return { id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) }; }
 function readMoves_() {
   var sh = movesSheet_(), last = lastRowOf_(sh);
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, MOVE_HEAD_.length).getValues(), out = [];
-  for (var i = 0; i < vals.length; i++) {
-    var v = vals[i];
-    if (!String(v[0]).trim()) continue;
-    out.push({ id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) });
-  }
+  for (var i = 0; i < vals.length; i++) if (String(vals[i][0]).trim()) out.push(moveOf_(vals[i]));
   return out;
 }
-/** Stock per lower-case SKU (In minus Out) and the moving average cost, replayed in sheet order the way the app does it. */
+/**
+ * Stock per lower-case SKU, replayed first in, first out in sheet order, the same way as live() in the app; dates are not used.
+ * Each SKU has a queue of units on hand, oldest first ({ id, cost } per unit: an In of Qty 3 is three units at its cost), and a deficit.
+ * An In covers the deficit first and queues the rest. An Out takes units from the front, except that a Correction whose Ref is an In
+ * takes that In's own units first; what the queue cannot give is added to the deficit.
+ * Returns { stock, units }: stock is units on hand minus the deficit (one of the two is always zero).
+ */
 function stockOf_(moves) {
-  var stock = {}, avg = {};
+  var units = {}, owe = {}, stock = {};
   moves.forEach(function (m) {
-    var k = m.sku.toLowerCase(), have = stock[k] || 0;
+    var k = m.sku.toLowerCase(), u = units[k] = units[k] || [], n = m.qty, d = owe[k] || 0;
     if (m.dir === 'In') {
-      if (m.cost != null) avg[k] = have <= 0 || avg[k] == null ? m.cost : (have * avg[k] + m.qty * m.cost) / (have + m.qty);
-      stock[k] = have + m.qty;
-    } else stock[k] = have - m.qty;
+      owe[k] = Math.max(d - n, 0);
+      for (n -= d; n > 0; n--) u.push({ id: m.id, cost: m.cost });
+    } else {
+      for (var i = u.length - 1; m.reason === 'Correction' && i >= 0 && n > 0; i--) if (u[i].id === m.ref) { u.splice(i, 1); n--; }
+      var took = Math.min(n, u.length);
+      u.splice(0, took); owe[k] = d + n - took;
+    }
   });
-  return { stock: stock, avg: avg };
+  Object.keys(units).forEach(function (k) { stock[k] = units[k].length - (owe[k] || 0); });
+  return { stock: stock, units: units };
 }
 /** Writes On hand (column G) for every item in one call, aligned by the SKU in each row now. */
 function writeOnHand_() {
@@ -244,9 +257,11 @@ function writeBrowse_() {
   readTab_('order').forEach(function (o) { if (o.status === 'Ordered') { var k = o.sku.toLowerCase(); inc[k] = (inc[k] || 0) + o.qty; } });
   readTab_('pre').forEach(function (p) { if (p.status === PRE_OPEN_) { var k = p.sku.toLowerCase(); owed[k] = (owed[k] || 0) + p.qty; } });
   var rows = readItems_().map(function (it) {
-    var k = it.sku.toLowerCase(), have = m.stock[k] || 0, a = m.avg[k], i = inc[k] || 0, o = owed[k] || 0;
+    var k = it.sku.toLowerCase(), have = m.stock[k] || 0, u = m.units[k] || [], i = inc[k] || 0, o = owed[k] || 0, val = 0, none = 0;
+    u.forEach(function (x) { if (x.cost == null) none++; else val += x.cost; });
+    // Unit costs, stock value and units without cost are blank when no unit is on hand.
     return [it.sku, it.name, it.cat, blank_(it.price), blank_(it.min), it.active ? 'Yes' : 'No', have, i, o, have + i - o,
-      a == null ? '' : r2_(a), a == null ? '' : r2_(Math.max(have, 0) * a), it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
+      u.map(function (x) { return x.cost == null ? '?' : x.cost; }).join(', '), u.length ? r2_(val) : '', u.length ? none : '', it.mfr, it.brand, it.line, it.chr, it.rel, it.relCheck ? 'Verify' : ''];
   });
   if (sh.getMaxRows() > 1) sh.getRange(2, 1, sh.getMaxRows() - 1, BROWSE_HEAD_.length).clearContent();
   ensureRows_(sh, rows.length + 1);
@@ -300,11 +315,7 @@ function snapshot_(have) {
   var moves = [];
   if (rows > from) {
     var vals = sh.getRange(from + 2, 1, rows - from, MOVE_HEAD_.length).getValues();
-    for (var i = 0; i < vals.length; i++) {
-      var v = vals[i];
-      if (!String(v[0]).trim()) continue;
-      moves.push({ id: s_(v[0]), date: dateStr_(v[1]), sku: s_(v[2]), dir: s_(v[4]), qty: Number(v[5]), reason: s_(v[6]), ref: s_(v[7]), note: String(v[8]), cost: num_(v[9]) });
-    }
+    for (var i = 0; i < vals.length; i++) if (String(vals[i][0]).trim()) moves.push(moveOf_(vals[i]));
   }
   var lastId = rows > 0 ? String(sh.getRange(rows + 1, 1).getValue()) : '';
   var invs = readTab_('inv'), byInv = {}, warnings = [];
@@ -810,7 +821,7 @@ function plan_(entries, skip) {
     }
   });
 
-  var stock = stockOf_(moveList.concat(newMoves.map(function (m) { return { sku: m.v[2], dir: m.v[4], qty: m.v[5], cost: num_(m.v[9]) }; }))).stock;
+  var stock = stockOf_(moveList.concat(newMoves.map(function (m) { return moveOf_(m.v); }))).stock;
   return { results: results, items: items, newItems: newItems, newMoves: newMoves, marks: marks, stock: stock,
     tabs: { cust: custs, order: orders, pre: pres, inv: invs, line: lines, ret: rets } };
 }

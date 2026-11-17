@@ -358,11 +358,13 @@ W.add([{ id: 'f1', kind: 'order', order: { id: 'fo1', date: '2026-11-10', sku: '
 W.add([{ ...preD('f6', 21), pre: { ...preD('f6', 21).pre, sku: 'S5', qty: 2, paid: 0 } }]);
 const br = W.sheet('Browse');
 assert.equal(br.frozen, 1);
-assert.deepEqual(br.getRange(1, 1, 1, 18).getValues()[0], ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Average cost', 'Stock value at cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
+assert.deepEqual(br.getRange(1, 1, 1, 19).getValues()[0], ['SKU', 'Name', 'Category', 'Price', 'Reorder at', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Unit costs', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
 let bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
 assert.equal(Object.keys(bs).length, Object.keys(names()).length, 'one row per item');
-assert.deepEqual(bs.S5.slice(6, 12), [4, 4, 2, 6, 140, 560], 'on hand, incoming, owed, left to promise, average cost (1 uncosted, then 2 at 100 and 2 at 200), stock value');
-assert.deepEqual(bs.S2.slice(0, 6), ['S2', 'Item C renamed', 'Cars', 5, 2, 'Yes']); assert.equal(bs.S2[10], '', 'no cost on file leaves the average blank');
+assert.deepEqual(bs.S5.slice(6, 13), [4, 4, 2, 6, '100, 100, 200, 200', 600, 0], 'on hand, incoming, owed, left to promise, unit costs (the sale took the uncosted unit, the oldest), stock value, units without cost');
+assert.deepEqual(bs.S2.slice(0, 6), ['S2', 'Item C renamed', 'Cars', 5, 2, 'Yes']); assert.deepEqual(bs.S2.slice(10, 13), ['?, ?, ?, ?, ?, ?, ?, ?', 0, 8], 'a unit without a cost shows as ?');
+assert.deepEqual(bs.S9.slice(6, 13), [0, 0, 0, 0, '', '', ''], 'nothing on hand leaves the cost columns blank');
+assert.ok(br.textCols.has(11), 'Unit costs is a text column');
 br.filter = { range: 'A1:R' };
 W.sheet('Items').set(2, 2, 'Typed in the sheet');
 W.full(); bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
@@ -414,4 +416,26 @@ vm.runInContext('setup()', W.b);
 assert.deepEqual(prot(), tabsH.slice(0, 8).map(() => [['Used by the app. Sort and filter in the Browse tab; change fields in the Edits tab.', true]]), 'warning-only protection on the app tabs');
 assert.deepEqual(W.sheet('Inbox').getProtections(), [], 'the Inbox stays open for Claude');
 assert.deepEqual(snap(), beforeH, 'every cell kept');
+
+// ---------- 2.3: units first in, first out, a cost per unit, cost entries, moveRev, wipe ----------
+const U = bench();
+const brU = sku => U.sheet('Browse').rowsOf().find(x => x[0] === sku).slice(6, 13);
+const onHandU = sku => U.sheet('Items').rowsOf().find(x => x[0] === sku)[6];
+r = U.add([item('U1', 'Unit One'), item('U2', 'Unit Two'), item('U3', 'Unit Three'), item('U4', 'Unit Four'), { id: 'uk', kind: 'cust', cust: { id: 'cu', name: 'Cora', contact: '0917' } }]);
+assert.ok(r.results.every(x => x.ok));
+
+// (i) a sale below zero, then receipts: the first unit to arrive covers the deficit, the rest go on hand
+r = U.add([move('n1', 'U2', 'Out', 2, 'Sale'), move('n2', 'U2', 'In', 1, 'Restock', { cost: 50 })]);
+assert.deepEqual([onHandU('U2'), brU('U2')], [-1, [-1, 0, 0, -1, '', '', '']], 'still below zero: no unit on hand');
+r = U.add([move('n3', 'U2', 'In', 1, 'Restock', { cost: 60 }), move('n4', 'U2', 'In', 1, 'Restock', { cost: 70 })]);
+assert.deepEqual([onHandU('U2'), brU('U2')], [1, [1, 0, 0, 1, '70', 70, 0]], 'the deficit took the units at 50 and 60');
+
+// (j) a Correction reversing an In takes that In's unit, not the oldest; once it is gone, a Correction takes the oldest
+r = U.add([move('a1', 'U4', 'In', 1, 'Opening', { cost: 10 }), move('a2', 'U4', 'In', 1, 'Restock', { cost: 20 }), move('a3', 'U4', 'In', 1, 'Restock', { cost: 30 }),
+  move('a4', 'U4', 'Out', 1, 'Correction', { ref: 'a2' })]);
+assert.deepEqual(brU('U4'), [2, 0, 0, 2, '10, 30', 40, 0]);
+r = U.add([move('a5', 'U4', 'Out', 1, 'Correction', { ref: 'a2' })]);
+assert.deepEqual(brU('U4'), [1, 0, 0, 1, '30', 30, 0]);
+r = U.add([move('a6', 'U4', 'In', 2, 'Restock', { cost: 5 }), move('a7', 'U4', 'Out', 3, 'Correction', { ref: 'a6' })]);
+assert.deepEqual([onHandU('U4'), brU('U4')[4]], [0, ''], 'a read In of Qty 2 is two units; the third unit of the Correction comes from the front');
 console.log('backend tests passed');
