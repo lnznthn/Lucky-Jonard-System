@@ -353,6 +353,8 @@ function live() {
       case 'prePay': { const p = find(pres, q.preId); if (p && p.status === PRE_OPEN) { p.paid = q.paid; p.balance = r2(p.qty * p.price - q.paid); p.w = q; } break; }
       case 'preCancel': { const p = find(pres, q.preId); if (p && p.status === PRE_OPEN) { p.status = PRE_CANCEL; p.kept = q.kept || 0; p.w = q; } break; }
       case 'inboxDone': q.rows.forEach(x => handled.add(x.row)); break;
+      // A cost typed for a unit shows at once: it changes its movement (queued or synced before it) ahead of the replay.
+      case 'cost': all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); break;
       case 'invoice': {
         const v = q.invoice, c = custs.get(v.custId) || {};
         invs.push({ no: v.no, id: v.id, date: v.date, type: SALE, custId: v.custId, cust: c.name || '', contact: c.contact || '', total: r2(v.lines.reduce((s, l) => s + l.qty * l.price, 0)), ship: '', preId: v.preId || '',
@@ -372,8 +374,6 @@ function live() {
       }
     }
   }
-  // A cost typed for a unit shows at once: a pending cost entry changes its movement before the replay.
-  queue.forEach(q => { if (q.kind === 'cost' && q.status === 'pending') all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); });
   const incoming = new Map(), owed = new Map();
   orders.forEach(o => { if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty); });
   pres.forEach(p => { if (p.status === PRE_OPEN) owed.set(p.sku, (owed.get(p.sku) || 0) + p.qty); });
