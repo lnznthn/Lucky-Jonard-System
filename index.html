@@ -1241,21 +1241,24 @@ function splitLine(line) {
 }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
-const DETAILS = [['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
+const DETAILS = [['cat', 'category'], ['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
 /** Reads the toy-detail columns of a pasted row into r. */
 function readDetails(r, mfr, brand, line, chr, rel, verify) {
   r.mfr = (mfr || '').trim(); r.brand = (brand || '').trim(); r.line = (line || '').trim(); r.chr = (chr || '').trim();
   const d = parseRel(rel); r.rel = d || ''; r.relCheck = !!r.rel && /^(y|yes|true|verify|check|x|\?)$/i.test((verify || '').trim());
   r.relMsg = d == null ? `Release date “${rel}” not understood, left blank.` : '';
 }
-/** Details a paste can add to a toy on file. Only blank fields are filled; what the owner typed is never overwritten. */
+/**
+ * Details a row changes on an item on file. Values from Claude or a paste only fill blank fields. A value typed in
+ * Correct this row (a key of src.fix) overwrites what is on file; one cleared there leaves the item alone.
+ */
 function detailPatch(it, r) {
-  const p = {};
-  DETAILS.forEach(([k]) => { if (!it[k] && r[k]) p[k] = r[k]; });
-  if (p.rel && r.relCheck) p.relCheck = true;
+  const p = {}, t = (r.src && r.src.fix) || {}, blank = v => v == null || v === '';
+  DETAILS.forEach(([k]) => { if (!blank(r[k]) && r[k] !== it[k] && (blank(it[k]) || k in t)) p[k] = r[k]; });
+  if ('rel' in t || 'verify' in t ? r.rel && r.relCheck !== !!it.relCheck : p.rel && r.relCheck) p.relCheck = r.relCheck;
   return p;
 }
-const detailNames = p => DETAILS.filter(([k]) => p[k]).map(d => d[1]).join(', ');
+const detailNames = p => DETAILS.filter(([k]) => k in p).map(d => d[1]).join(', ');
 const detailLine = r => [r.brand || r.mfr, r.line, r.chr].filter(Boolean).join(' / ') + (r.rel ? ` · released ${r.rel}${r.relCheck ? ' (to verify)' : ''}` : '');
 const newItemFrom = r => ({ sku: nextSku(), name: r.name, cat: r.cat || 'General', price: r.price == null ? null : r.price, min: null, active: true, mfr: r.mfr, brand: r.brand, line: r.line, chr: r.chr, rel: r.rel, relCheck: r.relCheck });
 
@@ -1576,12 +1579,10 @@ function openImpResult() {
     <p class="hint" id="resSync">${esc(state)}</p>
     <button class="btn big" data-act="close">Close</button>`, 'impResult', openImpResult);
 }
-/** Fills blank details on an item already on file; restores it when archived. True when it queued a change. */
+/** Changes the details of an item already on file (see detailPatch()); restores it when archived. True when it queued a change. */
 function patchExisting(it, r) {
   const patch = detailPatch(it, r);
   if (!it.active) patch.active = true;
-  if (it.price == null && r.price != null) patch.price = r.price;
-  if (!it.cat && r.cat) patch.cat = r.cat;
   if (Object.keys(patch).length) qEdit(it.sku, patch);
   return Object.keys(patch).length > 0;
 }
