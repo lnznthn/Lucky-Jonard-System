@@ -233,7 +233,8 @@ const store = {
 };
 function norm(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
 function jaccard(a, b) { const A = new Set(norm(a).split(' ').filter(Boolean)), B = new Set(norm(b).split(' ').filter(Boolean)); if (!A.size || !B.size) return 0; let n = 0; A.forEach(t => { if (B.has(t)) n++; }); return n / (A.size + B.size - n); }
-function todayISO() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+const isoOf = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);   // the local date, YYYY-MM-DD
+const todayISO = () => isoOf(new Date());
 function parseDate(s) {
   s = String(s || '').trim(); if (!s) return todayISO();
   let y, m, d, x;
@@ -254,7 +255,7 @@ function parseRel(s) {
 }
 function fmtDay(iso) {
   const t = todayISO(); if (iso === t) return 'Today';
-  const y = new Date(); y.setDate(y.getDate() - 1); if (iso === new Date(y.getTime() - y.getTimezoneOffset() * 60000).toISOString().slice(0, 10)) return 'Yesterday';
+  const y = new Date(); y.setDate(y.getDate() - 1); if (iso === isoOf(y)) return 'Yesterday';
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: iso.slice(0, 4) === t.slice(0, 4) ? undefined : 'numeric' });
 }
 const fmtNum = n => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -1254,7 +1255,8 @@ function drawDoc(v) {
   const wrap = (s, max) => { const out = []; String(s).split(/\n/).forEach(par => { let line = ''; par.split(/\s+/).forEach(w => { const t = line ? line + ' ' + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }); out.push(line); }); return out; };
   const rule = (py, c) => { x.strokeStyle = c || '#d9d4cb'; x.lineWidth = 0.75; x.beginPath(); x.moveTo(M, py); x.lineTo(R, py); x.stroke(); };
   const page = () => { if (pages.length) ends.push(y); const c = document.createElement('canvas'); c.width = W * S; c.height = H * S; x = c.getContext('2d'); x.scale(S, S); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); pages.push(c); y = M; };
-  const head = () => { text('ITEM', M, y, { size: 8, color: '#6f6b76', bold: true }); text('QTY', 372, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('PRICE', 455, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); text('AMOUNT', R, y, { size: 8, color: '#6f6b76', bold: true, align: 'right' }); y += 7; rule(y); y += 16; };
+  const cap = (s, px, align) => text(s, px, y, { size: 8, color: '#6f6b76', bold: true, align });   // a small grey label
+  const head = () => { cap('ITEM', M); cap('QTY', 372, 'right'); cap('PRICE', 455, 'right'); cap('AMOUNT', R, 'right'); y += 7; rule(y); y += 16; };
   page();
   // Header: shop on the left, under the logo's 150 x 56 pt box when there is one; document title on the right.
   let ly = y + (shop.logo ? 72 : 14);
@@ -1265,7 +1267,7 @@ function drawDoc(v) {
   text('No. ' + v.no, R, ry, { size: 11, align: 'right' }); ry += 15;
   text(new Date(v.date + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }), R, ry, { size: 10, color: '#6f6b76', align: 'right' });
   y = Math.max(ly, ry) + 26;
-  text(sale ? 'BILLED TO' : 'RECEIVED FROM', M, y, { size: 8, color: '#6f6b76', bold: true }); y += 15;
+  cap(sale ? 'BILLED TO' : 'RECEIVED FROM', M); y += 15;
   text(v.cust, M, y, { size: 12, bold: true }); y += 14;
   if (contact) { text(contact, M, y, { size: 10, color: '#6f6b76' }); y += 14; }
   y += 18; head();
@@ -1328,12 +1330,8 @@ async function copyImg(id) {
 }
 
 /* ---------- import ---------- */
-function splitLine(line) {
-  if (line.includes('\t')) return line.split('\t').map(s => s.trim());
-  if (line.includes('|')) return line.split('|').map(s => s.trim());
-  if (line.includes(';')) return line.split(';').map(s => s.trim());
-  return null;
-}
+/** A pasted line's columns, split at tabs, else at |, else at ;. Null when it has none of them. */
+function splitLine(line) { const sep = ['\t', '|', ';'].find(x => line.includes(x)); return sep ? line.split(sep).map(s => s.trim()) : null; }
 function cleanLines(text) { return String(text || '').split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim() && !/^```/.test(l.trim())); }
 function parsePrice(s) { const t = String(s || '').replace(/[^0-9.\-]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) || n < 0 ? null : n; }
 const DETAILS = [['cat', 'category'], ['price', 'price'], ['mfr', 'manufacturer'], ['brand', 'brand'], ['line', 'product line'], ['chr', 'character'], ['rel', 'release date']];
