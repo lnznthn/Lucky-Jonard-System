@@ -209,7 +209,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
   .frow{display:flex;gap:12px}.frow>div{flex:1;min-width:0}.frow>div:nth-child(3){flex:.8}.frow>div:nth-child(4){flex:1.5}
   .tbl.lines{max-height:none;container-type:inline-size}
   .lines td:first-child{white-space:normal}
-  .lines .picked{min-height:36px;padding:0 10px}.lines .picked .name{font-size:13px}.lines .picked .hint{display:none}
+  .lines .picked{min-height:36px;padding:0 10px}.lines .picked .name{font-size:13px}.lines .picked .hint{display:none}.lines .picked .tbtn{min-height:0;align-self:center;font-size:13px}
   .lines input{min-height:36px;font-size:13px;padding:0 8px}.lines input[type=number]{text-align:right}
   .lines tr:has(+ .note) td{border-bottom:0}
   .lines .note td{padding:0 8px 12px;white-space:normal;overflow:visible}
@@ -240,7 +240,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.4.2';
+const VERSION = '2.4.3';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 
 /* ---------- small helpers ---------- */
@@ -1032,6 +1032,8 @@ function linePrice(l) { const it = l.sku && live().map.get(l.sku); return l.pric
 function invTotal() { return r2(ui.inv.lines.reduce((s, l) => { const p = linePrice(l); return s + lineQty(l) * (p == null || isNaN(p) ? 0 : p); }, 0)); }
 const lineQty = l => parseInt(l.qty, 10) || 0;
 const lineAmt = l => { const p = linePrice(l); return p == null || isNaN(p) ? '–' : money(r2(lineQty(l) * p)); };
+/** A line's cost each on desktop, from the units it takes oldest first; "Add the cost" when one of them has none, as the phone's note does. */
+const lineCost = l => { if (!l.sku) return ''; const c = costOut(l.sku, lineQty(l)); return c != null ? money(c) : noCost(l) ? `<button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button>` : '–'; };
 /**
  * The form is a sale unless a picked line asks for more than is free to sell, in which case it saves a pre-order.
  * Opening it from a pre-order (preId) or tapping "It is here, sell it now" (force) keeps it a sale.
@@ -1083,7 +1085,7 @@ function renderInvForm() {
   // Nothing to sell yet: say so and offer the one step that fixes it.
   if (!L.list.some(i => i.active)) { box.innerHTML = `<div class="empty"><h3>No products to sell yet</h3><p>Add a product with its price, or send Claude photos and review them under Add inventory.</p><div class="actions"><button class="btn primary" data-act="newItem">Add a product</button><button class="btn" data-act="homeGo" data-to="add">Add inventory${L.inbox.length ? ' · ' + L.inbox.length : ''}</button></div></div>`; return; }
   const banner = pre ? `<div class="banner"><span>For the pre-order of <b>${esc(pre.cust)}</b>. Paid so far ${money(pre.paid)}${pre.balance > 0 ? `. Issuing marks the balance of <b>${money(pre.balance)}</b> as paid` : ', nothing left to pay'}.</span><button class="tbtn" data-act="invReset">Clear</button></div>` : '';
-  const notes = l => `${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku ? invNoCost(l) : ''}`;
+  const notes = l => `${pm && l === shortL ? invNotice(l, several) : ''}${!pm && f.force === 'sale' && !f.preId && l.sku ? invForced(l) : ''}${!pm && l.sku && !wide() ? invNoCost(l) : ''}`;   // on desktop the cost has its own column
   const add = pm ? '' : '<button class="tbtn" data-act="invAddLine">Add another product</button>';
   const cust = `<div><label for="iCust">Customer</label><input id="iCust" data-b="inv.cust" data-cust="inv" list="custList" value="${esc(f.cust)}" placeholder="Name" autocomplete="off">${custList()}</div>
       <div><label for="iContact">Phone or Messenger</label><input id="iContact" data-b="inv.contact" value="${esc(f.contact)}" placeholder="${pm ? 'Required for a pre-order' : 'Optional'}" autocomplete="off"></div>`;
@@ -1096,12 +1098,12 @@ function renderInvForm() {
       : `<button class="btn primary big" data-act="invIssue">Issue invoice no. ${nextNo()}</button><p class="hint" id="invHint">${esc(invHint())}</p>`}</div>`;
   if (wide()) {   // the customer in one row, the lines as table rows with any notice under its line, the total and button at the right
     box.innerHTML = `${banner}<div class="frow">${cust}${date}${paid}${note}</div>
-    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'money', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
+    <div class="tbl lines">${tableTag(['name', 'txt', 'num', 'money', 'money', 'money', 'num'])}<thead><tr><th>Product</th><th></th><th class="n">Quantity</th><th class="n">Price each (${esc(prefs.cur)})</th><th class="n">${pm ? '' : 'Cost each'}</th><th class="n">Amount</th><th></th></tr></thead><tbody>${f.lines.map((l, i) => `
       <tr><td>${pickerHtml('inv.lines.' + i, l.sku)}</td><td title="${l.sku ? esc(pickSub(l.sku)) : ''}"><span class="hint">${l.sku ? esc(pickSub(l.sku)) : ''}</span></td>
         <td class="n"><input id="q${i}" type="number" inputmode="numeric" min="1" step="1" data-b="inv.lines.${i}.qty" value="${esc(l.qty)}" aria-label="Quantity"></td>
         <td class="n"><input id="p${i}" type="number" inputmode="decimal" min="0" step="any" data-b="inv.lines.${i}.price" value="${esc(l.price)}" aria-label="Price each"></td>
-        <td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
-      ${notes(l) ? `<tr class="note"><td colspan="6">${notes(l)}</td></tr>` : ''}`).join('')}</tbody></table></div>
+        <td class="n" id="cost${i}">${pm ? '' : lineCost(l)}</td><td class="n" id="amt${i}">${lineAmt(l)}</td><td>${several ? `<button class="tbtn danger" data-act="invDelLine" data-i="${i}">Remove</button>` : ''}</td></tr>
+      ${notes(l) ? `<tr class="note"><td colspan="7">${notes(l)}</td></tr>` : ''}`).join('')}</tbody></table></div>
     ${add}<div class="send">${end}</div>`;
     return;
   }
@@ -2052,7 +2054,7 @@ document.addEventListener('click', async ev => {
     case 'wipe': if (confirm('Erase everything stored on this device? The Google Sheet is not touched.')) { ['cfg', 'items', 'moves', 'docs', 'meta', 'queue', 'prefs'].forEach(k => localStorage.removeItem('toys.' + k)); location.reload(); } break;
   }
 });
-function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); ui.inv.lines.forEach((l, i) => { if ((e = $('#amt' + i))) e.textContent = lineAmt(l); }); }
+function liveHints() { let e; if ((e = $('#invTotal'))) e.textContent = money(invTotal()); if ((e = $('#invBal'))) e.textContent = money(invBalance()); if ((e = $('#invHint'))) e.textContent = invHint(); ui.inv.lines.forEach((l, i) => { if ((e = $('#amt' + i))) e.textContent = lineAmt(l); if ((e = $('#cost' + i)) && e.innerHTML) e.innerHTML = lineCost(l); }); }
 document.addEventListener('input', ev => {
   const t = ev.target;
   if (t.dataset.cost) { costInput(t); return; }
