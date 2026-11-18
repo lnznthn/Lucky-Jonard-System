@@ -33,25 +33,25 @@ with sync_playwright() as pw:
     close(p); synced(p)
     inv = rows('Invoices')[0]; vid = inv[1]; ln = rows('Invoice lines'); sales = [r for r in rows('Movements') if r[6] == 'Sale']
     check(inv[4] == 'Ana Reyes' and inv[6:10] == [4500, 1000, 3500, ''], f'one invoice with paid and balance: {inv}')
-    check([r[2] for r in ln] == [1, 2] and ln[0][8:10] == [800, 'Delivered'] and ln[1][8:12] == ['', 'To follow', EXP, ''], f'one line delivered, one to follow: {ln}')
+    check([r[2] for r in ln] == [1, 2] and ln[0][8:10] == [800, 'Delivered'] and ln[1][8:11] == ['', 'To follow', EXP] and ln[1][11] in [r[0] for r in rows('Supplier orders')], f'one line delivered, one to follow on its own new supplier order: {ln}')
     check([(r[0], r[5]) for r in sales] == [(f'{vid}-1', 1)], f'only the delivered line left stock: {sales}')
     tab(p, 'Inventory'); p.click('.item:has-text("Luffy Figure")')
-    check(re.search(r'On hand\s+0\s+Incoming\s+0\s+Owed\s+2\s+Left to promise\s+-2', p.inner_text('#sheet')) is not None, 'the to-follow units are owed'); close(p)
+    check(re.search(r'On hand\s+0\s+Incoming\s+2\s+Owed\s+2\s+Left to promise\s+0', p.inner_text('#sheet')) is not None, 'the to-follow units are owed, and their supplier order is incoming'); close(p)
 
     # ---- an open supplier-order line for the product: the to-follow line can wait for it
     p.evaluate(f"""() => {{ qAdd('supplier', {{ supplier: {{ id: 's1', name: 'Shop Supply', contact: '', note: '' }} }});
       qAdd('order', {{ order: {{ id: 'o1', date: todayISO(), supId: 's1', expected: '{EXP2}', note: '', lines: [{{ id: 'ol1', sku: live().list.find(i => i.name === 'Luffy Figure').sku, qty: 4, cost: 700 }}] }} }}); commit(); }}""")
     synced(p)
     new_sale(p); pick(p, 'inv.lines.0', 'luffy')
-    check(on(p, 0) and p.input_value('#o0') == 'ol1' and p.eval_on_selector('#o0', 'e => e.selectedOptions[0].text') == f'{day(p, EXP2)} · Shop Supply', 'nothing free to sell: Pre-order is on, waiting for the open supplier-order line')
+    check(on(p, 0) and p.eval_on_selector('#o0', 'e => [...e.options].map(o => o.text)') == [f'{day(p, EXP)} · No supplier yet', f'{day(p, EXP2)} · Shop Supply', 'New supplier order'] and p.input_value('#o0') == ln[1][11], 'nothing free to sell: Pre-order is on, waiting for the first open supplier-order line')
     p.click('#backBtn')
     tab(p, 'Sales'); p.click('.item:has-text("No. 1")'); p.click('#sheet button:has-text("Change expected date")')
-    check(p.input_value('#oS') == '' and p.input_value('#eS') == EXP, 'the line keeps its typed date until another is picked')
+    check(p.input_value('#oS') == ln[1][11], 'the line waits for its own order line until another is picked')
     p.select_option('#oS', 'ol1'); p.click('#sheet [data-act="followSave"]')
     check(f'To follow · expected {day(p, EXP2)}' in p.inner_text('#sheet'), 'linked to the order line, the line follows its date'); close(p); synced(p)
     check(rows('Invoice lines')[1][9:12] == ['To follow', EXP2, 'ol1'], f"the link reached the sheet: {rows('Invoice lines')[1]}")
     tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]')
-    check('2 waiting' in p.inner_text('#view .item:has-text("Luffy Figure")'), 'the order line counts the to-follow units waiting for it')
+    check('2 waiting' in p.inner_text('#view .item:has-text("Shop Supply")'), 'the order line counts the to-follow units waiting for it')
 
     # ---- a payment, then Home asks to collect the rest
     check('Collect ₱3,500 on 1 invoice\nBalances still open' in home(p), 'Home: collect the balance')
