@@ -97,7 +97,7 @@ label,.lbl{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
 .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.row2:empty{display:none}
 /* A unit on the product sheet: its SKU and date over its cost and condition on a phone, all in one row on a desktop. */
 .units .item{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:8px 12px}.units .main{grid-column:1/-1}
-.row2[data-costbox]{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}   /* a condition such as "Loose complete" needs the wider share */
+.row2[data-costbox],.row2.cc{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}   /* a cost and a condition: "Loose complete" needs the wider share */
 .row3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .step{display:flex;gap:8px}.step .btn{min-width:52px;min-height:48px;padding:0}
 .step input{text-align:center}
@@ -397,15 +397,17 @@ function live() {
       case 'edit': if (map.has(q.sku)) Object.assign(map.get(q.sku), q.patch); break;
       case 'cust': custs.set(q.cust.id, { ...q.cust }); break;
       case 'supplier': sups.set(q.supplier.id, { ...q.supplier }); break;
-      // A supplier order is one row per line; a line ID already there is skipped.
-      case 'order': { const o = q.order; o.lines.forEach(l => { if (!find(orders, l.id)) orders.push({ id: l.id, orderId: o.id, date: o.date, supId: o.supId, sup: '', sku: l.sku, name: nameOf(l.sku), qty: l.qty, cost: l.cost, expected: o.expected, recQty: 0, status: 'Ordered', note: o.note, q }); }); break; }
-      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost and condition picked for it, skipping IDs already written.
+      // A supplier order is one row per line, each with its condition (MIB unless picked); a line ID already there is skipped. supId '' is no supplier yet.
+      case 'order': { const o = q.order; o.lines.forEach(l => { if (!find(orders, l.id)) orders.push({ id: l.id, orderId: o.id, date: o.date, supId: o.supId || '', sup: '', sku: l.sku, name: nameOf(l.sku), qty: l.qty, cost: l.cost, cond: l.cond || NEW_COND, expected: o.expected, recQty: 0, status: 'Ordered', note: o.note, q }); }); break; }
+      // Receiving writes one In per unit, rcv-<lineId>-<from+1> ... with the cost and condition picked for it (the line's condition when none), skipping IDs already written.
       case 'receive': {
         const o = find(orders, q.lineId); if (!o || o.status === 'Cancelled') break;
-        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost, cond: (q.conds || [])[k] || '' }, q); });
+        q.costs.forEach((cost, k) => { const id = 'rcv-' + o.id + '-' + (q.from + k + 1); if (!all.some(m => m.id === id)) push({ id, date: q.date, sku: o.sku, dir: 'In', qty: 1, reason: 'Restock', ref: o.orderId, note: '', cost, cond: (q.conds || [])[k] || o.cond || '' }, q); });
         o.recQty = Math.max(o.recQty || 0, q.from + q.costs.length); if (o.recQty >= o.qty) o.status = 'Received'; o.w = q; break;
       }
       case 'orderCancel': { const o = find(orders, q.lineId); if (o && o.status === 'Ordered') { o.status = 'Cancelled'; o.w = q; } break; }
+      // An open order line's cost each, condition, supplier (its name follows below) or expected date, each field as sent.
+      case 'orderLine': { const o = find(orders, q.lineId); if (o && o.status === 'Ordered') { ['cost', 'cond', 'supId', 'expected'].forEach(k => { if (k in q) o[k] = q[k]; }); o.w = q; } break; }
       case 'inboxDone': q.rows.forEach(x => handled.add(x.row)); break;
       // A cost typed or a condition picked for a unit shows at once: it changes its movement (queued or synced before it) ahead of the replay.
       case 'cost': all.forEach(m => { if (m.id === q.moveId) m.cost = q.cost; }); break;
@@ -446,8 +448,8 @@ function live() {
     else { nos.set(m.sku, n + m.qty); if (m.q && m.qty === 1) m.unit = m.sku + '-' + (n + 1); }
   });
   const incoming = new Map(), owed = new Map();
-  // A line shows its supplier's current name; incoming is what its Ordered lines still have due.
-  orders.forEach(o => { o.sup = (sups.get(o.supId) || {}).name || o.sup; if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty - (o.recQty || 0)); });
+  // A line shows its supplier's current name ('' with none yet); incoming is what its Ordered lines still have due.
+  orders.forEach(o => { o.sup = o.supId ? (sups.get(o.supId) || {}).name || o.sup : ''; if (o.status === 'Ordered') incoming.set(o.sku, (incoming.get(o.sku) || 0) + o.qty - (o.recQty || 0)); });
   invs.forEach(v => v.lines.forEach(l => { if (l.status === FOLLOW) owed.set(l.sku, (owed.get(l.sku) || 0) + l.qty); }));
   const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   // Rows Claude left in the sheet's Inbox tab, minus the ones already applied or dismissed here.
@@ -523,6 +525,13 @@ function custFor(name, contact) {
   if (cur) { if (contact && contact !== cur.contact) { qAdd('cust', { cust: { id: cur.id, name: cur.name, contact } }); dirty(); } return cur.id; }
   const id = 'c' + uid(); qAdd('cust', { cust: { id, name, contact } }); dirty(); return id;
 }
+/** The ID of the supplier named name (matched like a customer's name), queuing a new supplier when the name is new; '' for no name. */
+function supFor(name) {
+  name = String(name || '').trim().replace(/\s+/g, ' '); if (!name) return '';
+  const cur = [...live().sups.values()].find(x => custKey(x.name) === custKey(name)); if (cur) return cur.id;
+  const id = 's' + uid(); qAdd('supplier', { supplier: { id, name, contact: '', note: '' } }); dirty(); return id;
+}
+const supList = () => `<datalist id="supList">${[...live().sups.values()].map(x => `<option value="${esc(x.name)}">`).join('')}</datalist>`;
 const contactOf = d => { const c = live().custs.get(d.custId); return (c && c.contact) || d.contact || ''; };
 /** How many of a toy on an invoice can still be returned: only delivered lines take returns. */
 function returnable(v, sku) { return v.lines.filter(l => l.sku === sku && l.status === DELIVERED).reduce((s, l) => s + l.qty, 0) - live().rets.filter(r => r.invId === v.id && r.sku === sku).reduce((s, r) => s + r.qty, 0); }
@@ -538,7 +547,7 @@ function readyLines() {
 }
 /** Open supplier-order lines of a product, in sheet order: what a to-follow line can wait for. */
 const openLines = sku => live().orders.filter(o => o.sku === sku && o.status === 'Ordered');
-const olText = o => [o.expected ? fmtDay(o.expected) : 'No date yet', o.sup].filter(Boolean).join(' · ');
+const olText = o => [o.expected ? fmtDay(o.expected) : 'No date yet', o.sup || 'No supplier yet'].join(' · ');
 /** A to-follow line's expected date: its supplier-order line's when it is linked to one, else the date typed. */
 const lineExp = l => { const o = l.orderLine && live().orders.find(x => x.id === l.orderLine); return (o && o.expected) || l.expected || ''; };
 
@@ -557,6 +566,8 @@ const shopWaits = () => queue.some(q => q.kind === 'shop' && q.status === 'pendi
 /** The shop fields that changed, merged into the pending shop entry so one entry carries them all and the last value wins.
  *  Keyed on fill: the one-time move-up (fill: true) stays ahead of it, and this entry's values land after it. */
 const qShop = patch => { const p = queue.find(q => q.kind === 'shop' && !q.fill && q.status === 'pending'); qLast('shop', 'fill', { shop: Object.assign({}, p && p.shop, patch) }); };
+/** A change to an open supplier-order line (cost, cond, supId or expected), merged into the line's pending orderLine entry: the last value of each field wins. */
+const qOrderLine = (lineId, patch) => { const { id, kind, status, error, ...was } = queue.find(q => q.kind === 'orderLine' && q.lineId === lineId && q.status === 'pending') || {}; qLast('orderLine', 'lineId', { ...was, lineId, ...patch }); };
 /** The records in an entry that carry a SKU. */
 const skuRecs = q => q.kind === 'move' ? [q.move] : q.kind === 'edit' ? [q] : q.kind === 'item' ? [q.item] : q.kind === 'order' ? q.order.lines : q.kind === 'invoice' ? q.invoice.lines : q.kind === 'ret' ? [q.ret] : [];
 const entrySkus = q => skuRecs(q).map(o => o.sku);
@@ -570,6 +581,7 @@ function describe(q) {
     case 'order': return `Supplier order of ${plural(q.order.lines.length, 'line')}`;
     case 'receive': return 'Receiving a supplier order line';
     case 'orderCancel': return 'Cancelling the rest of a supplier order line';
+    case 'orderLine': { const o = live().orders.find(x => x.id === q.lineId); return 'Supplier order line' + (o ? ' of ' + o.name : ''); }
     case 'invoice': return `Invoice no. ${q.invoice.no}`;
     case 'deliver': return 'Shipping a to-follow line' + invNoOf(q.invId);
     case 'follow': return 'Expected date of a to-follow line' + invNoOf(q.invId);
@@ -1404,37 +1416,60 @@ function linesHtml() {
   const L = live(), wait = waitingOn(), open = L.orders.filter(o => o.status === 'Ordered'), closed = L.orders.filter(o => o.status !== 'Ordered').reverse();
   const add = `<div><button class="btn primary${wide() ? '' : ' big'}" data-act="ordNew">New order</button></div>`, at = o => `data-act="ord" data-id="${esc(o.orderId)}"`;
   if (!L.orders.length) return add + '<p class="empty">No supplier orders yet. New order opens Add inventory, where Claude’s rows from an order or quotation also arrive.</p>';
-  if (wide()) return add + table('olines', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Supplier', o => o.sup], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.qty, null, 'num'], ['Received', o => o.recQty || 0, null, 'num'],
-    ['Cost each', o => blank(o.cost) ? null : o.cost, o => blank(o.cost) ? '–' : money(o.cost), 'money'], ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'],
+  // An order a pre-order made may have no supplier yet; its order sheet sets one.
+  if (wide()) return add + table('olines', [['Date', o => o.date, o => esc(fmtDay(o.date)), 'date'], ['Supplier', o => o.sup, o => o.sup ? esc(o.sup) : '<span class="hint">No supplier yet</span>'], ['Product', o => o.name, o => esc(o.name) + waitTag(o), 'name'], ['Qty', o => o.qty, null, 'num'], ['Received', o => o.recQty || 0, null, 'num'],
+    ['Cost each', o => blank(o.cost) ? null : o.cost, o => blank(o.cost) ? '–' : money(o.cost), 'money'], ['Condition', o => o.cond], ['Expected', o => o.expected, o => o.expected ? esc(fmtDay(o.expected)) : '', 'date'],
     ['Status', o => ['Ordered', 'Received', 'Cancelled'].indexOf(o.status), o => o.status === 'Ordered' ? 'On the way' : esc(o.status)], ['Waiting', o => wait.get(o.id) || 0, o => wait.get(o.id) || '', 'num']],
     [...open, ...closed.slice(0, 200)], at);
   const line = o => row(`${esc(o.name)}${o.status !== 'Ordered' ? `<span class="tag">${esc(o.status.toLowerCase())}</span>` : ''}${waitTag(o)}`,
-    [o.sup, 'ordered ' + fmtDay(o.date), o.recQty ? `${o.recQty} of ${o.qty} received` : '', o.status === 'Ordered' && o.expected ? 'expected ' + fmtDay(o.expected) : '', wait.get(o.id) ? wait.get(o.id) + ' waiting' : ''].filter(Boolean).map(esc).join(' · '),
+    [o.sup || 'No supplier yet', 'ordered ' + fmtDay(o.date), o.cond, o.recQty ? `${o.recQty} of ${o.qty} received` : '', o.status === 'Ordered' && o.expected ? 'expected ' + fmtDay(o.expected) : '', wait.get(o.id) ? wait.get(o.id) + ' waiting' : ''].filter(Boolean).map(esc).join(' · '),
     at(o), `<span class="qty">${o.status === 'Ordered' ? dueOf(o) : o.recQty || 0}</span>`);
   return add + (open.length ? sec('On the way', `<div class="list">${open.map(line).join('')}</div>`) : '<p class="empty">Nothing on the way.</p>')
     + (closed.length ? `<details>${summary(`Closed (${closed.length})`)}<div class="list">${closed.slice(0, 200).map(line).join('')}</div></details>` : '');
 }
-// Receiving a line: the quantity starts at what is still due, each unit's cost field at the line's cost each and its condition at MIB.
-const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], d: [], open: false } });
-/** One supplier order (id is its Order ID) with its lines: Receive and Cancel the rest per line, and Receive all. */
+// Receiving a line: the quantity starts at what is still due, each unit's cost field at the line's cost each and its condition at the line's (MIB when blank).
+const recvSub = l => ({ id: l.id, mode: 'recv', qty: dueOf(l), c: { v: blank(l.cost) ? [] : [String(l.cost)], d: [oneCond(l.cond) || NEW_COND], open: false } });
+/** One supplier order (id is its Order ID) with its lines: each open line's Cost each and Condition (saved as they change, setOl()), Receive and
+ *  Cancel the rest per line, and Receive all. An order with no supplier yet (made by a pre-order) has a Supplier dropdown for its open lines. */
 function openOrd(id) {
   const L = live(), lines = L.orders.filter(o => o.orderId === id); if (!lines.length) return closeSheet();
-  const o = lines[0], sup = L.sups.get(o.supId), open = lines.filter(x => x.status === 'Ordered'), wait = waitingOn();
+  const o = lines.find(x => x.supId) || lines[0], sup = L.sups.get(o.supId), open = lines.filter(x => x.status === 'Ordered'), wait = waitingOn();
+  const sups = [...L.sups.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const pickSup = !open.some(x => !x.supId) ? '' : sups.length ? `<div><label for="ordSup">Supplier</label><select id="ordSup" data-olsup="${esc(id)}"><option value="" selected>No supplier yet</option>${sups.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></div>`
+    : '<p class="hint">No supplier yet. Add one on the Suppliers tab to pick it here.</p>';
   // With one line left to receive, its form shows at once.
   if (open.length === 1 && !(ui.sub && ui.sub.id === open[0].id)) ui.sub = recvSub(open[0]);
   const s = ui.sub && ui.sub.mode === 'recv' ? ui.sub : null, l = s && open.find(x => x.id === s.id);
+  const edit = x => `<div class="row2 cc"><div><label for="olc-${esc(x.id)}">Cost each (${esc(prefs.cur)})</label><input id="olc-${esc(x.id)}" type="number" inputmode="decimal" min="0" step="any" data-olcost="${esc(x.id)}" value="${blank(x.cost) ? '' : esc(x.cost)}" placeholder="No cost yet"></div>
+      <div><label for="old-${esc(x.id)}">Condition</label>${condSel(`id="old-${esc(x.id)}" data-olcond="${esc(x.id)}"`, x.cond || '')}</div></div>`;
   openSheet(`
-    <div class="top"><h2>Order from ${esc(o.sup)}</h2>${closeBtn}</div>
+    <div class="top"><h2>${o.sup ? 'Order from ' + esc(o.sup) : 'Supplier order'}</h2>${closeBtn}</div>
     <p class="hint">${[sup && sup.contact, 'ordered ' + fmtDay(o.date), o.expected ? 'expected ' + fmtDay(o.expected) : ''].filter(Boolean).map(esc).join(' · ')} ${waitTag(o)}</p>
-    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}
+    ${o.note ? `<p class="hint">${esc(o.note)}</p>` : ''}${pickSup}
     <div class="list">${lines.map(x => `<div class="item"><div class="main"><div class="name">${esc(x.name)}${x.status !== 'Ordered' ? `<span class="tag">${esc(x.status.toLowerCase())}</span>` : ''}${x.q ? '' : waitTag(x)}</div>
-      <div class="sub">${[x.qty + ' ordered', x.recQty ? x.recQty + ' received' : '', blank(x.cost) ? 'no cost yet' : money(x.cost) + ' each', wait.get(x.id) ? wait.get(x.id) + ' waiting' : ''].filter(Boolean).join(' · ')}</div>
-      ${x.status === 'Ordered' ? `<div class="links"><button class="tbtn" data-act="ordLine" data-id="${esc(x.id)}">Receive</button><button class="tbtn danger" data-act="ordCancel" data-id="${esc(x.id)}">Cancel the rest</button></div>` : ''}</div>
+      <div class="sub">${[x.qty + ' ordered', x.recQty ? x.recQty + ' received' : '', x.status === 'Ordered' ? '' : (blank(x.cost) ? 'no cost yet' : money(x.cost) + ' each') + (x.cond ? ' · ' + esc(x.cond) : ''), wait.get(x.id) ? wait.get(x.id) + ' waiting' : ''].filter(Boolean).join(' · ')}</div>
+      ${x.status === 'Ordered' ? `${edit(x)}<div class="links"><button class="tbtn" data-act="ordLine" data-id="${esc(x.id)}">Receive</button><button class="tbtn danger" data-act="ordCancel" data-id="${esc(x.id)}">Cancel the rest</button></div>` : ''}</div>
       <span class="qty">${x.status === 'Ordered' ? dueOf(x) : x.recQty || 0}</span></div>`).join('')}</div>
     ${l ? sec(`Receive ${esc(l.name)}`, `<div><label for="rcQty">Quantity received (${dueOf(l)} due)</label><input id="rcQty" type="number" inputmode="numeric" min="1" step="1" data-b="sub.qty" data-units="sub.c" value="${esc(s.qty)}"></div>${costFields('sub.c', s.qty)}
       <button class="btn primary big" data-act="ordRecv">Received · add to stock</button>`, '', 'pad') : ''}
     ${open.length > 1 ? `<button class="btn ${l ? '' : 'primary'} big" data-act="ordRecvAll" data-id="${esc(id)}">Receive all</button>` : ''}
-    ${o.q ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
+    ${o.q && !lines.some(x => wait.get(x.id)) ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
+}
+/** A cost each or condition changed on an open supplier-order line, in its order or on a pre-order that waits for it: one orderLine entry for the line,
+ *  merged with one still waiting. It changes every pre-order waiting on the line (they share its units) and starts an open receive form again. */
+function setOl(lineId, k, v, say) {
+  const o = live().orders.find(x => x.id === lineId), val = k === 'cost' ? (v.trim() === '' ? null : Number(v)) : v; if (!o || o.status !== 'Ordered' || (k === 'cond' && !val)) return;
+  if (k === 'cost' && val != null && !(val >= 0)) { toast('Cost must be zero or more.'); return rerender(); }
+  if (k === 'cost' ? (blank(o.cost) ? null : o.cost) === val : (o.cond || '') === val) return;
+  qOrderLine(lineId, { [k]: val }); dirty();
+  if (ui.sub && ui.sub.mode === 'recv' && ui.sub.id === lineId) ui.sub.c = recvSub(live().orders.find(x => x.id === lineId)).c;
+  commit(); toast(say);
+}
+/** The supplier picked for an order that had none: one orderLine entry per open line of the order. */
+function setOrderSup(orderId, supId) {
+  if (!supId) return;
+  live().orders.filter(o => o.orderId === orderId && o.status === 'Ordered' && o.supId !== supId).forEach(o => qOrderLine(o.id, { supId }));
+  commit(); toast('Saved');
 }
 /** Receives part or all of what is still due on a line; a short line stays open for the rest. */
 function receiveLine() {
@@ -1445,10 +1480,10 @@ function receiveLine() {
   qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs, conds: readConds('sub.c', qty) });
   ui.sub = null; commit(); toast(`+${qty} ${l.name}`);
 }
-/** Receives everything still due on every open line of the order, each unit at its line's cost each and in condition MIB. */
+/** Receives everything still due on every open line of the order, each unit at its line's cost each and condition (MIB when blank). */
 function receiveAll(id) {
   const open = live().orders.filter(l => l.orderId === id && l.status === 'Ordered'), n = open.reduce((t, l) => t + dueOf(l), 0);
-  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost), conds: Array(dueOf(l)).fill(NEW_COND) }));
+  open.forEach(l => qAdd('receive', { lineId: l.id, date: todayISO(), from: l.recQty || 0, costs: Array(dueOf(l)).fill(blank(l.cost) ? null : l.cost), conds: Array(dueOf(l)).fill(oneCond(l.cond) || NEW_COND) }));
   ui.sub = null; commit(); toast(`+${plural(n, 'unit')} received`);
 }
 
@@ -1648,7 +1683,7 @@ function settleReceive(rows, ordered) {
   const taken = new Set(), L = live();
   rows.forEach(r => {
     if (['bad', 'skip'].includes(r.status) && !r.qty) { r.on = false; return; }
-    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty); r.conds = ordered ? [] : unitConds(r, r.qty);   // one per unit the row adds; an order line has no units yet
+    r.msg = ''; r.order = null; r.costs = unitCosts(r, r.qty); r.conds = unitConds(r, r.qty);   // one per unit the row adds; an order line takes the first (see applyOrder())
     if (r.match) {
       r.status = ordered ? 'ord' : 'recv'; r.on = true; r.adds = detailNames(detailPatch(r.match, r));
       if (!ordered) r.order = L.orders.find(o => o.status === 'Ordered' && o.sku === r.match.sku && !taken.has(o.id)) || null;
@@ -1830,7 +1865,7 @@ function renderImpOut() {
 function ordSwitch(imp) {
   const o = imp.ord || (imp.ord = newOrd());
   return `<div class="stack" style="max-width:640px"><div class="seg"><button class="${o.on ? '' : 'on'}" data-act="ordOn" data-v="">Received now</button><button class="${o.on ? 'on' : ''}" data-act="ordOn" data-v="1">Ordered</button></div>
-    ${o.on ? `<div><label for="oSup">Supplier</label><input id="oSup" data-b="imp.ord.sup" list="supList" value="${esc(o.sup)}" placeholder="Pick one, or type a new name" autocomplete="off"><datalist id="supList">${[...live().sups.values()].map(x => `<option value="${esc(x.name)}">`).join('')}</datalist></div>
+    ${o.on ? `<div><label for="oSup">Supplier</label><input id="oSup" data-b="imp.ord.sup" list="supList" value="${esc(o.sup)}" placeholder="Pick one, or type a new name" autocomplete="off">${supList()}</div>
       <div class="row2"><div><label for="oDate">Order date</label><input id="oDate" type="date" data-b="imp.ord.date" value="${esc(o.date)}"></div><div><label for="oExp">Expected arrival</label><input id="oExp" type="date" data-b="imp.ord.exp" value="${esc(o.exp)}"></div></div>
       <p class="hint">Applying records one supplier order with a line per row. Nothing comes into stock until it is received under Suppliers.</p>`
     : '<p class="hint">Each row adds stock at its cost.</p>'}</div>`;
@@ -1854,7 +1889,7 @@ function impTable(imp, idx, k) {
     ['Status', i => STATUS_LABEL[R(i).status] || '', i => { const r = R(i); return (r.similar && !r.match ? `<button class="tbtn" data-act="useSimilar" data-i="${i}">Use “${esc(r.similar.name)}”</button> ` : '')   // the decision first
       + `<span class="tag ${r.status === 'bad' ? 'bad' : r.similar ? 'warn' : ''}" style="margin-left:0">${STATUS_LABEL[r.status] || ''}</span>${why(r) ? ` <span class="hint">${esc(why(r))}</span>` : ''}`; }, 'name'],
     [cnt ? 'Count' : 'Qty', i => cnt ? R(i).count : R(i).qty || null, i => { const r = R(i), q = cnt ? r.count : r.qty || null; return q == null ? '' : q + (cnt && r.match && r.delta ? ` <span class="hint">(${r.delta > 0 ? '+' : '−'}${Math.abs(r.delta)})</span>` : ''); }, 'num'],
-    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'], ...(ordered(imp) ? [] : [['Condition', i => condsText(R(i).conds || []), cond]]),
+    ['Cost', i => has(i).length ? Math.min(...has(i)) : null, cost, 'money'], ['Condition', i => condsText(R(i).conds || []), cond],
     ['Price', i => R(i).price != null ? R(i).price : R(i).match ? R(i).match.price : null, price, 'money'],
     ['Manufacturer', i => R(i).mfr], ['Brand', i => R(i).brand], ['Product line', i => R(i).line], ['Character', i => R(i).chr], ['Release date', i => R(i).rel, i => relCell(R(i)), 'date'], ['Note', i => R(i).note]],
     idx, i => (R(i).src ? `data-act="impFix" data-i="${i}" ` : '') + (R(i).on ? '' : 'class="off"'));
@@ -1919,7 +1954,7 @@ function openFix(i) {
     <p class="hint">This changes what is recorded from this review. The row in the sheet's Inbox stays as Claude wrote it.</p>
     ${fld('name', 'Name')}
     ${fld('count', imp.mode === 'count' ? 'Count' : 'Qty', ` inputmode="numeric" data-units="f.c" data-have="${have}"`)}
-    ${ordered(imp) ? fld('cost', `Cost each (${esc(prefs.cur)})`, ' inputmode="decimal" placeholder="Optional"') : costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
+    ${ordered(imp) ? `<div class="row2 cc">${fld('cost', `Cost each (${esc(prefs.cur)})`, ' inputmode="decimal" placeholder="Optional"')}<div><label for="fxCond">Condition</label>${condSel('id="fxCond"', unitConds(r, 1)[0])}</div></div>` : costFields('f.c', (parseInt(at('count'), 10) || 0) - have)}
     ${fld('price', `Price (${esc(prefs.cur)})`, ' inputmode="decimal"')}
     <div class="row2">${fld('mfr', 'Manufacturer')}${fld('brand', 'Brand')}</div>
     <div class="row2">${fld('line', 'Product line')}${fld('chr', 'Character')}</div>
@@ -1939,9 +1974,9 @@ function saveFix(i, simSku) {
   if (v.price && parsePrice(v.price) == null) return toast('Price must be zero or more.');
   if (v.rel && !parseRel(v.rel)) return toast('Release date must look like 2024, 2024-07 or 2024-07-15.');
   if (v.cost && parsePrice(v.cost) == null) return toast('Cost must be zero or more.');
-  // An order line has one cost each; otherwise each unit the row adds has its own cost and condition.
+  // An order line has one cost each and one condition; otherwise each unit the row adds has its own cost and condition.
   const n = Math.max((parseInt(v.count, 10) || 0) - $('#fxCount').dataset.have, 0);
-  if (ordered(imp)) delete fix.costs;
+  if (ordered(imp)) { delete fix.costs; delete fix.conds; fix.cond = $('#fxCond').value; }
   else if (!(fix.costs = readCosts('f.c', n))) return toast('Cost must be zero or more.');
   else fix.conds = readConds('f.c', n);
   if ($('#fxRelCheck').checked !== !!r.relCheck) fix.verify = $('#fxRelCheck').checked ? 'Y' : '';
@@ -2003,7 +2038,8 @@ function applyReceive(rows) {
   });
   return out;
 }
-/** Ordered: the supplier (queued when the name is new), new products and their details, then one supplier order with a line per row. No stock moves. */
+/** Ordered: the supplier (queued when the name is new), new products and their details, then one supplier order with a line per row,
+ *  each with its cost each and condition. No stock moves. */
 function applyOrder(rows, o) {
   const name = o.sup.trim().replace(/\s+/g, ' '), date = parseDate(o.date), expected = o.exp ? parseDate(o.exp) : '';
   if (!name) return toast('Type the supplier’s name.');
@@ -2015,12 +2051,10 @@ function applyOrder(rows, o) {
     let it = r.match || made.get(norm(r.name));
     if (!it) { it = newItemFrom(r); made.set(norm(r.name), it); qItem(it, true); out.nNew++; }
     else if (r.match && patchExisting(it, r)) out.nDetails++;
-    lines.push({ id: 'l' + uid(), sku: it.sku, qty: r.qty, cost: r.costs[0] == null ? null : r.costs[0] });
+    lines.push({ id: 'l' + uid(), sku: it.sku, qty: r.qty, cost: r.costs[0] == null ? null : r.costs[0], cond: r.conds[0] || NEW_COND });
     out.done.add(i); dirty();
   });
-  const cur = [...live().sups.values()].find(x => custKey(x.name) === custKey(name)), supId = cur ? cur.id : 's' + uid();
-  if (!cur) qAdd('supplier', { supplier: { id: supId, name, contact: '', note: '' } });
-  qAdd('order', { order: { id: 'o' + uid(), date, supId, expected, note: '', lines } });
+  qAdd('order', { order: { id: 'o' + uid(), date, supId: supFor(name), expected, note: '', lines } });
   out.nLines = lines.length;
   return out;
 }
@@ -2365,6 +2399,9 @@ document.addEventListener('change', ev => {
   if (t.dataset.unit) setUnitCost(t.dataset.unit, t.value);
   if (t.dataset.ucond && setConds([t.dataset.ucond], t.value)) { commit(); toast('Saved'); }
   if (t.dataset.lcond) setLineCond(+t.dataset.lcond, t.value);
+  // A supplier-order line's cost each or condition, in its order sheet or on a pre-order line of New sale that waits for it.
+  if (t.dataset.olcost || t.dataset.olcond) setOl(t.dataset.olcost || t.dataset.olcond, t.dataset.olcost ? 'cost' : 'cond', t.value, t.closest('#sellBody') ? 'Saved on the supplier order' : 'Saved');
+  if (t.dataset.olsup) setOrderSup(t.dataset.olsup, t.value);
   if (t.dataset.rcost) setRowCost(t);
   if (t.dataset.rcond) setRowCond(t);
   if (t.dataset.rprice) setRowPrice(t);
