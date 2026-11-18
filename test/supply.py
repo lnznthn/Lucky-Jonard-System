@@ -18,7 +18,8 @@ with sync_playwright() as pw:
     tab(p, 'Inventory'); p.click('.item:has-text("Alpha Figure")'); p.click('#sheet button:has-text("Order stock")')
     check(p.inner_text('#title') == 'Inventory' and 'on' in p.get_attribute('#view .seg button[data-f="add"]', 'class') and p.get_attribute('#impOut button[data-act="ordOn"][data-v="1"]', 'class') == 'on' and 'Alpha Figure' in p.inner_text('#impOut'), 'Order stock opens Add inventory set to Ordered with the product as a row')
     p.click('#impOut [data-act="impFix"]:has-text("Alpha Figure")'); p.fill('#fxCount', '3'); p.fill('#fxCost', '500')
-    check(p.query_selector('#sheet [data-costbox]') is None, 'Correct this row in an Ordered batch has one Cost each field'); p.click('#sheet button:has-text("Save")')
+    check(p.query_selector('#sheet [data-costbox]') is None and p.input_value('#fxCond') == 'MIB', 'Correct this row in an Ordered batch has one Cost each field and one Condition, MIB to start')
+    p.select_option('#fxCond', 'MISB'); p.click('#sheet button:has-text("Save")')
     p.click('#impOut button:has-text("Add a row")'); check(p.inner_text('#sheet h2') == 'Correct this row' and p.input_value('#fxName') == '', 'Add a row opens Correct this row on an empty row')
     p.fill('#fxName', 'Bravo Figure'); p.fill('#fxCount', '2'); p.fill('#fxCost', '300'); p.click('#sheet button:has-text("Save")')
     check('Alpha Figure: 3 ordered at ₱500 each' in p.inner_text('#impOut') and 'Bravo Figure: 2 ordered at ₱300 each' in p.inner_text('#impOut'), 'saving adds the row to the review')
@@ -27,7 +28,7 @@ with sync_playwright() as pw:
     out = apply(p, 'Apply 2 changes')
     o = kinds('order'); sup = kinds('supplier')
     check('Recorded: a supplier order of 2 lines' in out and len(o) == 1 and len(sup) == 1 and sup[0]['supplier']['name'] == 'Toyline Trading' and o[0]['order']['supId'] == sup[0]['supplier']['id'], f'Apply Ordered queues the new supplier and one order: {o}')
-    check([(l['sku'], l['qty'], l['cost']) for l in o[0]['order']['lines']] == [('T0001', 3, 500), ('T0002', 2, 300)] and o[0]['order']['expected'] == TODAY and not kinds('move'), 'the order has one line per row with its cost each, and moves no stock')
+    check([(l['sku'], l['qty'], l['cost'], l['cond']) for l in o[0]['order']['lines']] == [('T0001', 3, 500, 'MISB'), ('T0002', 2, 300, 'MIB')] and o[0]['order']['expected'] == TODAY and not kinds('move'), 'the order has one line per row with its cost each and condition, and moves no stock')
     check(p.evaluate("[stockOf('T0001'), nums('T0001').inc, nums('T0002').inc]") == [0, 3, 2], 'the lines count as incoming')
 
     # ---- the Suppliers page: the supplier list, and Home's due row opening the order lines
@@ -74,7 +75,7 @@ with sync_playwright() as pw:
     tabs = dump(); tab_rows = lambda n: tabs[n]['rows'][1:] if n in tabs else []
     so = tab_rows('Supplier orders'); mv = [r for r in tab_rows('Movements') if str(r[0]).startswith('rcv-')]
     check(sorted(r[1] for r in tab_rows('Suppliers')) == ['Kanto Hobby', 'Toyline Trading'], f"the sheet has both suppliers: {tab_rows('Suppliers')}")
-    check(len(so) == 3 and so[0][1] == so[1][1] != so[2][1] and [(r[5], r[6], r[7], r[8], r[10] or 0, r[11]) for r in so] == [('T0001', 'Alpha Figure', 3, 500, 3, 'Received'), ('T0002', 'Bravo Figure', 2, 300, 1, 'Cancelled'), ('T0001', 'Alpha Figure', 4, 450, 0, 'Ordered')], f'the sheet has one row per order line: {so}')
+    check(len(so) == 3 and so[0][1] == so[1][1] != so[2][1] and [(r[5], r[6], r[7], r[8], r[10] or 0, r[11], r[13]) for r in so] == [('T0001', 'Alpha Figure', 3, 500, 3, 'Received', 'MISB'), ('T0002', 'Bravo Figure', 2, 300, 1, 'Cancelled', 'MIB'), ('T0001', 'Alpha Figure', 4, 450, 0, 'Ordered', 'MIB')], f'the sheet has one row per order line: {so}')
     check(len(so) == 3 and sorted(r[0] for r in mv) == sorted([f'rcv-{so[0][0]}-{k}' for k in (1, 2, 3)] + [f'rcv-{so[1][0]}-1']) and all(r[7] == so[0][1] for r in mv), f'the receipts reached the sheet once, Ref the order: {mv}')
     b.close()
 finish()

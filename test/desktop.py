@@ -81,7 +81,7 @@ with sync_playwright() as pw:
     synced(p); tab(p, 'Suppliers')
     check(heads('sups') == ['Name', 'Contact', 'Open lines', 'Units incoming', 'Note'] and 'Kanto Hobby' in p.inner_text('[data-tbl="sups"]') and fits(), f"Suppliers lists the suppliers as a table: {heads('sups')}")
     p.click('#view button[data-s="orders"]')
-    check(heads('olines') == ['Date', 'Supplier', 'Product', 'Qty', 'Received', 'Cost each', 'Expected', 'Status', 'Waiting'] and fits(), f"Orders lists the order lines as a table: {heads('olines')}")
+    check(heads('olines') == ['Date', 'Supplier', 'Product', 'Qty', 'Received', 'Cost each', 'Condition', 'Expected', 'Status', 'Waiting'] and fits(), f"Orders lists the order lines as a table: {heads('olines')}")
     p.click('[data-tbl="olines"] tbody tr:has-text("Luffy")'); check(p.is_visible('#sheet button:has-text("Received · add to stock")'), 'clicking an order line opens its order')
     p.click('#sheet button:has-text("Received · add to stock")'); p.click('#sheet button[aria-label="Close"]'); synced(p)
     p.screenshot(path=f'{SHOTS}/orders.png')
