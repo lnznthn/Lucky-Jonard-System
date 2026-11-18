@@ -43,7 +43,7 @@ with sync_playwright() as pw:
       qAdd('order', {{ order: {{ id: 'o1', date: todayISO(), supId: 's1', expected: '{EXP2}', note: '', lines: [{{ id: 'ol1', sku: live().list.find(i => i.name === 'Luffy Figure').sku, qty: 4, cost: 700 }}] }} }}); commit(); }}""")
     synced(p)
     new_sale(p); pick(p, 'inv.lines.0', 'luffy')
-    check(on(p, 0) and p.eval_on_selector('#o0', 'e => [...e.options].map(o => o.text)') == [f'{day(p, EXP)} · No supplier yet', f'{day(p, EXP2)} · Shop Supply', 'New supplier order'] and p.input_value('#o0') == ln[1][11], 'nothing free to sell: Pre-order is on, waiting for the first open supplier-order line')
+    check(on(p, 0) and p.eval_on_selector('#o0', 'e => [...e.options].map(o => o.text)') == [f'{day(p, EXP)} · No supplier yet', f'{day(p, EXP2)} · Shop Supply', 'New supplier order'] and p.input_value('#o0') == 'ol1', 'nothing free to sell: Pre-order is on, waiting for the first open supplier-order line with units not yet promised')
     p.click('#backBtn')
     tab(p, 'Sales'); p.click('.item:has-text("No. 1")'); p.click('#sheet button:has-text("Change expected date")')
     check(p.input_value('#oS') == ln[1][11], 'the line waits for its own order line until another is picked')
