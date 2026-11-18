@@ -1156,14 +1156,16 @@ const lineCost = l => { if (!l.sku) return ''; const c = costOut(l.sku, lineQty(
 const lineFree = i => { const ls = ui.inv.lines, l = ls[i]; return freeOf(l.sku) - ls.slice(0, i).reduce((s, x, j) => s + (x.sku === l.sku && !isFollow(j) ? lineQty(x) : 0), 0); };
 /** Whether line i is to follow: the owner's Pre-order choice, else on when the line asks more than is free to sell. */
 function isFollow(i) { const l = ui.inv.lines[i]; return !!(l.sku && live().map.get(l.sku)) && (l.follow != null ? l.follow : lineQty(l) > lineFree(i)); }
-/** The supplier-order line a to-follow line (x has sku and ol) waits for: the one picked while it is open, '' for New supplier order, else the first open one. */
-const lineOl = x => { const ols = openLines(x.sku); return x.ol === '' ? '' : ols.some(o => o.id === x.ol) ? x.ol : ols.length ? ols[0].id : ''; };
+/** The supplier-order line a to-follow line (x has sku and ol) waits for: the one picked while it is open, '' for New supplier order, else the first open one
+ *  with units not yet promised (due above what to-follow lines wait for on it, so a pick never edits another customer's line), else New supplier order. */
+const lineOl = x => { const ols = openLines(x.sku), w = waitingOn(); return x.ol === '' ? '' : ols.some(o => o.id === x.ol) ? x.ol : (ols.find(o => dueOf(o) > (w.get(o.id) || 0)) || { id: '' }).id; };
 const olOf = x => { const ol = lineOl(x); return ol ? live().orders.find(o => o.id === ol) : null; };
 /** What x (sku, ol, exp) records on a to-follow line: the supplier-order line and its date, or for a new order the date typed (null when not understood). */
 const expOf = x => { const o = olOf(x); return { ol: o ? o.id : '', exp: o ? o.expected || '' : x.exp ? parseDate(x.exp) : '' }; };
 /** A pre-order's own supplier order (New supplier order): one line of qty units at its cost each and condition, from the supplier named (none yet when blank).
- *  Queued before the entry that links to it, with the supplier first when the name is new; returns the line's ID. */
-function qNewOrder(sku, qty, expected, cost, cond, sup) { const id = 'l' + uid(); qAdd('order', { order: { id: 'o' + uid(), date: todayISO(), supId: supFor(sup), expected, note: '', lines: [{ id, sku, qty, cost, cond }] } }); dirty(); return id; }
+ *  Queued before the entry that links to it, with the supplier first when the name is new, and tagged with the invoice (invId, which Code.gs ignores)
+ *  so deleting that invoice before it syncs drops the order too; returns the line's ID. */
+function qNewOrder(invId, sku, qty, expected, cost, cond, sup) { const id = 'l' + uid(); qAdd('order', { invId, order: { id: 'o' + uid(), date: todayISO(), supId: supFor(sup), expected, note: '', lines: [{ id, sku, qty, cost, cond }] } }); dirty(); return id; }
 /** A to-follow line's Cost each and Condition (field id k<i>, select c<i>): those of the supplier-order line it waits for, where a change is saved at once
  *  (setOl()), or on New supplier order the picks kept in the form until Issue (cost blank and MIB to start). */
 const folCost = (l, i) => { const o = olOf(l); return `<input id="k${i}" type="number" inputmode="decimal" min="0" step="any" ${o ? `data-olcost="${esc(o.id)}"` : `data-b="inv.lines.${i}.cost"`} value="${esc(o ? (blank(o.cost) ? '' : o.cost) : l.cost || '')}" placeholder="Optional" aria-label="Cost each">`; };
@@ -1204,15 +1206,17 @@ function invNoCost(l) {
   const n = noCost(l); if (!n) return '';
   return `<div class="links"><p class="hint" style="flex:1">${n === 1 ? '1 unit of this product has' : n + ' units of this product have'} no cost yet, so the margin on this sale will stay unknown.</p><button class="tbtn" data-act="item" data-sku="${esc(l.sku)}">Add the cost</button></div>`;
 }
-/** Expected arrival of a to-follow line at path (x holds sku, ol, exp, sup): the open supplier-order lines of its product, then "New supplier order",
- *  which adds its expected date and a supplier (a name on file or a new one; both optional). The page carries supList() once. */
-function expHtml(path, x, k, inline) {
-  const ols = openLines(x.sku), ol = lineOl(x);
+/** Expected arrival of a to-follow line at path (x holds sku, ol, exp, sup, olExp): the open supplier-order lines of its product, then "New supplier order",
+ *  which adds its expected date and a supplier (a name on file or a new one; both optional). With olDate (the invoice sheet) a linked line also shows
+ *  its order line's expected date, to change on that line (olExp, unset until typed). The page carries supList() once. */
+function expHtml(path, x, k, inline, olDate) {
+  const ols = openLines(x.sku), ol = lineOl(x), o = ol && ols.find(y => y.id === ol);
   const sel = `<select id="o${k}" data-b="${path}.ol" data-redraw="1">${ols.map(o => `<option value="${esc(o.id)}" ${o.id === ol ? 'selected' : ''}>${esc(olText(o))}</option>`).join('')}<option value="" ${ol ? '' : 'selected'}>New supplier order</option></select>`;
-  const fields = [['o' + k, 'Expected arrival', sel], ...(ol ? [] : [['e' + k, 'Expected date', `<input id="e${k}" type="date" data-b="${path}.exp" value="${esc(x.exp || '')}">`],
+  const date = (b, v) => ['e' + k, 'Expected date', `<input id="e${k}" type="date" data-b="${path}.${b}" value="${esc(v || '')}">`];
+  const fields = [['o' + k, 'Expected arrival', sel], ...(ol ? (olDate ? [date('olExp', x.olExp != null ? x.olExp : o.expected)] : []) : [date('exp', x.exp),
     ['s' + k, 'Supplier', `<input id="s${k}" data-b="${path}.sup" list="supList" value="${esc(x.sup || '')}" placeholder="No supplier yet" autocomplete="off">`]])];
-  const fld = ([id, t, h]) => `<div><label for="${id}">${t}</label>${h}</div>`;
-  return inline ? `<div class="exp">${fields.map(([id, t, h]) => `<label for="${id}">${t}</label>${h}`).join('')}</div>` : fld(fields[0]) + (ol ? '' : `<div class="row2">${fields.slice(1).map(fld).join('')}</div>`);
+  const fld = ([id, t, h]) => `<div><label for="${id}">${t}</label>${h}</div>`, rest = fields.slice(1);
+  return inline ? `<div class="exp">${fields.map(([id, t, h]) => `<label for="${id}">${t}</label>${h}`).join('')}</div>` : fld(fields[0]) + (rest.length > 1 ? `<div class="row2">${rest.map(fld).join('')}</div>` : rest.map(fld).join(''));
 }
 function renderInvForm() {
   const box = $('#sellBody'); if (!box) return;
@@ -1296,7 +1300,7 @@ function issueInvoice() {
   if (paid !== '' && paid > total) return toast('Amount paid is more than the total.');
   const date = parseDate(f.date); if (!date) return toast('Check the date.');
   const custId = custFor(name, f.contact), id = 'v' + uid(), no = nextNo();
-  news.forEach(([line, cost, cond, sup]) => { line.orderLine = qNewOrder(line.sku, line.qty, line.expected, cost, cond, sup); });
+  news.forEach(([line, cost, cond, sup]) => { line.orderLine = qNewOrder(id, line.sku, line.qty, line.expected, cost, cond, sup); });
   qAdd('invoice', { invoice: { id, no, date, custId, paid: paid === '' ? '' : r2(paid), disc, fee, lines } });
   ui.inv = newInv(); ui.sellSeg = 'list'; commit(); openInv(id); toast(`Invoice no. ${no} issued.${lines.some(l => !l.follow) ? ' Stock updated.' : ''}`);
 }
@@ -1335,7 +1339,7 @@ function openInv(id) {
       <div><label for="rNote">Note</label><input id="rNote" data-b="sub.note" value="${esc(s.note)}" placeholder="Optional" autocomplete="off"></div>
       <div class="links"><button class="btn primary" style="flex:1" data-act="retSave">Record return</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   }
-  if (sl && s.mode === 'follow') lineForm = sec(`Expected arrival · ${esc(sl.name)}`, `${expHtml('sub', s, 'S')}${supList()}
+  if (sl && s.mode === 'follow') lineForm = sec(`Expected arrival · ${esc(sl.name)}`, `${expHtml('sub', s, 'S', false, true)}${supList()}
       <div class="links"><button class="btn primary" style="flex:1" data-act="followSave">Save</button><button class="tbtn" data-act="subOff">Cancel</button></div>`, '', 'pad');
   if (sl && s.mode === 'lineCancel') {
     // A refund defaults to what was paid beyond the new total, which is worked out again without the line (a discount may absorb part of it).
@@ -1388,10 +1392,13 @@ function saveLineCancel() {
 }
 function saveFollow() {
   const s = ui.sub, v = s && live().invs.find(x => x.id === s.id), l = v && v.lines.find(x => x.line === s.line && x.status === FOLLOW); if (!l) return;
-  const x = expOf(s); if (x.exp == null) return toast('Check the expected date.');
-  // New supplier order: the line gets its own, keeping the cost each and condition of the order line it leaves (MIB and blank when none).
+  const x = expOf(s), d = s.olExp ? parseDate(s.olExp) : '';
+  if (x.exp == null || (x.ol && d == null)) return toast('Check the expected date.');
+  // A linked line's date is its order line's: a changed one is saved there (every pre-order waiting on it follows), and on this line by the follow entry.
+  if (x.ol && s.olExp != null && d !== x.exp) { qOrderLine(x.ol, { expected: d }); x.exp = d; }
+  // New supplier order, only when picked: the line gets its own, keeping the cost each and condition of the order line it leaves (MIB and blank when none).
   const was = live().orders.find(o => o.id === l.orderLine);
-  const ol = x.ol || qNewOrder(l.sku, l.qty, x.exp, was && !blank(was.cost) ? was.cost : null, (was && oneCond(was.cond)) || NEW_COND, s.sup);
+  const ol = x.ol || qNewOrder(v.id, l.sku, l.qty, x.exp, was && !blank(was.cost) ? was.cost : null, (was && oneCond(was.cond)) || NEW_COND, s.sup);
   qAdd('follow', { invId: v.id, line: l.line, expected: x.exp, orderLine: ol }); ui.sub = null; commit(); toast('Expected date saved');
 }
 function saveReturn() {
@@ -1481,14 +1488,16 @@ function openOrd(id) {
     ${o.q && !lines.some(x => wait.get(x.id)) ? `<button class="tbtn danger" data-act="dropQ" data-qid="${esc(o.q.id)}">Delete this order</button>` : ''}`, 'ord:' + id, () => openOrd(id));
 }
 /** A cost each or condition changed on an open supplier-order line, in its order or on a pre-order that waits for it: one orderLine entry for the line,
- *  merged with one still waiting. It changes every pre-order waiting on the line (they share its units) and starts an open receive form again. */
+ *  merged with one still waiting. It changes every pre-order waiting on the line (they share its units) and starts an open receive form again.
+ *  The field already shows the value, so only the receive form's fields and the page behind the order sheet are redrawn: a cost typed just before
+ *  a tap on Issue invoice or Received must not replace the button under the tap. */
 function setOl(lineId, k, v, say) {
   const o = live().orders.find(x => x.id === lineId), val = k === 'cost' ? (v.trim() === '' ? null : Number(v)) : v; if (!o || o.status !== 'Ordered' || (k === 'cond' && !val)) return;
   if (k === 'cost' && val != null && !(val >= 0)) { toast('Cost must be zero or more.'); return rerender(); }
   if (k === 'cost' ? (blank(o.cost) ? null : o.cost) === val : (o.cond || '') === val) return;
-  qOrderLine(lineId, { [k]: val }); dirty();
-  if (ui.sub && ui.sub.mode === 'recv' && ui.sub.id === lineId) ui.sub.c = recvSub(live().orders.find(x => x.id === lineId)).c;
-  commit(); toast(say);
+  qOrderLine(lineId, { [k]: val }); saveQueue(); dirty(); scheduleSync(); renderSync(); toast(say);
+  if (ui.sub && ui.sub.mode === 'recv' && ui.sub.id === lineId) { ui.sub.c = recvSub(live().orders.find(x => x.id === lineId)).c; redrawCosts('sub.c', ui.sub.qty); }
+  if (prefs.tab === 'orders' && !$('#layer').hidden) keepScroll(renderOrders);
 }
 /** The supplier picked for an order that had none: one orderLine entry per open line of the order. */
 function setOrderSup(orderId, supId) {
@@ -2263,7 +2272,11 @@ document.addEventListener('click', async ev => {
     case 'dropQ': {
       const gone = queue.find(x => x.id === d.qid); queue = queue.filter(x => x.id !== d.qid);
       if (gone && gone.kind === 'item') queue = queue.filter(x => x.kind === 'item' || !entrySkus(x).includes(gone.item.sku));
-      if (gone && gone.kind === 'invoice') queue = queue.filter(x => x.invId !== gone.invoice.id);   // its payments, shipping and line changes go with it
+      // An invoice takes its payments, shipping and line changes with it, and the supplier orders its pre-orders made unless another now waits on them;
+      // an order takes the changes, receipts and cancellations queued for its lines, which the sheet would refuse.
+      const lineIds = os => new Set(os.flatMap(o => o.order.lines.map(l => l.id)));
+      if (gone && gone.kind === 'invoice') { dirty(); const w = waitingOn(), mine = x => x.invId === gone.invoice.id && !(x.kind === 'order' && x.order.lines.some(l => w.get(l.id))), ids = lineIds(queue.filter(x => mine(x) && x.kind === 'order')); queue = queue.filter(x => !mine(x) && !ids.has(x.lineId)); }
+      if (gone && gone.kind === 'order') { const ids = lineIds([gone]); queue = queue.filter(x => !ids.has(x.lineId)); }
       if (!d.stay) closeSheet(); commit(); toast('Deleted'); break;
     }
     case 'retryOne': { const q = queue.find(x => x.id === d.qid); if (q) { q.status = 'pending'; delete q.error; } closeSheet(); commit(); break; }
@@ -2305,7 +2318,7 @@ document.addEventListener('click', async ev => {
     case 'sf': ui.sf = d.f; renderInvList(); break;
     case 'invSub': {   // a payment, or a change to a to-follow line, in the invoice sheet
       const v = live().invs.find(x => x.id === d.id), l = v && v.lines.find(x => x.line === +d.line);
-      ui.sub = { id: d.id, mode: d.m, line: l ? l.line : 0, paid: '', refund: '', sku: l ? l.sku : '', ol: l ? l.orderLine || (l.expected ? '' : undefined) : '', exp: l ? l.expected : '', sup: '' }; rerender(); break;
+      ui.sub = { id: d.id, mode: d.m, line: l ? l.line : 0, paid: '', refund: '', sku: l ? l.sku : '', ol: l ? l.orderLine || undefined : '', exp: l ? l.expected : '', sup: '' }; rerender(); break;
     }
     case 'lineShip': { const v = live().invs.find(x => x.id === d.id), l = v && v.lines.find(x => x.line === +d.line && x.status === FOLLOW); if (l) shipLine(v, l); break; }
     case 'paySave': savePayment(); break;
@@ -2399,6 +2412,7 @@ document.addEventListener('input', ev => {
   if (t.dataset.units) redrawCosts(t.dataset.units, t.value - (t.dataset.have || 0));   // a quantity sets how many cost fields show (a count: the units above the stock on hand)
   if (t.dataset.b) {
     setPath(t.dataset.b, t.value);
+    if (t.dataset.b.endsWith('.ol')) setPath(t.dataset.b + 'Exp', undefined);   // another order line picked: its own date shows (expHtml())
     if (t.dataset.redraw) rerender();
     // A quantity can turn a line's Pre-order on and off: redraw the form and keep the caret in the field.
     else if (t.dataset.b.startsWith('inv.') && $('#sellBody') && invSig() !== ui.invSig) { const b = t.dataset.b; renderInvForm(); const n = $(`[data-b="${b}"]`); if (n) n.focus(); }
