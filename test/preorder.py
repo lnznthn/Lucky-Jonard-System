@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 from common import *
 
 TODAY = datetime.date.today()
-EXP, EXP2 = (TODAY + datetime.timedelta(days=20)).isoformat(), (TODAY + datetime.timedelta(days=30)).isoformat()
+EXP, EXP2, EXP3 = [(TODAY + datetime.timedelta(days=n)).isoformat() for n in (20, 30, 25)]
 def kinds(p): return [q['kind'] for q in p.evaluate('queue')]
 def line_of(name): return next(r for r in rows('Supplier orders') if r[6] == name)
 def day(p, iso): return p.evaluate(f'fmtDay("{iso}")')
@@ -45,13 +45,19 @@ with sync_playwright() as pw:
 
     # ---- a pre-order linked to that open line shows and edits its condition and cost each, for every pre-order waiting on it
     new_sale(p); pick(p, 'inv.lines.0', 'ren')
+    check(p.input_value('#o0') == '', 'a second pre-order does not start on an order line whose units are all promised')
+    p.select_option('#o0', ren[0])
     check(p.input_value('#o0') == ren[0] and p.eval_on_selector('#o0', 'e => e.selectedOptions[0].text') == f'{day(p, EXP)} · No supplier yet' and p.input_value('#c0') == 'Loose' and p.input_value('#k0') == '450',
           'a pre-order linked to an open order line shows its condition and cost each')
     p.select_option('#c0', 'Box damage'); p.fill('#k0', '500'); p.press('#k0', 'Tab')
     ol = [q for q in p.evaluate('queue') if q['kind'] == 'orderLine']
     check('Saved on the supplier order' in p.inner_text('#toast') and [(q['lineId'], q.get('cond'), q.get('cost')) for q in ol] == [(ren[0], 'Box damage', 500)], f'each change is saved on the order line at once, merged into one entry: {ol}')
     p.click('#backBtn'); synced(p)
-    check(line_of('Ren Figure')[8] == 500 and line_of('Ren Figure')[13] == 'Box damage' and '2 × ₱1,200 · Box damage' in inv_sheet(p, 1), 'the order line changes in the sheet, and so does the pre-order already waiting on it'); close(p)
+    check(line_of('Ren Figure')[8] == 500 and line_of('Ren Figure')[13] == 'Box damage' and '2 × ₱1,200 · Box damage' in inv_sheet(p, 1), 'the order line changes in the sheet, and so does the pre-order already waiting on it')
+    p.click('#sheet .item:has-text("Ren Figure") [data-m="follow"]')
+    check(p.input_value('#oS') == ren[0] and p.input_value('#eS') == EXP, 'Change expected date on a linked line shows its order line’s date')
+    p.fill('#eS', EXP3); p.click('#sheet [data-act="followSave"]'); k = kinds(p); close(p); synced(p)
+    check('order' not in k and line_of('Ren Figure')[9] == EXP3 and rows('Invoice lines')[1][10] == EXP3 and len(rows('Supplier orders')) == 2, f'a new date is saved on the order line and the invoice line, with no new order: {k}')
 
     # ---- the order sheet: an order with no supplier gets one; its open line's cost each and condition are fields
     tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]')
@@ -65,12 +71,31 @@ with sync_playwright() as pw:
     # ---- Receive starts each unit at the line's condition and cost each; shipping the pre-order carries the condition to its invoice line
     check([e.input_value() for e in p.query_selector_all('#sheet [data-cond="sub.c"]')] == ['Box damage'] * 2 and [e.input_value() for e in p.query_selector_all('#sheet [data-cost="sub.c"]')] == ['500'] * 2,
           'receiving starts each unit at the line’s condition and cost each')
-    p.click('#sheet button:has-text("Received · add to stock")'); close(p); synced(p)
-    check([(r[9], r[11]) for r in rows('Movements') if str(r[0]).startswith('rcv-' + ren[0])] == [(500, 'Box damage')] * 2, 'the units come in at the line’s cost and condition')
+    p.fill('#sheet [data-olcost]', '520'); p.click('#sheet button:has-text("Received · add to stock")'); r = [q for q in p.evaluate('queue') if q['kind'] == 'receive']
+    check(len(r) == 1 and r[0]['costs'] == [520, 520], f'a cost each typed just before Received is saved, and the tap still receives, at it: {r}')
+    close(p); synced(p)
+    check([(r[9], r[11]) for r in rows('Movements') if str(r[0]).startswith('rcv-' + ren[0])] == [(520, 'Box damage')] * 2, 'the units come in at the line’s cost and condition')
     inv_sheet(p, 1); p.click('#sheet [data-act="lineShip"]'); close(p); synced(p)
     ln = rows('Invoice lines')[1]; sale = [r for r in rows('Movements') if r[0] == ln[1] + '-2']
-    check(ln[8:10] == [500, 'Delivered'] and ln[13] == 'Box damage' and len(sale) == 1 and sale[0][11] == 'Box damage', f'the shipped line and its Sale movement carry the condition: {ln}')
+    check(ln[8:10] == [520, 'Delivered'] and ln[13] == 'Box damage' and len(sale) == 1 and sale[0][11] == 'Box damage', f'the shipped line and its Sale movement carry the condition: {ln}')
     check('2 × ₱1,200 · Box damage' in inv_sheet(p, 1) and not [q for q in p.evaluate('queue')], 'the invoice shows it, and the sheet took every entry'); close(p)
+
+    # ---- held unsynced: a deleted invoice takes the supplier order its pre-order made; a deleted order, the change queued for its line
+    p.evaluate('ui.busy = true')   # holds the sync, so the entries stay on the device
+    new_sale(p); pick(p, 'inv.lines.0', 'sora'); p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.fill('[data-b="inv.contact"]', '0917 000 0000')
+    check(p.input_value('#o0') == '', 'the product’s only open line is promised in full, so the pre-order starts on New supplier order')
+    p.click('#view [data-act="invIssue"]'); k = kinds(p); p.click('#sheet button:has-text("Delete this invoice")')
+    check(k == ['order', 'invoice'] and not p.evaluate('queue'), f'deleting the invoice before it syncs also deletes its supplier order: {k}')
+    p.evaluate("""() => { const sku = live().list.find(i => i.name === 'Kai Figure').sku, c = [...live().custs.values()][0];
+      qAdd('order', { order: { id: 'oK', date: todayISO(), supId: '', expected: '', note: '', lines: [{ id: 'lK', sku, qty: 2, cost: null, cond: 'MIB' }] } });
+      qAdd('invoice', { invoice: { id: 'vK', no: nextNo(), date: todayISO(), custId: c.id, paid: '', disc: 0, fee: 0, lines: [{ sku, qty: 1, list: 1500, price: 1500, cost: null, cond: '', follow: true, expected: '%s', orderLine: '' }] } }); commit(); }""" % EXP)
+    inv_sheet(p, 2); p.click('#sheet [data-act="invSub"][data-m="follow"]')
+    check(p.input_value('#oS') == 'lK', 'a pre-order from before 2.8 (a typed date, no order line) opens on an open line with room, not New supplier order'); close(p)
+    tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]'); p.click('#view .item:has-text("Kai Figure")')
+    p.fill('#sheet [data-olcost]', '10'); p.press('#sheet [data-olcost]', 'Tab'); p.click('#sheet [data-act="dropQ"]')
+    check(kinds(p) == ['invoice'], f'deleting an order before it syncs also deletes the change queued for its line: {kinds(p)}')
+    p.evaluate('ui.busy = false'); p.click('#syncBtn'); synced(p)
+    check(not p.evaluate('queue') and len(rows('Invoices')) == 2, 'the sheet takes what is left')
 
     tab(p, 'Suppliers'); p.click('#view button[data-s="orders"]'); no_toy(p, 'Suppliers > Orders')
     check(not errors, f'no page errors: {errors}')
