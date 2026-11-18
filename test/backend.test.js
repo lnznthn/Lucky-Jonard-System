@@ -15,7 +15,7 @@ const item = (sku, name, extra = {}) => ({ id: 'i' + sku, kind: 'item', item: { 
 const move = (id, sku, dir, qty, reason, extra = {}) => ({ id: 'q' + id, kind: 'move', move: { id, date: '2026-11-15', sku, dir, qty, reason, ref: '', note: '', ...extra } });
 
 assert.equal(call('ping', {}, 'nope').ok, false); assert.equal(call('ping', {}, 'nope').auth, true);
-assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.7.0');
+assert.equal(call('ping').ok, true); assert.equal(call('ping').data.version, '2.8.0');
 assert.equal(sheet('Sheet1'), undefined, 'default tab removed');
 
 // 1. add items + moves in one batch, results per entry
@@ -371,7 +371,7 @@ assert.equal(br.frozen, 1);
 assert.deepEqual(br.getRange(1, 1, 1, 17).getValues()[0], ['Product ID', 'Name', 'Price', 'Active', 'On hand', 'Incoming', 'Owed', 'Left to promise', 'Units on hand', 'Stock value at cost', 'Units without cost', 'Manufacturer', 'Brand', 'Product line', 'Character', 'Release date', 'Release check']);
 let bs = Object.fromEntries(br.rowsOf().map(x => [x[0], x]));
 assert.equal(Object.keys(bs).length, Object.keys(names()).length, 'one row per item');
-assert.deepEqual(bs.S5.slice(4, 11), [4, 4, 2, 6, 'S5-3 150, S5-4 200, 100, 100', 550, 0], 'on hand, incoming (Qty less Received qty over Ordered lines), owed, left to promise, units on hand (the sale took the uncosted unit, the oldest; an In of Qty 2 has no unit SKUs), stock value, units without cost');
+assert.deepEqual(bs.S5.slice(4, 11), [4, 4, 2, 6, 'S5-3 150 MIB, S5-4 200 MIB, 100, 100', 550, 0], 'on hand, incoming (Qty less Received qty over Ordered lines), owed, left to promise, units on hand (the sale took the uncosted unit, the oldest; an In of Qty 2 has no unit SKUs; a received unit has its line\'s condition), stock value, units without cost');
 assert.deepEqual(bs.S2.slice(0, 4), ['S2', 'Item C renamed', 5, 'Yes']); assert.deepEqual(bs.S2.slice(8, 11), ['?, ?, ?, ?, ?, ?, ?, S2-8 ?', 0, 8], 'a unit without a cost shows as ?; the In of Qty 7 used SKU numbers 1 to 7');
 assert.deepEqual(bs.S9.slice(4, 11), [0, 0, 0, 0, '', '', ''], 'nothing on hand leaves the cost columns blank');
 assert.ok(br.textCols.has(9), 'Units on hand is a text column');
@@ -455,12 +455,12 @@ r = U.add([{ id: 'us', kind: 'supplier', supplier: { id: 'us', name: 'Supplier U
   { id: 'ur', kind: 'receive', lineId: 'uo1', date: '2026-11-14', from: 0, costs: [100, 200, 300, 400] }]);
 assert.ok(r.results.every(x => x.ok));
 assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[7] === 'uo').map(x => [x[0], x[5], x[9], x[10]]), [['rcv-uo1-1', 1, 100, 'U1-1'], ['rcv-uo1-2', 1, 200, 'U1-2'], ['rcv-uo1-3', 1, 300, 'U1-3'], ['rcv-uo1-4', 1, 400, 'U1-4']], 'each unit received has its SKU in column K');
-assert.deepEqual(brU('U1'), [4, 0, 0, 4, 'U1-1 100, U1-2 200, U1-3 300, U1-4 400', 1000, 0]);
+assert.deepEqual(brU('U1'), [4, 0, 0, 4, 'U1-1 100 MIB, U1-2 200 MIB, U1-3 300 MIB, U1-4 400 MIB', 1000, 0]);
 r = U.add([saleU('us1', 1, [{ sku: 'U1', qty: 1, price: 500, cost: 100 }]), saleU('us2', 2, [{ sku: 'U1', qty: 1, price: 500, cost: 150 }])]);
 assert.ok(r.results.every(x => x.ok));
 assert.deepEqual(U.sheet('Invoice lines').rowsOf().map(x => [x[0], x[8]]), [[1, 100], [2, 150]], 'the line cost is written as the app sent it');
 assert.deepEqual(U.sheet('Movements').rowsOf().filter(x => x[6] === 'Sale' && x[2] === 'U1').map(x => [x[0], x[9], x[10]]), [['us1-1', 100, ''], ['us2-1', 150, '']], 'and the same on the Sale movement, which has no SKU');
-assert.deepEqual([onHandU('U1'), brU('U1')], [2, [2, 0, 0, 2, 'U1-3 300, U1-4 400', 700, 0]], 'the two oldest units left');
+assert.deepEqual([onHandU('U1'), brU('U1')], [2, [2, 0, 0, 2, 'U1-3 300 MIB, U1-4 400 MIB', 700, 0]], 'the two oldest units left');
 
 // (l) a Restock return writes one row per unit at the cost of the first line of that item on the invoice, at the back of the queue
 r = U.add([move('t1', 'U3', 'In', 1, 'Opening', { cost: 80 }), move('t2', 'U3', 'In', 1, 'Opening', { cost: 90 }), move('t3', 'U3', 'In', 1, 'Opening', { cost: 95 }),
@@ -477,7 +477,7 @@ const s0 = U.full(), rowBefore = mvRow(U, 'rcv-uo1-4');
 r = U.c('add', { have: { rows: s0.rows, lastId: s0.lastId, moveRev: s0.moveRev }, entries: [costE('cc1', 'rcv-uo1-4', 450)] }).data;
 assert.ok(r.results[0].ok);
 assert.deepEqual(mvRow(U, 'rcv-uo1-4'), rowBefore.slice(0, 9).concat(450, rowBefore.slice(10)), 'only Unit cost changed');
-assert.deepEqual(brU('U1'), [2, 0, 0, 2, 'U1-3 300, U1-4 450', 750, 0]);
+assert.deepEqual(brU('U1'), [2, 0, 0, 2, 'U1-3 300 MIB, U1-4 450 MIB', 750, 0]);
 assert.equal(r.sync.moveRev, s0.moveRev + 1, 'a cost write raises moveRev');
 assert.deepEqual([r.sync.reset, r.sync.moves.length, r.sync.moves.find(m => m.id === 'rcv-uo1-4').cost], [true, s0.rows, 450], 'the reply carries every movement');
 let s1 = U.c('sync', { have: { rows: s0.rows, lastId: s0.lastId, moveRev: s0.moveRev } }).data;
@@ -486,7 +486,7 @@ s1 = U.c('sync', { have: { rows: s1.rows, lastId: s1.lastId, moveRev: s1.moveRev
 assert.deepEqual([s1.reset, s1.moves.length], [false, 0], 'and then syncs incrementally again');
 r = U.add([costE('cc1', 'rcv-uo1-4', 450), costE('cc2', 'rcv-uo1-3', null)]);
 assert.ok(r.results.every(x => x.ok)); assert.equal(r.sync.moveRev, s0.moveRev + 2, 'a retry writes nothing; clearing a cost is a write');
-assert.equal(mvRow(U, 'rcv-uo1-3')[9], ''); assert.deepEqual(brU('U1'), [2, 0, 0, 2, 'U1-3 ?, U1-4 450', 450, 1]);
+assert.equal(mvRow(U, 'rcv-uo1-3')[9], ''); assert.deepEqual(brU('U1'), [2, 0, 0, 2, 'U1-3 ? MIB, U1-4 450 MIB', 450, 1]);
 r = U.add([move('nx', 'U2', 'In', 1, 'Restock', { cost: 5 }), costE('cc3', 'nx', 6)]);
 assert.ok(r.results.every(x => x.ok)); assert.equal(mvRow(U, 'nx')[9], 6, 'a movement written earlier in the same request takes the cost');
 assert.equal(r.sync.moveRev, s0.moveRev + 2, 'a new row needs no reset');
@@ -503,7 +503,7 @@ assert.deepEqual(tabsN(), beforeN, 'no movement and no invoice changed'); assert
 r = U.add([saleU('us4', 4, [{ sku: 'U1', qty: 1, price: 500, cost: null }]), costE('cn7', 'rcv-uo1-3', 310), costE('cn8', 'n4', 75)]);
 zn = res(r);
 assert.ok(zn.vus4.ok && zn.cn8.ok); assert.equal(zn.cn7.error, LEFT, 'the sale earlier in the request took that unit');
-assert.deepEqual([mvRow(U, 'rcv-uo1-3')[9], brU('U1')[4], brU('U2')[4]], ['', 'U1-4 450', 'U2-3 75, U2-4 6']);
+assert.deepEqual([mvRow(U, 'rcv-uo1-3')[9], brU('U1')[4], brU('U2')[4]], ['', 'U1-4 450 MIB', 'U2-3 75, U2-4 6']);
 
 // (o) the Movements key check: a sorted tab still gets the cost on the right row; a duplicated or deleted row refuses the entry
 const K = bench();
@@ -610,11 +610,11 @@ assert.deepEqual([res(r).qw4.error, res(r).qw5.error], [COND, COND]);
 assert.deepEqual([condsOf(['w1', 'w2', 'w3']), r.sync.moves.map(m => m.cond)], [['MISB', 'Loose', ''], ['MISB', 'Loose', '']]);
 assert.equal(brC('C1'), 'C1-1 10 MISB, C1-2 20 Loose, C1-3 30', 'Browse: SKU, cost, condition when recorded');
 
-// (s) receive: conds parallel to costs, a short list leaves the rest blank, one bad value refuses the receipt
+// (s) receive: conds parallel to costs, a short list gives the rest the line's condition (MIB here), one bad value refuses the receipt
 r = C.add([{ id: 'cs', kind: 'supplier', supplier: { id: 'cs', name: 'Supplier C' } }, { id: 'co', kind: 'order', order: { id: 'co', date: '2026-11-10', supId: 'cs', expected: '', note: '', lines: [{ id: 'cl1', sku: 'C2', qty: 3 }] } },
   { id: 'cr0', kind: 'receive', lineId: 'cl1', date: '2026-11-14', from: 0, costs: [5, 6], conds: ['MOC', 'Boxed'] }, { id: 'cr1', kind: 'receive', lineId: 'cl1', date: '2026-11-14', from: 0, costs: [5, 6], conds: ['MOC'] }]);
 assert.equal(res(r).cr0.error, COND); assert.ok(res(r).cr1.ok);
-assert.deepEqual([condsOf(['rcv-cl1-1', 'rcv-cl1-2']), brC('C2')], [['MOC', ''], 'C2-1 5 MOC, C2-2 6']);
+assert.deepEqual([condsOf(['rcv-cl1-1', 'rcv-cl1-2']), brC('C2')], [['MOC', 'MIB'], 'C2-1 5 MOC, C2-2 6 MIB']);
 
 // (t) an invoice with a discount and a shipping fee: Total = max(0, subtotal - discount) + fee; each line's condition on the line and its Sale movement
 const invC = (id, no, lines, extra = {}) => ({ id: 'v' + id, kind: 'invoice', invoice: { id, no, date: '2026-11-18', custId: 'cc', lines, ...extra } });
@@ -686,7 +686,7 @@ const shopRows = () => shopT.rowsOf().map(x => x.slice(0, 2));
 const sz = S.full();
 assert.deepEqual([shopT.getRange(1, 1, 1, 2).getValues()[0], shopRows(), shopT.textCols.has(1) && shopT.textCols.has(2), shopT.getProtections(), P.SHEET_ID],
   [['Field', 'Value'], [['Shop name', ''], ['Address', ''], ['Notes', ''], ['Currency', '']], true, [], 'mock-sheet']);
-assert.deepEqual([sz.shop, sz.logo, sz.version, S.add([]).sync.version, JSON.parse(vm.runInContext('doGet()', S.b).text).data], [{ name: '', contact: '', foot: '', cur: '', logoRev: 0 }, '', '2.7.0', '2.7.0', { app: 'Bodega API', version: '2.7.0' }]);
+assert.deepEqual([sz.shop, sz.logo, sz.version, S.add([]).sync.version, JSON.parse(vm.runInContext('doGet()', S.b).text).data], [{ name: '', contact: '', foot: '', cur: '', logoRev: 0 }, '', '2.8.0', '2.8.0', { app: 'Bodega API', version: '2.8.0' }]);
 
 // (aa) rows are found by label after the owner reorders them; a field is written on its own row, trimmed, and a retry writes nothing
 shopT.putRows([['Currency', '$'], ['Notes', 'Thank you'], ['Shop name', 'Old Name'], ['Address', '']]);
@@ -749,6 +749,63 @@ vm.runInContext('onOpen()', Z.b);
 assert.deepEqual(Z.b.ui.menus, [{ name: 'Bodega', items: [['Set up or upgrade this sheet', 'setupFromMenu'], ['Show connection code', 'showCode']] }]);
 const zUrl = Z.b.url; vm.runInContext('showCode()', Z.b); Z.b.url = null; vm.runInContext('showCode()', Z.b); vm.runInContext('setupFromMenu()', Z.b);
 const dz = Z.b.ui.dialogs;
-assert.deepEqual(dz.map(d => d.title), ['Connection code', 'Deploy the web app first', 'This sheet is ready (back end 2.7.0)']);
+assert.deepEqual(dz.map(d => d.title), ['Connection code', 'Deploy the web app first', 'This sheet is ready (back end 2.8.0)']);
 assert.ok(dz[0].html.includes(zUrl + '#' + zKey) && !dz[1].html.includes('/exec#') && dz[1].html.includes(zKey) && dz[1].html.includes('New deployment'));
+// ---------- 2.8: a condition on every supplier order line, orders with no supplier yet, the orderLine entry ----------
+const O = bench(), soO = O.sheet('Supplier orders'), soRow = id => soO.rowsOf().find(x => x[0] === id), mvO = id => O.sheet('Movements').rowsOf().find(x => x[0] === id);
+const ordO = (id, supId, lines) => ({ id: 'o' + id, kind: 'order', order: { id, date: '2026-11-18', supId, expected: '', note: '', lines } });
+const olE = (id, lineId, f) => ({ id, kind: 'orderLine', lineId, ...f });
+const linesO = () => Object.fromEntries(O.full().orders.map(o => [o.id, [o.supId, o.sup, o.cost, o.cond, o.expected, o.status]]));
+O.add([item('O1', 'Ord One'), item('O2', 'Ord Two'), { id: 'ok', kind: 'cust', cust: { id: 'oc', name: 'Oli', contact: '0917' } },
+  { id: 'osa', kind: 'supplier', supplier: { id: 'osa', name: 'Supplier A' } }, { id: 'osb', kind: 'supplier', supplier: { id: 'osb', name: 'Supplier B' } }]);
+
+// (jj) each order line has a condition (column N, cond in the JSON), MIB when missing or blank, refused outside the list; an order may have no supplier yet, an unknown one is still refused
+r = O.add([ordO('oa', 'osa', [{ id: 'la1', sku: 'O1', qty: 3, cost: 100, cond: 'MISB' }, { id: 'la2', sku: 'O1', qty: 1, cond: '' }, { id: 'la3', sku: 'O2', qty: 1 }]),
+  ordO('ob', '', [{ id: 'lb1', sku: 'O2', qty: 3, cost: 50, cond: 'Loose' }]), ordO('oc', 'nobody', [{ id: 'lc1', sku: 'O1', qty: 1 }]), ordO('od', 'osa', [{ id: 'ld1', sku: 'O1', qty: 1, cond: 'Mint' }])]);
+assert.deepEqual(r.results.map(x => x.error), [undefined, undefined, 'Unknown supplier', COND]);
+assert.deepEqual(linesO(), { la1: ['osa', 'Supplier A', 100, 'MISB', '', 'Ordered'], la2: ['osa', 'Supplier A', null, 'MIB', '', 'Ordered'], la3: ['osa', 'Supplier A', null, 'MIB', '', 'Ordered'], lb1: ['', '', 50, 'Loose', '', 'Ordered'] });
+assert.deepEqual([soO.cell(1, 14), soO.textCols.has(14), soRow('lb1').slice(3, 5), soRow('lb1')[13]], ['Condition', true, ['', ''], 'Loose'], 'no supplier: both cells blank');
+
+// (kk) orderLine sets each field present on an Ordered line: cost (null clears), cond, the supplier's ID and name, expected ('' clears); a retry, or no field, writes nothing
+r = O.add([olE('ol1', 'lb1', { cost: 55.555, cond: 'MOC', supId: 'osb', expected: '2026-12-20' }), olE('ol2', 'la1', { cost: null }), olE('ol3', 'la2', { expected: '2026-12-01' }), olE('ol4', 'la2', { expected: '' })]);
+assert.ok(r.results.every(x => x.ok));
+assert.deepEqual([linesO().lb1, linesO().la1, linesO().la2], [['osb', 'Supplier B', 55.56, 'MOC', '2026-12-20', 'Ordered'], ['osa', 'Supplier A', null, 'MISB', '', 'Ordered'], ['osa', 'Supplier A', null, 'MIB', '', 'Ordered']]);
+assert.deepEqual(soRow('lb1').slice(3, 14), ['osb', 'Supplier B', 'O2', 'Ord Two', 3, 55.56, '2026-12-20', 0, 'Ordered', '', 'MOC']);
+const soWrites = soO.writes;
+assert.ok(O.add([olE('ol1', 'lb1', { cost: 55.555, cond: 'MOC', supId: 'osb', expected: '2026-12-20' }), olE('ol5', 'la1', {})]).results.every(x => x.ok)); assert.equal(soO.writes, soWrites);
+
+// (ll) refused: a bad value, a blank condition, an unknown supplier or line; a change to a received or cancelled line, but not an entry that changes nothing
+r = O.add([{ id: 'or1', kind: 'receive', lineId: 'la3', date: '2026-11-19', from: 0, costs: [10], conds: [''] }, { id: 'or2', kind: 'orderCancel', lineId: 'la2' },
+  olE('ol6', 'la1', { cost: -1 }), olE('ol7', 'la1', { cond: '' }), olE('ol8', 'la1', { cond: 'Mint' }), olE('ol9', 'la1', { supId: 'nobody' }), olE('ol10', 'la1', { expected: 'soon' }), olE('ol11', 'nope', { cond: 'MIB' }),
+  olE('ol12', 'la3', { cond: 'Loose' }), olE('ol13', 'la3', { cond: 'MIB', cost: null }), olE('ol14', 'la2', { cost: 5 }), olE('ol15', 'la2', { cond: 'MIB' })]);
+assert.deepEqual(r.results.map(x => x.error), [undefined, undefined, 'Cost each must be a number, zero or more', COND, COND, 'Unknown supplier', 'Expected arrival must look like 2026-11-15', 'Unknown supplier order line',
+  'That order line was already received', undefined, 'That order line was cancelled', undefined]);
+assert.deepEqual([linesO().la1, linesO().la3[3]], [['osa', 'Supplier A', null, 'MISB', '', 'Ordered'], 'MIB']);
+
+// (mm) receive: a unit without a condition takes its line's; a line's new condition reaches only the units received after it
+r = O.add([{ id: 'or3', kind: 'receive', lineId: 'lb1', date: '2026-11-19', from: 0, costs: [1, 2, 3], conds: ['', 'CIB'] }, { id: 'or4', kind: 'receive', lineId: 'la1', date: '2026-11-19', from: 0, costs: [100] },
+  olE('ol16', 'la1', { cond: 'CIB' }), { id: 'or5', kind: 'receive', lineId: 'la1', date: '2026-11-20', from: 1, costs: [100, 100] }]);
+assert.ok(r.results.every(x => x.ok));
+assert.deepEqual(['rcv-lb1-1', 'rcv-lb1-2', 'rcv-lb1-3', 'rcv-la1-1', 'rcv-la1-2', 'rcv-la1-3', 'rcv-la3-1'].map(id => mvO(id)[11]), ['MOC', 'CIB', 'MOC', 'MISB', 'CIB', 'CIB', 'MIB']);
+
+// (nn) a pre-order on a new supplier order: the order entry before the invoice makes the line it links to, in one request; an invoice before its order entry is refused
+const invO = (id, no, orderLine) => ({ id: 'v' + id, kind: 'invoice', invoice: { id, no, date: '2026-11-18', custId: 'oc', paid: 0, lines: [{ sku: 'O2', qty: 1, price: 500, follow: true, expected: '2026-12-24', orderLine }] } });
+r = O.add([ordO('oe', '', [{ id: 'le1', sku: 'O2', qty: 1, cost: 70, cond: 'MOC' }]), invO('io1', 1, 'le1'), invO('io2', 2, 'lf1'), ordO('of', '', [{ id: 'lf1', sku: 'O2', qty: 1 }])]);
+assert.deepEqual(r.results.map(x => x.error), [undefined, undefined, 'Unknown supplier order line', undefined]);
+assert.deepEqual([r.sync.invs.find(v => v.id === 'io1').lines[0], linesO().le1], [{ line: 1, sku: 'O2', name: 'Ord Two', qty: 1, list: 99.5, price: 500, cost: null, status: 'To follow', expected: '2026-12-24', orderLine: 'le1', delivered: '', cond: '' },
+  ['', '', 70, 'MOC', '', 'Ordered']], 'the to-follow line stores no cost and no condition; its order line has them');
+
+// (oo) setup() on a 2.7 sheet: Supplier orders gets the Condition header, its text format, and MIB in the blank Condition of the lines still Ordered; nothing else changes
+const Q = bench(), soQ = Q.sheet('Supplier orders'), cellsQ = () => Q.b.sheets.map(x => [x.name, JSON.stringify(Object.entries(x.cells).sort())]);
+const noN = () => cellsQ().map(([n, c]) => [n, n === 'Supplier orders' ? JSON.stringify(JSON.parse(c).filter(([k]) => !k.endsWith(',14'))) : c]);
+Q.add([item('Q1', 'Queue One'), { id: 'qs', kind: 'supplier', supplier: { id: 'qs', name: 'Supplier Q' } }, { id: 'qo', kind: 'order', order: { id: 'qo', date: '2026-11-10', supId: 'qs', expected: '', note: '', lines: ['q1', 'q2', 'q3', 'q4'].map(id => ({ id, sku: 'Q1', qty: 2, cost: 10 })) } },
+  { id: 'qr2', kind: 'receive', lineId: 'q2', date: '2026-11-11', from: 0, costs: [10] }, { id: 'qr3', kind: 'receive', lineId: 'q3', date: '2026-11-11', from: 0, costs: [10, 10] }, { id: 'qc4', kind: 'orderCancel', lineId: 'q4' }]);
+Object.keys(soQ.cells).forEach(k => { if (k.endsWith(',14')) delete soQ.cells[k]; }); soQ.textCols.delete(14);
+const beforeQ = noN();
+vm.runInContext('setup()', Q.b);
+assert.deepEqual([soQ.cell(1, 14), soQ.textCols.has(14), soQ.rowsOf().map(x => [x[0], x[11], x[13]]), Q.full().orders.map(o => o.cond), noN()],
+  ['Condition', true, [['q1', 'Ordered', 'MIB'], ['q2', 'Ordered', 'MIB'], ['q3', 'Received', undefined], ['q4', 'Cancelled', undefined]], ['MIB', 'MIB', '', ''], beforeQ], 'a part-received line is still Ordered; the others stay blank and read as \'\'');
+const afterQ = cellsQ();
+vm.runInContext('setup()', Q.b);
+assert.deepEqual(cellsQ(), afterQ, 'running setup() again changes nothing');
 console.log('backend tests passed');
