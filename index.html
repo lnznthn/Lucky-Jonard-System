@@ -247,10 +247,11 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.7.0';
+const VERSION = '2.8.0';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 // One app serves every shop, each with its own sheet and back end: entries go only to a back end (VERSION_ in Code.gs) at this version or later.
-const BACKEND_MIN = '2.7.0';
+// 2.8: an order may have no supplier yet and each order line has a condition, which an older back end refuses or drops.
+const BACKEND_MIN = '2.8.0';
 // The New shop guide in Settings: a template sheet to copy ('' until there is one; the guide then says to paste Code.gs into a blank sheet).
 const TEMPLATE_URL = '';
 const CODE_URL = 'https://github.com/lnznthn/Lucky-Jonard-System/blob/main/apps-script/Code.gs';   // GitHub forwards the old name after a rename
