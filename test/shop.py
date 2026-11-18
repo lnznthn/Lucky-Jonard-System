@@ -66,15 +66,15 @@ with sync_playwright() as pw:
     a.click('#syncBtn'); synced(a); check(shop(a)[0]['logo'] == '' and shop(a)[0]['name'] == 'Typed here', 'device A loses the logo and has the new name')
 
     # ---- version guard: a back end older than the app gets no entries; they wait, the reason shows, and they go once it is updated
-    post('/_ver', '"2.6.0"'); a.click('#syncBtn'); synced(a)
-    check(a.evaluate('meta.ver') == '2.6.0' and 'Update the sheet' not in home(a), 'the version comes with every sync; with nothing to send, nothing is held')
+    post('/_ver', '"2.7.0"'); a.click('#syncBtn'); synced(a)
+    check(a.evaluate('meta.ver') == '2.7.0' and 'Update the sheet' not in home(a), 'the version comes with every sync; with nothing to send, nothing is held')
     settings(a); a.fill('#sFoot', 'Held note'); a.click('#sheet [data-act="saveShop"]')
     a.wait_for_function("document.querySelector('#syncTxt').textContent === 'Sheet out of date'", timeout=8000)
     tab(a, 'Home'); top = a.inner_text('#view .list .item')
-    check(top == 'Update the sheet: it runs back end 2.6.0, this app needs 2.7.0\nPaste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version. 1 entry waits here until then.', f'the top Home row says why entries wait: {top!r}')
+    check(top == 'Update the sheet: it runs back end 2.7.0, this app needs 2.8.0\nPaste the new Code.gs, run Bodega > Set up or upgrade this sheet, and publish a new version. 1 entry waits here until then.', f'the top Home row says why entries wait: {top!r}')
     check([x['status'] for x in a.evaluate('queue')] == ['pending'] and shop_tab()['Notes'] == 'Old notes', 'the entry stays queued and the sheet is untouched')
-    settings(a); check('This shop’s sheet runs back end 2.6.0; this app needs 2.7.0.' in a.inner_text('#sheet'), 'Settings > Connection gives the reason'); close(a)
-    post('/_ver', '"2.7.0"'); a.click('#syncBtn'); synced(a)
+    settings(a); check('This shop’s sheet runs back end 2.7.0; this app needs 2.8.0.' in a.inner_text('#sheet'), 'Settings > Connection gives the reason'); close(a)
+    post('/_ver', '"2.8.0"'); a.click('#syncBtn'); synced(a)
     check(not a.evaluate('queue') and shop_tab()['Notes'] == 'Held note' and 'Update the sheet' not in home(a), 'once the back end is updated the entry goes and the row is gone')
 
     check(not errors, f'no page errors: {errors}')
