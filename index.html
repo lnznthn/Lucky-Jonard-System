@@ -1501,10 +1501,10 @@ function drawDoc(v) {
     row(l.qty, QTY, 'center'); if (exp) row(exp, EXP, 'center'); row(peso(r2(l.qty * l.price)), R, 'right');
     y += rh;
   });
-  // Two rules right under the last row, then payment details at the left and the totals at the right: labels always, values when above zero
+  // One rule across the page right under the last row, then payment details at the left and the totals at the right: labels always, values when above zero
   // (Paid only on a part payment, when the Total box shows the balance).
   const by = y += 1, LX = 456, BX = 396, sub = r2(shown.reduce((t, l) => t + l.qty * l.price, 0));
-  rule(by, '#000', TL, 184); rule(by, '#000', 292, TR);
+  rule(by, '#000');
   pay.forEach((p, i) => { y += 19; text(p.method || '', M, y, { bold: true }); text(p.number || '', NR, y, { color: GREY, align: 'right' }); names[i].forEach((s, j) => text(s, NR + 8, y + j * 13, { color: GREY })); y += (names[i].length - 1) * 13; });
   [['SubTotal', peso(sub)], ['Discount', v.disc > 0 ? '−' + peso(v.disc) : ''], ['Paid', v.balance > 0 && v.paid > 0 ? peso(v.paid) : ''], ['Shipping Fee', v.fee > 0 ? peso(v.fee) : '']]
     .forEach(([k, val], i) => { text(k, LX, by + 19 * (i + 1), { color: GREY, align: 'right' }); text(val, R, by + 19 * (i + 1), { color: GREY, bold: !i, align: 'right' }); });
