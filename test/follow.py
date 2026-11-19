@@ -19,16 +19,16 @@ with sync_playwright() as pw:
 
     # ---- one invoice: the unit on hand leaves stock now, two more are to follow
     home(p); p.click('#view button:has-text("New sale")'); pick(p, 'inv.lines.0', 'luffy')
-    check(not on(p, 0) and not p.is_visible('#iPaid') and p.inner_text('#invHint') == 'Takes 1 Luffy Figure out of stock and opens the invoice.', 'a line the stock covers is sold now')
+    check(not on(p, 0) and not p.is_visible('#iPaid') and p.inner_text('#invHint') == 'Shows the invoice to check first. Approving it takes 1 Luffy Figure out of stock.', 'a line the stock covers is sold now')
     p.fill('[data-b="inv.lines.0.qty"]', '3')
     check(on(p, 0) and p.is_visible('#iPaid') and p.evaluate('document.activeElement.dataset.b') == 'inv.lines.0.qty', 'asking more than is free to sell turns Pre-order on and shows Paid now; the quantity keeps focus')
     p.fill('[data-b="inv.lines.0.qty"]', '1'); p.click('button:has-text("Add another product")'); pick(p, 'inv.lines.1', 'luffy'); p.fill('[data-b="inv.lines.1.qty"]', '2')
-    check(not on(p, 0) and on(p, 1) and p.inner_text('#invHint') == 'Takes 1 Luffy Figure out of stock, leaves 2 Luffy Figure to follow, and opens the invoice.', 'the same product on a second line is to follow')
+    check(not on(p, 0) and on(p, 1) and p.inner_text('#invHint') == 'Shows the invoice to check first. Approving it takes 1 Luffy Figure out of stock and leaves 2 Luffy Figure to follow.', 'the same product on a second line is to follow')
     p.fill('#e1', EXP); p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.click('#view [data-act="invIssue"]')
     check('phone or Messenger' in p.inner_text('#toast'), 'a to-follow line needs the contact')
     p.fill('[data-b="inv.contact"]', '0917 000 0000'); p.fill('[data-b="inv.paid"]', '1000')
     check(p.inner_text('#invTotal') == '₱4,500' and p.inner_text('#invBal') == '₱3,500', 'the form shows the total and the balance')
-    p.click('button:has-text("Issue invoice no. 1")'); sheet = p.inner_text('#sheet')
+    p.click('button:has-text("Issue invoice no. 1")'); approve(p); sheet = p.inner_text('#sheet')
     check(f'To follow · expected {day(p, EXP)}' in sheet and 'Paid ₱1,000 · balance ₱3,500' in sheet and 'Margin known once the to-follow lines ship' in sheet, 'the invoice shows the line to follow, paid and balance')
     close(p); synced(p)
     inv = rows('Invoices')[0]; vid = inv[1]; ln = rows('Invoice lines'); sales = [r for r in rows('Movements') if r[6] == 'Sale']
@@ -85,7 +85,7 @@ with sync_playwright() as pw:
     # ---- cancelling a to-follow line takes it off the total and refunds what was paid beyond it
     new_sale(p); pick(p, 'inv.lines.0', 'zoro'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.fill('[data-b="inv.contact"]', 'm.me/ben')
     check(on(p, 0), 'a product not in stock starts as a pre-order')
-    p.click('button:has-text("Issue invoice no. 2")')
+    p.click('button:has-text("Issue invoice no. 2")'); approve(p)
     check(not p.is_visible('#sheet button:has-text("Record a return")'), 'a line still to follow takes no return')
     p.click('#sheet [data-act="invSub"][data-m="lineCancel"]')
     check(p.get_attribute('[data-b="sub.refund"]', 'placeholder') == 'Leave blank for ₱1,100', 'cancelling asks what was refunded, the amount paid beyond the new total by default')

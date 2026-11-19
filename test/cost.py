@@ -23,7 +23,7 @@ def stock_in(p, name, costs):
     p.click('button:has-text("Record stock in")')
 def sell(p, name, price, cust, qty=1):
     new_sale(p); pick(p, 'inv.lines.0', name); p.fill('[data-b="inv.lines.0.qty"]', str(qty)); p.fill('[data-b="inv.lines.0.price"]', str(price)); p.fill('[data-b="inv.cust"]', cust)
-def issue(p): p.click('#view [data-act="invIssue"]'); text = p.inner_text('#sheet'); close(p); return text
+def issue(p): p.click('#view [data-act="invIssue"]'); approve(p); text = p.inner_text('#sheet'); close(p); return text
 def sku_of(p, name): return p.evaluate(f"live().list.find(i => i.name === {json.dumps(name)}).sku")
 
 with sync_playwright() as pw:

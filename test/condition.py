@@ -52,7 +52,7 @@ with sync_playwright() as pw:
     check(p.input_value('#iDisc') == '220' and 'Subtotal\n₱2,200' in tot and 'Discount\n−₱220' in tot and 'Shipping fee\n₱150' in tot and p.inner_text('#invTotal') == '₱2,130', f'the % keeps the amount up to date; Total is ₱2,200 − ₱220 + ₱150: {tot!r}')
     p.fill('#iDisc', '3000'); p.fill('[data-b="inv.cust"]', 'Ana Cruz'); p.click('#view [data-act="invIssue"]')
     check('more than the subtotal' in p.inner_text('#toast') and p.input_value('#iPct') == '136.36', 'a discount above the subtotal is refused')
-    p.fill('#iPct', '10'); p.click('#view [data-act="invIssue"]'); sheet = p.inner_text('#sheet')
+    p.fill('#iPct', '10'); p.click('#view [data-act="invIssue"]'); approve(p); sheet = p.inner_text('#sheet')
     check('2 × ₱1,100 (listed ₱1,000) · MIB' in sheet and 'Discount\n−₱220' in sheet and 'Shipping fee\n₱150' in sheet and 'Total\n₱2,130' in sheet and 'Margin ₱1,680' in sheet, f'the invoice shows the line’s condition, the discount, the fee, the total, and the margin without the fee: {sheet!r}')
     close(p); synced(p)
     inv, ln = rows('Invoices')[0], rows('Invoice lines')[0]

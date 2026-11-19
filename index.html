@@ -152,6 +152,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 .scrim{position:absolute;inset:0;background:var(--scrim)}
 .sheet{--sec:var(--raise);position:relative;background:var(--raise);border:1px solid var(--line);border-bottom:0;width:100%;max-width:720px;max-height:92dvh;overflow:auto;padding:12px 16px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px}
 .sheet .top{display:flex;align-items:center;gap:8px;margin-right:-8px;min-height:44px}
+.sheet .draft{display:flex;flex-direction:column;gap:8px}.sheet .draft canvas{display:block;width:100%;height:auto;border:1px solid var(--line)}
 .sheet .top h2{flex:1;min-width:0;font:400 28px/1.05 var(--display);letter-spacing:.02em;overflow-wrap:anywhere}
 .toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translate(-50%,20px);background:var(--text);color:var(--bg);padding:12px 16px;font-size:15px;opacity:0;pointer-events:none;transition:.2s;z-index:30;width:max-content;max-width:90%;text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -247,7 +248,7 @@ details.grp>summary{padding:14px 14px 4px;font-size:13px;color:var(--muted);font
 
 <script>
 'use strict';
-const VERSION = '2.8.0';
+const VERSION = '2.8.1';
 const APP_NAME = 'Bodega';   // the app's name in the UI; also in <title>, the head meta and manifest.webmanifest
 // One app serves every shop, each with its own sheet and back end: entries go only to a back end (VERSION_ in Code.gs) at this version or later.
 // 2.8: an order may have no supplier yet and each order line has a condition, which an older back end refuses or drops.
@@ -553,7 +554,7 @@ const olText = o => [o.expected ? fmtDay(o.expected) : 'No date yet', o.sup || '
 /** A to-follow line's expected date: its supplier-order line's when it is linked to one, else the date typed. */
 const lineExp = l => { const o = l.orderLine && live().orders.find(x => x.id === l.orderLine); return (o && o.expected) || l.expected || ''; };
 /** A line's condition as shown: a to-follow line's is its supplier-order line's (none when it links none, as before 2.8); once it ships, its own. */
-const condOfLine = l => { if (l.status !== FOLLOW) return l.cond || ''; const o = l.orderLine && live().orders.find(x => x.id === l.orderLine); return (o && o.cond) || ''; };
+const condOfLine = l => { if (l.status !== FOLLOW) return l.cond || ''; const o = l.orderLine && live().orders.find(x => x.id === l.orderLine); return (o && o.cond) || l.cond || ''; };
 
 /* ---------- queue ---------- */
 const queued = status => queue.filter(q => q.status === status).length;
@@ -1190,11 +1191,14 @@ const invTotHtml = later => subRows(invSub(), invDisc() || 0, invFee() || 0) + (
 function invHint() {
   const L = live(), ls = ui.inv.lines.map((l, i) => ({ l, i })).filter(x => x.l.sku && L.map.get(x.l.sku));
   if (!ls.length) return 'Pick a product, then type the customer’s name.';
+  return 'Shows the invoice to check first. Approving it ' + invEffects() + '.';
+}
+/** What issuing does to stock, for the form's hint and the check before issuing: "takes 1 Kai Figure out of stock and leaves 2 Ren Figure to follow". */
+function invEffects() {
+  const L = live(), ls = ui.inv.lines.map((l, i) => ({ l, i })).filter(x => x.l.sku && L.map.get(x.l.sku));
   const what = xs => { const n = xs.reduce((s, x) => s + lineQty(x.l), 0); return xs.length === 1 ? n + ' ' + L.map.get(xs[0].l.sku).name : plural(n, 'unit') + ' of ' + xs.length + ' products'; };
   const now = ls.filter(x => !isFollow(x.i)), later = ls.filter(x => isFollow(x.i));
-  const said = [now.length ? 'takes ' + what(now) + ' out of stock' : '', later.length ? 'leaves ' + what(later) + ' to follow' : ''].filter(Boolean);
-  const t = (said.length > 1 ? said.join(', ') + ',' : said[0]) + ' and opens the invoice.';
-  return t[0].toUpperCase() + t.slice(1);
+  return [now.length ? 'takes ' + what(now) + ' out of stock' : '', later.length ? 'leaves ' + what(later) + ' to follow' : ''].filter(Boolean).join(' and ');
 }
 function renderSell() {
   const form = '<div id="sellBody" class="stack" style="gap:20px"></div>', list = `<div id="invSeg"></div><div><label for="iq">Search</label><input id="iq" type="search" placeholder="Number, customer or product" value="${esc(ui.iq)}" autocomplete="off"></div><div id="invList"></div>`;
@@ -1267,7 +1271,8 @@ function renderInvForm() {
 }
 /** One invoice: lines with Pre-order on are to follow (no stock movement, no cost or condition yet); the others leave stock at their FIFO cost, with the condition of the units they take.
  *  A to-follow line on New supplier order first gets its own supplier order (qNewOrder()), which its orderLine then links. */
-function issueInvoice() {
+/** Checks the New sale form as Code.gs checks an invoice and returns what issuing it sends, or nothing after a toast saying what to fix. */
+function invDraft() {
   const f = ui.inv, L = live(), lines = [], seen = new Set(), news = [];
   for (const [i, l] of f.lines.entries()) {
     const it = l.sku && L.map.get(l.sku); if (!it) return toast('Pick a product first.');
@@ -1299,6 +1304,23 @@ function issueInvoice() {
   if (paid !== '' && (isNaN(paid) || paid < 0)) return toast('Amount paid must be zero or more.');
   if (paid !== '' && paid > total) return toast('Amount paid is more than the total.');
   const date = parseDate(f.date); if (!date) return toast('Check the date.');
+  return { lines, news, name, date, paid, disc, fee, total };
+}
+/** Issue invoice first shows the invoice as it will be drawn, logo and all, so it is seen before it exists; Approve issues it and Cancel goes back to the form. */
+function previewInvoice() {
+  const d = invDraft(); if (!d) return;
+  const L = live(), no = nextNo(), paid = d.paid === '' ? d.total : d.paid;
+  const v = { id: 'draft', no, date: d.date, cust: d.name, contact: ui.inv.contact.trim(), disc: d.disc, fee: d.fee, total: d.total, paid, balance: r2(d.total - paid),
+    lines: d.lines.map((l, k) => ({ line: k + 1, name: L.map.get(l.sku).name, qty: l.qty, price: l.price, status: l.follow ? FOLLOW : DELIVERED, orderLine: l.orderLine || '', expected: l.expected || '',
+      cond: l.follow ? ((d.news.find(n => n[0] === l) || [])[2] || '') : l.cond })) };
+  openSheet(`<div class="top"><h2>Check invoice no. ${no}</h2>${closeBtn}</div><div id="draftImg" class="draft"></div>
+    <p class="hint">Approving ${esc(invEffects())}.</p>
+    <div class="links"><button class="btn primary big" style="flex:1" data-act="invApprove">Approve</button><button class="tbtn" data-act="close">Cancel</button></div>`);
+  const cs = drawDoc(v); docPngs(cs).then(() => { const box = $('#draftImg'); if (box) box.append(...cs); });   // docPngs draws the logo onto the first page
+}
+function issueInvoice() {
+  const d = invDraft(); if (!d) return;
+  const f = ui.inv, { lines, news, name, date, paid, disc, fee } = d;
   const custId = custFor(name, f.contact), id = 'v' + uid(), no = nextNo();
   news.forEach(([line, cost, cond, sup]) => { line.orderLine = qNewOrder(id, line.sku, line.qty, line.expected, cost, cond, sup); });
   qAdd('invoice', { invoice: { id, no, date, custId, paid: paid === '' ? '' : r2(paid), disc, fee, lines } });
@@ -2313,7 +2335,8 @@ document.addEventListener('click', async ev => {
     case 'invFollow': ui.inv.lines[+d.i].follow = el.checked; renderSell(); break;
     case 'invAddLine': ui.inv.lines.push({ sku: '', qty: 1, price: '' }); renderSell(); break;
     case 'invDelLine': ui.inv.lines.splice(+d.i, 1); renderSell(); break;
-    case 'invIssue': issueInvoice(); break;
+    case 'invIssue': previewInvoice(); break;
+    case 'invApprove': issueInvoice(); break;
     case 'inv': ui.sub = null; openInv(d.id); break;
     case 'sf': ui.sf = d.f; renderInvList(); break;
     case 'invSub': {   // a payment, or a change to a to-follow line, in the invoice sheet

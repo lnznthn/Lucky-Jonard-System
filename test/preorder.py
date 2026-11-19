@@ -29,7 +29,7 @@ with sync_playwright() as pw:
     p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.fill('[data-b="inv.contact"]', '0917 000 0000'); no_toy(p, 'New sale with pre-order lines')
     p.click('#view [data-act="invIssue"]')
     check('Cost each for “Ren Figure” must be zero or more' in p.inner_text('#toast') and 'invoice' not in kinds(p), 'a negative cost each is refused before anything is queued')
-    p.fill('#k1', '450'); p.click('#view [data-act="invIssue"]'); k = kinds(p)
+    p.fill('#k1', '450'); p.click('#view [data-act="invIssue"]'); approve(p); k = kinds(p)
     check(k[-4:] == ['order', 'supplier', 'order', 'invoice'], f'each new order line is queued before the invoice, a new supplier before its order: {k}')
     sheet = p.inner_text('#sheet')   # issuing opens the invoice
     check('1 × ₱1,500 · MIB' in sheet and '2 × ₱1,200 · Loose' in sheet and '1 × ₱900 · MIB' in sheet, f'the invoice shows each to-follow line in its order line’s condition: {sheet!r}')
@@ -84,7 +84,7 @@ with sync_playwright() as pw:
     p.evaluate('ui.busy = true')   # holds the sync, so the entries stay on the device
     new_sale(p); pick(p, 'inv.lines.0', 'sora'); p.fill('[data-b="inv.cust"]', 'Ana Reyes'); p.fill('[data-b="inv.contact"]', '0917 000 0000')
     check(p.input_value('#o0') == '', 'the product’s only open line is promised in full, so the pre-order starts on New supplier order')
-    p.click('#view [data-act="invIssue"]'); k = kinds(p); p.click('#sheet button:has-text("Delete this invoice")')
+    p.click('#view [data-act="invIssue"]'); approve(p); k = kinds(p); p.click('#sheet button:has-text("Delete this invoice")')
     check(k == ['order', 'invoice'] and not p.evaluate('queue'), f'deleting the invoice before it syncs also deletes its supplier order: {k}')
     p.evaluate("""() => { const sku = live().list.find(i => i.name === 'Kai Figure').sku, c = [...live().custs.values()][0];
       qAdd('order', { order: { id: 'oK', date: todayISO(), supId: '', expected: '', note: '', lines: [{ id: 'lK', sku, qty: 2, cost: null, cond: 'MIB' }] } });

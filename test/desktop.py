@@ -60,7 +60,7 @@ with sync_playwright() as pw:
     p.fill('[data-b="inv.lines.0.qty"]', '1')
     form, btn = [p.eval_on_selector(sel, 'e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }') for sel in ['#sellBody', '#sellBody [data-act="invIssue"]']]
     check(abs(btn[1] - form[1]) < 2 and btn[0] > (form[0] + form[1]) / 2, f'the total and the issue button sit at the right under the lines: {btn} in {form}')
-    p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.click('button:has-text("Issue invoice no. 1")'); p.screenshot(path=f'{SHOTS}/invoice-dialog.png'); p.click('button[aria-label="Close"]'); synced(p)
+    p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.click('button:has-text("Issue invoice no. 1")'); approve(p); p.screenshot(path=f'{SHOTS}/invoice-dialog.png'); p.click('button[aria-label="Close"]'); synced(p)
     check(heads('invs') == ['No', 'Date', 'Customer', 'Products', 'Total', 'Margin', 'Delivered'] and p.is_visible('button:has-text("Issue invoice no. 2")') and fits(), f"the new invoice appears in the invoice table under a fresh form: {heads('invs')}")
     inv = p.eval_on_selector('#invList', 'e => e.getBoundingClientRect().top') > p.eval_on_selector('#sellBody', 'e => e.getBoundingClientRect().bottom')
     row1 = [c.inner_text().strip() for c in p.query_selector_all('[data-tbl="invs"] tbody tr:first-child td')]
@@ -71,7 +71,7 @@ with sync_playwright() as pw:
     pick(p, 'inv.lines.0', 'zoro'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '700'); p.fill('[data-b="inv.cust"]', 'Cy Lim'); p.fill('[data-b="inv.contact"]', 'cy.lim')
     t = tops('#iCust, #iContact, #iDate, #iPaid'); check(len(t) == 4 and len(set(t)) == 1 and p.is_checked('[data-act="invFollow"][data-i="0"]'), f'a to-follow line ticks Pre-order and Paid now joins the top row: {t}')
     check(p.eval_on_selector('#e0', 'e => e.closest("td").colSpan') == 9 and p.inner_text('#cost0') == '', 'its expected arrival spans the full width under its line, and it has no cost yet')
-    p.click('button:has-text("Issue invoice no. 2")'); p.click('button[aria-label="Close"]'); synced(p)
+    p.click('button:has-text("Issue invoice no. 2")'); approve(p); p.click('button[aria-label="Close"]'); synced(p)
     row2 = [c.inner_text().strip() for c in p.query_selector_all('[data-tbl="invs"] tbody tr:first-child td')]
     check(row2[2] == 'Cy Limto follow' and row2[5] == '–' and p.get_attribute('#invSeg button[data-f="follow"]', 'class') == '' and p.inner_text('#invSeg button[data-f="follow"]') == 'To follow · 1', f'the invoice list tags it to follow and counts it on its filter: {row2}')
     # Suppliers: the supplier list and the order lines are tables; an order line opens its order. Order stock fills Add inventory set to Ordered.
