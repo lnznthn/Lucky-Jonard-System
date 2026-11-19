@@ -23,6 +23,7 @@ def page(ctx, tag=''):
 def tab(p, name): p.click(f'#tabs button:has-text("{name}")')
 def home(p): tab(p, 'Home'); return p.inner_text('#view')
 def add_inventory(p): tab(p, 'Home'); p.click('#view .actions button[data-to="add"]')   # Inventory with its Add inventory tab chosen
+def approve(p): p.click('#sheet [data-act="invApprove"]')   # Issue invoice shows the invoice to check; Approve issues it
 def new_sale(p): tab(p, 'Sales'); p.click('#view [data-act="sellNew"]') if p.is_visible('#view [data-act="sellNew"]') else None
 def synced(p): p.wait_for_function("document.querySelector('#syncTxt').textContent.startsWith('Synced')", timeout=8000)
 def connect(p, code=CODE): p.click('button[aria-label="Settings"]'); p.fill('#sCode', code); p.click('button:has-text("Test and save")')

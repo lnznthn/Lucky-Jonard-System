@@ -99,7 +99,7 @@ with sync_playwright() as pw:
 
     # ---- the New sale form says what the tap does
     pick(p, 'inv.lines.0', 'luffy'); p.fill('[data-b="inv.lines.0.price"]', '1500')
-    check(not p.is_checked('[data-act="invFollow"]') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Takes 1 Maximatic Luffy out of stock and opens the invoice.' == p.inner_text('#invHint'), 'one in stock and one wanted: the line is sold now and the form says what the tap does')
+    check(not p.is_checked('[data-act="invFollow"]') and p.is_visible('#iCust') and not p.is_visible('#iPaid') and 'Shows the invoice to check first. Approving it takes 1 Maximatic Luffy out of stock.' == p.inner_text('#invHint'), 'one in stock and one wanted: the line is sold now and the form says what the tap does')
     no_toy(p, 'New sale')
     p.click('#backBtn'); check(p.is_visible('#view [data-act="sellNew"]') and p.evaluate('ui.inv.lines[0].sku') == '', 'closing New sale clears the draft and shows the invoice list')
 
@@ -128,7 +128,11 @@ with sync_playwright() as pw:
     p.fill('[data-b="inv.lines.0.price"]', '1700'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.fill('[data-b="inv.contact"]', '+63 917 000 0000')
     check(p.inner_text('#invTotal') == '₱1,700', 'total follows the overridden price'); p.screenshot(path=f'{SHOTS}/10-invoice-form.png')
     check('1 unit of this product has no cost yet, so the margin on this sale will stay unknown.' in p.inner_text('#sellBody') and p.is_visible('#sellBody button:has-text("Add the cost")'), 'the form says the unit sold has no cost')
-    p.click('button:has-text("Issue invoice no. 1")')
+    p.click('button:has-text("Issue invoice no. 1")'); p.wait_for_selector('#sheet .draft canvas')
+    check(p.inner_text('#sheet h2') == 'Check invoice no. 1' and p.eval_on_selector_all('#sheet .draft canvas', 'cs => cs.length') == 1 and p.is_visible('#sheet [data-act="invApprove"]') and 'Approving takes 1 Grandista Son Goku out of stock.' in p.inner_text('#sheet') and not p.evaluate('queue.some(q => q.kind === "invoice")'), 'Issue invoice first shows the invoice as it will be drawn, with Approve and Cancel, and issues nothing yet')
+    p.screenshot(path=f'{SHOTS}/11-check-invoice.png'); p.click('#sheet button:has-text("Cancel")')
+    check(not p.is_visible('#sheet') and p.is_visible('button:has-text("Issue invoice no. 1")') and p.input_value('[data-b="inv.cust"]') == 'Ben Cruz' and not p.evaluate('queue.some(q => q.kind === "invoice")'), 'Cancel goes back to the form as it was, with nothing issued')
+    p.click('button:has-text("Issue invoice no. 1")'); approve(p)
     sheet = p.inner_text('#sheet'); p.screenshot(path=f'{SHOTS}/11-invoice.png')
     check('Invoice no. 1' in sheet and '(listed ₱1,800)' in sheet and 'Margin unknown: a product has no cost' in sheet, 'invoice sheet shows override and the unknown margin')
     name, size = save_img(p, 'invoice-1')
@@ -161,7 +165,7 @@ with sync_playwright() as pw:
     check(not p.is_checked('[data-act="invFollow"][data-i="1"]') and not p.is_visible('#iPaid') and p.is_visible('button:has-text("Issue invoice no. 2")'), 'turning Pre-order off sells it now')
     p.fill('[data-b="inv.cust"]', 'ben cruz'); p.dispatch_event('[data-b="inv.cust"]', 'change')
     check(p.input_value('[data-b="inv.contact"]') == '+63 917 000 0000' and p.inner_text('#invTotal') == '₱1,700', 'contact filled from the customer tracker; two-line total')
-    p.click('button:has-text("Issue invoice no. 2")'); close(p); synced(p)
+    p.click('button:has-text("Issue invoice no. 2")'); approve(p); close(p); synced(p)
     check(len([r for r in rows('Movements') if r[7] == '2']) == 2 and len(rows('Customers')) == 1, 'two movements for two lines, no duplicate customer')
     check(stock_map(p)['Plain Toy'] == -1, 'selling it now takes stock below zero with no confirm')
 
@@ -187,7 +191,7 @@ with sync_playwright() as pw:
 
     # ---- offline: invoice issued with no signal waits, then lands once
     ctx.set_offline(True)
-    new_sale(p); pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.dispatch_event('[data-b="inv.cust"]', 'change'); p.click('button:has-text("Issue invoice no. 3")')
+    new_sale(p); pick(p, 'inv.lines.0', 'goku'); p.fill('[data-b="inv.cust"]', 'Ben Cruz'); p.dispatch_event('[data-b="inv.cust"]', 'change'); p.click('button:has-text("Issue invoice no. 3")'); approve(p)
     check('waiting' in p.inner_text('#sheet') and 'Delete this invoice' in p.inner_text('#sheet'), 'offline invoice is marked waiting and can still be deleted')
     name, size = save_img(p, 'invoice-3-offline'); check(size and size[0] == 1190, 'the image works offline'); close(p)
     check(stock_map(p)['Grandista Son Goku'] == 4, 'offline invoice already counts against stock')
@@ -207,7 +211,7 @@ with sync_playwright() as pw:
 
     # ---- invoice number already used in the sheet (second phone): renumbered, both kept
     ctx2.set_offline(True)
-    new_sale(p2); pick(p2, 'inv.lines.0', 'luffy'); p2.fill('[data-b="inv.lines.0.price"]', '1500'); p2.fill('[data-b="inv.cust"]', 'Dan Lim'); p2.click('button:has-text("Issue invoice no. 3")'); close(p2)
+    new_sale(p2); pick(p2, 'inv.lines.0', 'luffy'); p2.fill('[data-b="inv.lines.0.price"]', '1500'); p2.fill('[data-b="inv.cust"]', 'Dan Lim'); p2.click('button:has-text("Issue invoice no. 3")'); approve(p2); close(p2)
     ctx2.set_offline(False); p2.click('#syncBtn'); p2.wait_for_function("document.querySelector('#toast').textContent.includes('now no. 4')", timeout=8000)
     nos = sorted(r[0] for r in rows('Invoices')); check(nos == [1, 2, 3, 4], f'numbers stay unique and sequential: {nos}')
     check([r[7] for r in rows('Movements') if r[2] == 'T0002' and r[6] == 'Sale'][-1] == '4', 'the renumbered invoice’s movement carries the new number')
@@ -224,7 +228,7 @@ with sync_playwright() as pw:
     # ---- a to-follow line beyond stock and incoming is promised beyond supply; cancelling it frees it
     check(stock_map(p)['Plain Toy'] == -1 and 'promised beyond supply' not in home(p), 'an item below zero with nothing owed is not counted as promised')
     new_sale(p); pick(p, 'inv.lines.0', 'plain'); p.fill('[data-b="inv.lines.0.qty"]', '5'); p.fill('[data-b="inv.lines.0.price"]', '300'); p.fill('[data-b="inv.cust"]', 'Eva Cruz'); p.fill('[data-b="inv.contact"]', '0917 111 2222'); p.fill('[data-b="inv.paid"]', '100')
-    p.click('button:has-text("Issue invoice no. 5")'); close(p)
+    p.click('button:has-text("Issue invoice no. 5")'); approve(p); close(p)
     h = home(p)
     check('Order stock for 1 product promised beyond supply\nMore owed than on hand plus incoming' in h and 'Collect ₱1,400 on 1 invoice' in h, 'Home: a to-follow line beyond stock and incoming')
     p.click('#view .item:has-text("promised beyond supply")')
